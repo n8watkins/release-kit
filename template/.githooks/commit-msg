@@ -1,0 +1,3 @@
+#!/bin/sh
+# release-kit: reject commit messages that aren't Conventional Commits.
+exec node "$(git rev-parse --show-toplevel)/scripts/release-kit/commit-msg.mjs" "$1"
