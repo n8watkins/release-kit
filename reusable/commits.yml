@@ -6,6 +6,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch: # the release train runs it on its release commit
 
 permissions:
   contents: read

@@ -66,8 +66,8 @@ Repos that ship continuously (a website deploying every merge) turn it on with `
 - From "Run workflow" a bump can be forced, and a dry run shows the plan and the notes.
 - It runs `release:check` on the exact commit before tagging it, so a red main is never released.
 - It never guesses: no release tag yet, a moved tag or a `package.json` that doesn't match the last tag stops it.
-- GitHub doesn't start workflows from pushes made with a workflow's own token. So the train pushes the release commit and tag as `github-actions[bot]`, then starts the Release workflow on the tag itself with `workflow_dispatch`, the one trigger that token may use. The same rule means the release commit starts no CI, commit-check or train run: nothing loops. The commit check skips bot commits anyway.
-- If main moves while it runs, the atomic push is rejected and nothing is released.
+- GitHub doesn't start workflows from pushes made with a workflow's own token, and branch protection won't let `main` move to a commit without its required checks. So the train, as `github-actions[bot]`, pushes its release commit to a temporary branch, starts the workflows listed in `.release.json` `train.checks` there with `workflow_dispatch` (the one trigger that token may use) and waits for them, then pushes `main` and the tag together and starts the Release workflow on the tag. No extra secret is needed, and the full CI runs on exactly what is released. Its pushes start nothing else: nothing loops. The commit check skips bot commits anyway.
+- If main moves while it runs, or a check fails, nothing is released.
 
 ### Workflows
 

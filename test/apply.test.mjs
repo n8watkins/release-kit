@@ -212,3 +212,14 @@ test("apply leaves other hook managers and an existing release script alone, and
   quiet(KIT, 'node', ['apply.mjs', repo, '--force'])
   assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts.release, 'node scripts/release-kit/release.mjs')
 })
+
+test('--train-checks lists the workflows the train runs on its release commit, and upgrades keep them', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-checks'))
+  const config = () => JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8'))
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo, '--train-checks', 'ci.yml, commits.yml']), /now: ci\.yml, commits\.yml/)
+  assert.deepEqual(config().train, { schedule: '0 16 * * 1', checks: ['ci.yml', 'commits.yml'] })
+  quiet(KIT, 'node', ['apply.mjs', repo, '--schedule', '0 9 * * 5'])
+  assert.deepEqual(config().train, { schedule: '0 9 * * 5', checks: ['ci.yml', 'commits.yml'] })
+  assert.match(attempt(KIT, 'node', ['apply.mjs', repo, '--train-checks', 'ci.yml;id']).stderr, /takes workflow file names/)
+})

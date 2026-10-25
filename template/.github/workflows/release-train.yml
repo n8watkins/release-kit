@@ -3,11 +3,14 @@
 # has landed on main since the last tag, with the bump those commits call for.
 # Weeks with only docs, chores or tests release nothing.
 #
-# A push made with the workflow's GITHUB_TOKEN starts no other workflow. So the
-# train pushes the release commit and tag, then starts the Release workflow on
-# the new tag itself (workflow_dispatch is the one trigger GitHub allows from
-# that token). The release commit starts no CI or commit-check run either, so
-# the train can't trigger itself.
+# A push made with the workflow's GITHUB_TOKEN starts no other workflow, and
+# branch protection rejects a commit on main without its required checks. So
+# the train starts the checks itself (workflow_dispatch is the one trigger
+# GitHub allows from that token): it pushes the release commit to a temporary
+# release-train/vX.Y.Z branch, runs the workflows listed in .release.json
+# train.checks there, and only when they pass pushes main and the tag. Then it
+# starts the Release workflow on the tag. Its pushes start nothing else, so the
+# train can't trigger itself. No extra secret is needed.
 #
 # Turned on with apply.mjs --train (the schedule comes from .release.json), or
 # called from n8watkins/release-kit:
@@ -151,10 +154,10 @@ jobs:
     needs: [plan, check]
     if: needs.plan.outputs.release == 'true' && !inputs.dry-run
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90 # it waits for train.checks
     permissions:
-      contents: write # push the release commit and the tag
-      actions: write # start the Release workflow on the tag
+      contents: write # push the release commit, the tag and the temporary check branch
+      actions: write # start train.checks and the Release workflow
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -185,29 +188,19 @@ jobs:
         with:
           node-version: ${{ needs.plan.outputs.node }}
 
-      # Exactly the commit that was planned and checked. If main moved since,
-      # the atomic push is rejected and nothing is released; run it again.
-      - name: Commit, tag and push
+      # Exactly the commit that was planned and checked. train.mjs commits and
+      # tags it, runs .release.json train.checks on it (the workflows branch
+      # protection requires), pushes main and the tag atomically, and starts
+      # the Release workflow on the tag. If main moved, nothing is released.
+      - name: Cut, check, push and publish
         env:
           BRANCH: ${{ github.ref_name }}
           VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_WORKFLOW: ${{ inputs.release-workflow || 'release.yml' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "$BRANCH" in main|master) ;; *) echo "::error::The release train runs on main or master, not '$BRANCH'."; exit 1 ;; esac
           git switch --force-create "$BRANCH"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # The checks ran in the job before, on this commit.
-          node "$RELEASE_KIT/release.mjs" "$VERSION" --push --no-check
-
-      - name: Start the Release workflow on the tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.plan.outputs.tag }}
-          WORKFLOW: ${{ inputs.release-workflow || 'release.yml' }}
-        run: |
-          if ! printf '%s' "$WORKFLOW" | grep -Eqx '[A-Za-z0-9._-]+\.ya?ml'; then
-            echo "::error::release-workflow must be a workflow file name, like release.yml."
-            exit 1
-          fi
-          gh workflow run "$WORKFLOW" --repo "$GITHUB_REPOSITORY" --ref "$TAG"
-          echo "Cut $TAG. The [Release workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW) publishes it." >> "$GITHUB_STEP_SUMMARY"
+          node "$RELEASE_KIT/train.mjs" --version "$VERSION" --release-workflow "$RELEASE_WORKFLOW"

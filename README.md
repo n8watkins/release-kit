@@ -33,6 +33,7 @@ npm run release -- --plan                  # what the release train would do now
 |---|---|
 | `--train` | Adds the release train (`.github/workflows/release-train.yml`): every week it releases whatever user-facing work landed, and "Run workflow" releases now. |
 | `--schedule "<cron>"` | When the train runs, in UTC (default `"0 16 * * 1"`, Mondays 16:00). Implies `--train`. |
+| `--train-checks <a.yml,b.yml>` | Workflows the train runs on its release commit before moving `main` to it: the ones whose checks branch protection requires. |
 | `--no-train` | Removes the train. |
 | `--reusable` | The workflows call `n8watkins/release-kit/.github/workflows/<file>.yml@vX.Y.Z` instead of carrying the steps. |
 | `--kit-ref <ref>` | With `--reusable`, pin a commit SHA (or another tag) instead of this kit's version tag. |
@@ -64,12 +65,16 @@ With `--train`, a scheduled workflow cuts releases so nobody has to remember:
 
 1. It finds the commits on `main` since the last `vX.Y.Z` tag. With no feature, fix, security or performance change, revert or breaking change among them, it stops: nothing to release.
 2. It runs `npm run release:check` on that exact commit.
-3. It runs `npm run release -- <version> --push` as `github-actions[bot]`: version bump, `CHANGELOG.md`, `chore(release): vX.Y.Z`, tag, one atomic push.
-4. It starts the Release workflow on the new tag, which publishes the GitHub Release as usual.
+3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version>`: version bump, `CHANGELOG.md`, `chore(release): vX.Y.Z`, tag.
+4. With `train.checks` in `.release.json` (`--train-checks ci.yml,commits.yml`), it pushes that commit to a temporary `release-train/vX.Y.Z` branch, starts each listed workflow there and waits for it to pass.
+5. It pushes `main` and the tag in one atomic push, then starts the Release workflow on the tag, which publishes the GitHub Release as usual.
 
-Why step 4 is explicit: GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITHUB_TOKEN`, so the tag push alone would publish nothing.
-`workflow_dispatch` is the exception, and the train uses it.
-The same rule means the release commit starts no CI or commit-check run, so the train can't loop; the commit check also skips bot commits.
+Why steps 4 and 5 start workflows explicitly: GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITHUB_TOKEN`, so the pushes alone would check and publish nothing.
+`workflow_dispatch` is the exception, and the train uses it; each workflow in `train.checks` needs `workflow_dispatch:` in its `on:`.
+The same rule means the train can't loop; the commit check also skips bot commits.
+
+On a `main` protected by required status checks, list the workflows that produce those checks in `train.checks`: the release commit then carries passing checks before `main` moves to it, so the push is accepted with the default token and no extra secret.
+This doesn't work if protection also requires pull requests; that needs a token that may bypass it, which the kit doesn't ask for.
 
 "Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
 It needs a release tag to start from, so baseline a new repo first.

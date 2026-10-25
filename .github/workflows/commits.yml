@@ -9,6 +9,8 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # The release train runs it on its release commit (see release-train.yml).
+  workflow_dispatch:
   workflow_call:
 
 permissions:

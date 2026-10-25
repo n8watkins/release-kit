@@ -51,11 +51,14 @@ If this repo has `.github/workflows/release-train.yml` (added by `apply.mjs --tr
 Its schedule is in `.release.json` (`train.schedule`, a cron line in UTC).
 
 - On each run it looks at the commits on `main` since the last tag.
-- When at least one is user-facing (`feat`, `fix`, `perf`, `security`, a revert or a breaking change), it runs `npm run release:check` on that commit, then cuts the release with the bump the commits call for, exactly like `npm run release -- --push`, and starts the Release workflow on the new tag.
+- When at least one is user-facing (`feat`, `fix`, `perf`, `security`, a revert or a breaking change), it runs `npm run release:check` on that commit, then makes the release commit and tag with the bump the commits call for, exactly like `npm run release`.
+- If `.release.json` lists `train.checks` (workflow files, such as the ones whose checks branch protection requires on `main`), it pushes the release commit to a temporary `release-train/vX.Y.Z` branch, runs each of them there and waits for them to pass, then deletes the branch. Each of those workflows needs `workflow_dispatch:` in its `on:`.
+- Then it pushes `main` and the tag in one atomic push and starts the Release workflow on the tag.
 - When there are only docs, chores, tests or refactors, it releases nothing.
 - "Run workflow" on the Release train runs it now; pick a bump to force one (it then releases any commits, user-facing or not), or tick "dry run" to see the plan and the notes without cutting anything.
-- The release commit and tag are pushed by `github-actions[bot]` with the workflow's own token, which starts no other workflow: CI and the commit check don't run on the release commit, and the train can't trigger itself.
-- If `main` moves while it runs, the push is rejected and nothing is released; run it again, or let the next scheduled run pick it up.
+- The release commit and tag are pushed by `github-actions[bot]` with the workflow's own token, which starts no other workflow by itself; that is why the train starts `train.checks` and the Release workflow explicitly, and why it can't trigger itself.
+- No secret is needed: a commit whose required checks have passed may be pushed to a protected `main` with that token (as long as protection doesn't also require a pull request).
+- If `main` moves while it runs, or a check fails, nothing is released and the release commit is thrown away; run it again, or let the next scheduled run pick it up.
 - It stops instead of guessing when there is no release tag yet (run `npm run release -- --baseline` first), when the last tag isn't on `main`, or when `package.json` doesn't match the last tag.
 
 Preview what it would do with `npm run release -- --plan`.

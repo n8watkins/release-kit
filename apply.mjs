@@ -6,6 +6,9 @@
 //   --train              also add the release train: a scheduled workflow that
 //                        cuts a release when user-facing work has landed
 //   --schedule "<cron>"  when the train runs (UTC; default "0 16 * * 1", Mondays 16:00)
+//   --train-checks <a.yml,b.yml>
+//                        workflows the train runs on its release commit before
+//                        pushing it to main: the ones branch protection requires
 //   --no-train           remove the release train
 //   --reusable           workflows call one pinned copy in the release-kit repo
 //                        instead of carrying the steps themselves
@@ -43,17 +46,20 @@ function valueOf(name) {
 }
 function usage(problem) {
   if (problem) console.error(`apply: ${problem}`)
-  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--no-train] [--reusable | --vendored] [--kit-ref <ref>] [--force]')
+  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--reusable | --vendored] [--kit-ref <ref>] [--force]')
   process.exit(1)
 }
 
-const valued = new Set(['--schedule', '--kit-ref'])
+const valued = new Set(['--schedule', '--kit-ref', '--train-checks'])
 const repo = argv.find((a, i) => !a.startsWith('--') && !valued.has(argv[i - 1]))
 if (!repo || !existsSync(join(repo, 'package.json'))) usage('the repo needs a package.json')
 const force = has('force')
 if (has('reusable') && has('vendored')) usage('pick one of --reusable and --vendored')
 if (has('train') && has('no-train')) usage('pick one of --train and --no-train')
 const schedule = valueOf('schedule')
+const trainChecks = valueOf('train-checks')?.split(',').map((s) => s.trim()).filter(Boolean)
+if (trainChecks?.some((file) => !/^[\w.-]+\.ya?ml$/.test(file))) usage(`--train-checks takes workflow file names, like ci.yml,commits.yml`)
+if (trainChecks && has('no-train')) usage('--train-checks turns the train on; drop --no-train')
 if (schedule !== undefined && has('no-train')) usage('--schedule turns the train on; drop --no-train')
 // Five cron fields, nothing that could break out of the YAML string.
 if (schedule !== undefined && !/^[\d*/,A-Za-z-]+( [\d*/,A-Za-z-]+){4}$/.test(schedule)) usage(`"${schedule}" is not a five-field cron schedule`)
@@ -74,9 +80,12 @@ const config = hadConfig ? JSON.parse(read('.release.json')) : {}
 if (has('reusable')) config.workflows = 'reusable'
 if (has('vendored')) delete config.workflows
 if (has('no-train')) delete config.train
-else if (has('train') || schedule !== undefined) config.train = { schedule: schedule ?? config.train?.schedule ?? DEFAULT_SCHEDULE }
+else if (has('train') || schedule !== undefined || trainChecks) {
+  config.train = { ...config.train, schedule: schedule ?? config.train?.schedule ?? DEFAULT_SCHEDULE }
+  if (trainChecks) config.train.checks = trainChecks
+}
 const reusable = config.workflows === 'reusable'
-const train = config.train ? { schedule: config.train.schedule ?? DEFAULT_SCHEDULE } : null
+const train = config.train ? { schedule: config.train.schedule ?? DEFAULT_SCHEDULE, checks: config.train.checks ?? [] } : null
 
 // Files that also carry the version, detected on the first run.
 if (!hadConfig) {
@@ -231,4 +240,4 @@ console.log(`
 Next:
   1. Review the diff (git -C ${repo} diff) and commit it: chore: adopt release-kit ${KIT_VERSION}
   2. Preview the first release: npm run release -- --dry-run
-  3. Cut it: npm run release -- --push${train ? '\n  The release train needs a release tag to start from (npm run release -- --baseline on a new repo).' : ''}`)
+  3. Cut it: npm run release -- --push${train ? `\n  The release train needs a release tag to start from (npm run release -- --baseline on a new repo).\n  If main is protected by required checks, list the workflows that produce them: --train-checks ci.yml,commits.yml${train.checks.length ? ` (now: ${train.checks.join(', ')})` : ''}` : ''}`)
