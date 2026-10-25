@@ -112,8 +112,8 @@ git('tag', '-a', tag, '-m', `${tag}\n\n${section}`)
 console.log(`release: committed and tagged ${tag}`)
 
 if (flag('push')) {
-  git('push', 'origin', branch)
-  git('push', 'origin', tag)
+  // One atomic push: the branch and the tag land together or not at all.
+  git('push', '--atomic', 'origin', branch, tag)
   console.log(`release: pushed ${tag}; the Release workflow publishes it`)
 } else {
   console.log(`release: push with  git push origin ${branch} && git push origin ${tag}`)
