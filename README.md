@@ -11,7 +11,7 @@ The rules and the reasoning are in [STANDARD.md](STANDARD.md).
 
 ```bash
 cd path/to/your-repo
-npx github:n8watkins/release-kit .           # or: node path/to/release-kit/apply.mjs .
+npx --allow-git=root github:n8watkins/release-kit .   # npm 12 needs --allow-git; or: node path/to/release-kit/apply.mjs .
 git diff                                   # review what it added
 git add -A && git commit -m "chore: adopt release-kit 1.0.0"
 npm run release -- --baseline              # tag the version it's already at

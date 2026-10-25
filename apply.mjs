@@ -40,9 +40,12 @@ function* walk(dir) {
     else yield path
   }
 }
+const usesHusky = existsSync(join(repo, '.husky'))
 for (const source of walk(TEMPLATE)) {
   const path = relative(TEMPLATE, source)
   if (path === 'AGENTS.release.md') continue
+  // A husky repo gets the hook in .husky/ instead (below).
+  if (usesHusky && path.startsWith('.githooks/')) continue
   const target = join(repo, path)
   if (existsSync(target) && path.startsWith('.github/') && !read(path).includes(MARKER) && !force) {
     skipped.push(`${path} exists and isn't from the kit (rerun with --force to replace it)`)
@@ -84,7 +87,6 @@ if (!scripts['release:check']) {
   scripts['release:check'] = checks.length ? checks.map((s) => (s === 'test' ? 'npm test' : `npm run ${s}`)).join(' && ') : 'echo "release:check: define lint/test/build checks" && exit 1'
   done.push(`release:check = ${scripts['release:check']}`)
 }
-const usesHusky = existsSync(join(repo, '.husky'))
 if (usesHusky) {
   write('.husky/commit-msg', 'node scripts/release-kit/commit-msg.mjs "$1"\n')
   chmodSync(join(repo, '.husky/commit-msg'), 0o755)
@@ -100,7 +102,7 @@ if (usesHusky) {
   }
 }
 write('package.json', `${JSON.stringify(pkg, null, 2)}\n`)
-done.push('package.json scripts: release, release:check, prepare')
+done.push(`package.json scripts: release, release:check${usesHusky ? '' : ', prepare'}`)
 
 // 4. Agent instructions.
 const snippet = readFileSync(join(TEMPLATE, 'AGENTS.release.md'), 'utf8')
