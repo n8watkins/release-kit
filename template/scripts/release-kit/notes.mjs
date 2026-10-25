@@ -4,7 +4,8 @@
 // stay out, so the notes read like a changelog, not a git log.
 //
 //   node scripts/release-kit/notes.mjs [--from <ref>] [--to <ref>] [--version x.y.z]
-import { pathToFileURL } from 'node:url'
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { NOTE_SECTIONS, parse, sectionFor } from './conventional.mjs'
 import { commitsBetween, isBot, previousTag } from './git.mjs'
 
@@ -35,7 +36,8 @@ function arg(name) {
   return i === -1 ? undefined : process.argv[i + 1]
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run as a command (resolving links, so a symlinked scripts/ folder works too).
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const to = arg('to') ?? 'HEAD'
   // For a tag, start from the tag before it, not the tag itself.
   const from = arg('from') ?? previousTag(`${to}^`)

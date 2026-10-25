@@ -70,6 +70,11 @@ test('apply, then the hook, the release command and tag verification all work', 
   // Notes for the tag, as the workflow builds them.
   assert.match(run(repo, 'node', ['scripts/release-kit/notes.mjs', '--to', 'v0.2.0']), /### Features\n\n- Add a thing/)
 
+  // Run through a symlinked scripts folder (as this kit runs itself), the notes still print.
+  run(repo, 'ln', ['-s', 'scripts/release-kit', 'linked-kit'])
+  assert.match(run(repo, 'node', ['linked-kit/notes.mjs', '--to', 'v0.2.0']), /### Features/)
+  run(repo, 'rm', ['linked-kit'])
+
   // Nothing new to release.
   const empty = attempt(repo, 'node', ['scripts/release-kit/release.mjs'])
   assert.match(empty.stderr, /nothing to release/)
