@@ -1,5 +1,7 @@
 # release-kit
 
+[![CI](https://github.com/n8watkins/release-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/n8watkins/release-kit/actions/workflows/ci.yml)
+
 The n8 release standard as a kit: Conventional Commits, SemVer tags, and GitHub Releases published by a workflow, with notes written from the commits.
 No dependencies: plain Node scripts and two GitHub Actions workflows, copied into each repo.
 
@@ -8,12 +10,12 @@ The rules and the reasoning are in [STANDARD.md](STANDARD.md).
 ## Adopt it in a repo (about five minutes)
 
 ```bash
-node ~/n8builds/release-kit/apply.mjs ~/projects/extensions/tldw
-cd ~/projects/extensions/tldw
+cd path/to/your-repo
+npx github:n8watkins/release-kit .           # or: node path/to/release-kit/apply.mjs .
 git diff                                   # review what it added
 git add -A && git commit -m "chore: adopt release-kit 1.0.0"
 npm run release -- --baseline              # tag the version it's already at
-git push && git push origin v1.0.0         # the tag is verified, not published
+git push && git push origin vX.Y.Z         # the tag is verified, not published
 ```
 
 From then on:
@@ -43,6 +45,11 @@ npm run release -- --baseline <commit> --publish
 git push origin vX.Y.Z
 ```
 
+## This repo follows it too
+
+The kit uses its own standard: commits are checked by the same hook and workflow, and releases are cut with `npm run release`.
+`scripts/release-kit` and `.githooks` are links into `template/`, and a test fails if `.github/workflows/` drifts from the template.
+
 ## Developing the kit
 
 ```bash
@@ -50,3 +57,7 @@ npm test        # unit tests and an end-to-end run against a throwaway repo
 ```
 
 Bump `VERSION` for any change, then re-run `apply.mjs` on each repo to upgrade it.
+
+## License
+
+MIT.

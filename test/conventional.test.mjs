@@ -58,3 +58,12 @@ test('notes keep user-facing changes, grouped, and drop chores, docs and bots', 
   assert.doesNotMatch(notes, /README|sync portfolios|latency/)
   assert.match(renderNotes([{ hash: 'x', author: 'N', message: 'chore: deps' }]), /Maintenance release/)
 })
+
+test("the kit's own workflows are exact copies of the template it ships", async () => {
+  const { readFileSync } = await import('node:fs')
+  for (const name of ['release.yml', 'commits.yml']) {
+    const shipped = readFileSync(new URL(`../template/.github/workflows/${name}`, import.meta.url), 'utf8')
+    const own = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), 'utf8')
+    assert.equal(own, shipped, `.github/workflows/${name} drifted from the template`)
+  }
+})

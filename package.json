@@ -5,6 +5,26 @@
   "description": "The n8 release standard: Conventional Commits, SemVer tags and GitHub Releases, applied to any repo with one command.",
   "type": "module",
   "scripts": {
-    "test": "node --test test/*.test.mjs"
-  }
+    "test": "node --test test/*.test.mjs",
+    "release": "node scripts/release-kit/release.mjs",
+    "release:check": "npm test",
+    "prepare": "git config core.hooksPath .githooks || true"
+  },
+  "license": "MIT",
+  "author": "Nathan Watkins",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/n8watkins/release-kit.git"
+  },
+  "bin": {
+    "release-kit": "apply.mjs"
+  },
+  "files": [
+    "apply.mjs",
+    "VERSION",
+    "template",
+    "STANDARD.md",
+    "README.md",
+    "LICENSE"
+  ]
 }
