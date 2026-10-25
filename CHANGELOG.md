@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 - 2026-10-25
+
+### Features
+
+- **train:** Push a protected main with a deploy key; protect.mjs sets it up (#2)
+
 ## 1.1.0 - 2026-10-25
 
 ### Features
