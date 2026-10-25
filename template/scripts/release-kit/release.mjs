@@ -188,7 +188,7 @@ try {
 }
 const section = renderNotes(commits, { heading: `## ${version} - ${date}` })
 
-console.log(`release: ${current} -> ${version} (${kind}), ${commits.length} commits since ${since ?? 'the start'}\n`)
+console.log(`release: ${current} -> ${version} (${kind}), ${commits.length} commit${commits.length === 1 ? '' : 's'} since ${since ?? 'the start'}\n`)
 console.log(section)
 if (flag('dry-run')) process.exit(0)
 
