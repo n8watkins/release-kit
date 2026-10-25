@@ -1,4 +1,5 @@
-# The kit's own tests (unit tests and an end-to-end run against a throwaway repo).
+# The kit's own tests: unit tests, end-to-end runs against throwaway repos,
+# and actionlint over every workflow the kit ships or writes.
 name: CI
 
 on:
@@ -12,9 +13,27 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      - name: Install actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v$VERSION/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "$SHA256  actionlint.tar.gz" | sha256sum --check
+          tar xzf actionlint.tar.gz actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: npm test
+
+  # The shipped workflows, called the way a repo in reusable mode calls them.
+  reusable-commits:
+    name: Reusable commit check
+    uses: ./.github/workflows/commits.yml

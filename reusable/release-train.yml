@@ -1,0 +1,33 @@
+# release-kit (reusable): the release train. On a schedule, and from "Run
+# workflow", it cuts a release when user-facing work (feat, fix, perf) has
+# landed since the last tag. The steps live in the release-kit repo, pinned
+# below; apply.mjs updates the pin and the schedule (.release.json).
+name: Release train
+
+on:
+  schedule:
+    - cron: "0 16 * * 1" # release-kit: schedule
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "auto: release only user-facing work, with the bump it calls for"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      dry-run:
+        description: "Plan and run the checks, but cut nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    permissions:
+      contents: write # push the release commit and the tag
+      actions: write # start the Release workflow on the tag
+    uses: KIT_REPO/.github/workflows/release-train.yml@KIT_REF
+    with:
+      bump: ${{ inputs.bump || 'auto' }}
+      dry-run: ${{ inputs.dry-run == true }}
