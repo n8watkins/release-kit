@@ -28,16 +28,18 @@ What the standard changes:
 - **Generic, not per-app.** Scribe's build steps (Rust, Vulkan, MSI installers, smoke installs) are Scribe's. The standard keeps the shape and moves the app-specific part behind two npm scripts: `release:check` and the optional `release:artifacts`. Scribe keeps its own workflow; it already meets the standard.
 - **Enforced at commit time.** A `commit-msg` hook and a CI check, so the history is clean before release time, not cleaned up at it.
 - **Baselines for adoption.** Repos with years of untagged history start from a baseline tag, so the first release lists only new work.
+- **An optional release train.** A repo that deploys every merge still needs someone to remember to release. The train releases on a schedule, but only when there is something to tell a user about.
 
 ## The rules
 
 ### Commits
 
 - Conventional Commits: `type(scope): subject`, header at most 100 characters.
-- Types: `feat`, `fix`, `perf` (these reach the release notes), and `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`.
+- Types: `feat`, `fix`, `perf`, `security` (these reach the release notes), and `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`.
 - `feat` and `fix` only for changes a user would notice. They are the public record.
 - Breaking changes: `!` after the type, or a `BREAKING CHANGE:` footer.
 - Merge, revert, fixup and bot commits pass the check; bot commits never reach the notes.
+- `security` isn't in the Conventional Commits spec, but these repos already used it for hardening a user should hear about, so it has its own notes section and a patch bump.
 
 ### Versions
 
@@ -48,23 +50,48 @@ What the standard changes:
 
 ### Releases
 
-- `npm run release -- --push` from a clean main: bump, changelog section, `chore(release): vX.Y.Z` commit, annotated tag, push.
+- `npm run release -- --push` from a clean main that isn't behind origin: `release:check`, bump, changelog section, `chore(release): vX.Y.Z` commit, annotated tag, one atomic push of the branch and the tag. A rejected push undoes the commit and the tag.
+- Changelog dates are in the repo's `.release.json` `timeZone` (the machine's zone if unset).
 - The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the generated notes, download-and-verify.
-- Release when something worth telling a user about has landed; there is no schedule.
+- A failed Release run is retried by running the Release workflow on the tag; a pushed tag is never moved or re-pushed.
+- Release when something worth telling a user about has landed.
+- The previous release is the highest `vX.Y.Z` tag on the branch's history. Other tags (`v2.0.0-beta`, `vnext`) are ignored, and a version tag that isn't on the branch (moved, or made elsewhere) stops the release.
+
+### The release train (opt-in)
+
+Repos that ship continuously (a website deploying every merge) turn it on with `apply.mjs --train`.
+
+- It runs on a schedule (default Mondays 16:00 UTC, set per repo in `.release.json`) and from "Run workflow".
+- It releases only when a `feat`, `fix`, `perf`, `security`, revert or breaking change has landed since the last tag, with the bump those commits call for. A quiet week releases nothing.
+- From "Run workflow" a bump can be forced, and a dry run shows the plan and the notes.
+- It runs `release:check` on the exact commit before tagging it, so a red main is never released.
+- It never guesses: no release tag yet, a moved tag or a `package.json` that doesn't match the last tag stops it.
+- GitHub doesn't start workflows from pushes made with a workflow's own token. So the train pushes the release commit and tag as `github-actions[bot]`, then starts the Release workflow on the tag itself with `workflow_dispatch`, the one trigger that token may use. The same rule means the release commit starts no CI, commit-check or train run: nothing loops. The commit check skips bot commits anyway.
+- If main moves while it runs, the atomic push is rejected and nothing is released.
+
+### Workflows
+
+- Third-party actions pinned to commit SHAs; every workflow reads by default, and only the jobs that publish, push or start a workflow get `contents: write` or `actions: write`.
+- Tag names, branch names and commit messages reach a shell only through environment variables, and a tag only after it is checked to be a plain `vX.Y.Z`.
+- Two ways to carry them, chosen per repo and kept on upgrade (`.release.json` `workflows`):
+  - **Vendored** (the default): the full workflows are copied into the repo. Nothing outside the repo runs.
+  - **Reusable** (`apply.mjs --reusable`): the repo's workflows are short callers of `n8watkins/release-kit/.github/workflows/<file>.yml@vX.Y.Z`. The steps and the scripts they run come from the kit at that exact ref, so an upgrade is a one-line change per workflow (or a Dependabot PR). Pin a commit SHA instead of a tag with `--kit-ref <sha>`.
+- The workflows use the Node version in `.release.json` `node`, else `.nvmrc` or `.node-version`, else 22.
 
 ### What each repo provides
 
 | Script | Required | What it does |
 |---|---|---|
-| `release:check` | yes | Lint, types, tests, build. `apply.mjs` composes it from the scripts the repo has. |
+| `release:check` | yes | The repo's checks: whichever of lint, types, tests and build it has (`apply.mjs` composes it from them), or anything the repo prefers. |
 | `release:artifacts` | no | Writes shippable files (an extension zip, an installer) into `release-artifacts/`. |
 
 ## Adopting it in a repo
 
 See README.md.
-In short: `node apply.mjs <repo>`, commit, `npm run release -- --baseline`, push the tag.
+In short: `node apply.mjs <repo>` (add `--train` for scheduled releases, `--reusable` to call the kit's workflows), commit, `npm run release -- --baseline`, push the tag.
 
 ## Changing the standard
 
 Edit this kit, run its tests (`npm test`), release it with `npm run release`, and re-run `apply.mjs` on each repo.
 Kit-owned files are replaced; each repo's `scripts/release-kit/VERSION` shows which kit version it runs.
+The kit's own `.github/workflows/` are the shipped workflows (the train without a schedule), because reusable-mode repos call them there; a test fails if they drift.
