@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const KIT_VERSION = readFileSync(new URL('./VERSION', import.meta.url), 'utf8').trim()
+const KIT_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
 const TEMPLATE = join(dirname(fileURLToPath(import.meta.url)), 'template')
 const MARKER = 'release-kit'
 

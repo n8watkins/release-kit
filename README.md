@@ -56,7 +56,7 @@ The kit uses its own standard: commits are checked by the same hook and workflow
 npm test        # unit tests and an end-to-end run against a throwaway repo
 ```
 
-Bump `VERSION` for any change, then re-run `apply.mjs` on each repo to upgrade it.
+Release kit changes with `npm run release` like any other repo, then re-run `apply.mjs` on each repo to upgrade it (each repo's `scripts/release-kit/VERSION` shows which kit version it runs).
 
 ## License
 

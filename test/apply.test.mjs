@@ -20,7 +20,8 @@ test('apply, then the hook, the release command and tag verification all work', 
   run(repo, 'git', ['commit', '-q', '-m', 'Initial commit'])
 
   const applied = run(KIT, 'node', ['apply.mjs', repo])
-  assert.match(applied, /release-kit 1\.0\.0 applied/)
+  const kitVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+  assert.match(applied, new RegExp(`release-kit ${kitVersion.replaceAll('.', '\\.')} applied`))
   const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'))
   assert.equal(pkg.scripts['release:check'], 'npm run lint && npm run build')
   assert.deepEqual(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')).versionFiles, ['manifest.json'])

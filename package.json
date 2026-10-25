@@ -21,7 +21,6 @@
   },
   "files": [
     "apply.mjs",
-    "VERSION",
     "template",
     "STANDARD.md",
     "README.md",

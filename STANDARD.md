@@ -66,5 +66,5 @@ In short: `node apply.mjs <repo>`, commit, `npm run release -- --baseline`, push
 
 ## Changing the standard
 
-Edit this kit, bump `VERSION`, run its tests (`npm test`), and re-run `apply.mjs` on each repo.
+Edit this kit, run its tests (`npm test`), release it with `npm run release`, and re-run `apply.mjs` on each repo.
 Kit-owned files are replaced; each repo's `scripts/release-kit/VERSION` shows which kit version it runs.
