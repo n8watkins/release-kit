@@ -115,3 +115,111 @@ test('a husky repo gets its hook in .husky and no .githooks folder', () => {
   assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts.prepare, 'husky')
   assert.doesNotMatch(out, /prepare/)
 })
+
+test('--train adds the release train on its schedule, and re-running keeps it until --no-train', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-train'))
+  const train = join(repo, '.github/workflows/release-train.yml')
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.ok(!existsSync(train), 'the train is opt-in')
+
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo, '--train']), /vendored workflows, release train "0 16 \* \* 1"/)
+  assert.match(readFileSync(train, 'utf8'), /^ {4}- cron: "0 16 \* \* 1" # release-kit: schedule$/m)
+  assert.equal(readFileSync(train, 'utf8'), readFileSync(join(KIT, 'template/.github/workflows/release-train.yml'), 'utf8'))
+
+  quiet(KIT, 'node', ['apply.mjs', repo, '--schedule', '30 15 * * FRI'])
+  assert.match(readFileSync(train, 'utf8'), /- cron: "30 15 \* \* FRI" # release-kit: schedule/)
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), { versionFiles: [], train: { schedule: '30 15 * * FRI' } })
+  // An upgrade with no options keeps the train and its schedule.
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.match(readFileSync(train, 'utf8'), /- cron: "30 15 \* \* FRI"/)
+
+  for (const bad of ['0 16 * * 1" ; echo', '0 16 * *', '0 16 * * 1\n']) {
+    const result = attempt(KIT, 'node', ['apply.mjs', repo, '--schedule', bad])
+    assert.notEqual(result.status, 0, bad)
+    assert.match(result.stderr, /is not a five-field cron schedule/)
+  }
+
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo, '--no-train']), /release-train\.yml removed/)
+  assert.ok(!existsSync(train))
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), { versionFiles: [] })
+})
+
+test('--reusable writes callers of the pinned kit workflows, and --vendored switches back', async () => {
+  const { KIT_VERSION, makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-reusable'))
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: ['manifest.json'], node: '24' }))
+  writeFileSync(join(repo, 'manifest.json'), JSON.stringify({ version: '1.0.0' }))
+  const workflow = (name) => readFileSync(join(repo, '.github/workflows', name), 'utf8')
+
+  quiet(KIT, 'node', ['apply.mjs', repo, '--reusable', '--train'])
+  assert.match(workflow('commits.yml'), new RegExp(`^ {4}uses: n8watkins/release-kit/\\.github/workflows/commits\\.yml@v${KIT_VERSION.replaceAll('.', '\\.')}$`, 'm'))
+  assert.match(workflow('release.yml'), /uses: n8watkins\/release-kit\/\.github\/workflows\/release\.yml@v/)
+  assert.match(workflow('release-train.yml'), /- cron: "0 16 \* \* 1"[\s\S]*uses: n8watkins\/release-kit\/\.github\/workflows\/release-train\.yml@v/)
+  assert.doesNotMatch(workflow('release.yml'), /npm ci/)
+  // The scripts still come along: the hook and npm run release run locally.
+  assert.ok(existsSync(join(repo, 'scripts/release-kit/release.mjs')))
+  // Choices and settings the repo already had are kept.
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), { versionFiles: ['manifest.json'], node: '24', workflows: 'reusable', train: { schedule: '0 16 * * 1' } })
+
+  const sha = 'b'.repeat(40)
+  quiet(KIT, 'node', ['apply.mjs', repo, '--kit-ref', sha])
+  assert.match(workflow('commits.yml'), new RegExp(`commits\\.yml@${sha} # release-kit ${KIT_VERSION.replaceAll('.', '\\.')}$`, 'm'))
+  assert.notEqual(attempt(KIT, 'node', ['apply.mjs', repo, '--kit-ref', 'v1;id']).status, 0)
+
+  quiet(KIT, 'node', ['apply.mjs', repo, '--vendored'])
+  assert.equal(workflow('release.yml'), readFileSync(join(KIT, 'template/.github/workflows/release.yml'), 'utf8'))
+  assert.ok(existsSync(join(repo, '.github/workflows/release-train.yml')))
+  assert.equal(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')).workflows, undefined)
+})
+
+test("a workflow the kit didn't write is left alone unless --force", async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-own'))
+  run(repo, 'mkdir', ['-p', '.github/workflows'])
+  writeFileSync(join(repo, '.github/workflows/release.yml'), 'name: Mine\n')
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo, '--train']), /release\.yml exists and isn't from the kit/)
+  assert.equal(readFileSync(join(repo, '.github/workflows/release.yml'), 'utf8'), 'name: Mine\n')
+  quiet(KIT, 'node', ['apply.mjs', repo, '--force'])
+  assert.match(readFileSync(join(repo, '.github/workflows/release.yml'), 'utf8'), /release-kit/)
+  const usage = attempt(KIT, 'node', ['apply.mjs', repo, '--reusable', '--vendored'])
+  assert.match(usage.stderr, /pick one of --reusable and --vendored/)
+})
+
+test("apply leaves other hook managers and an existing release script alone, and says so", async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  for (const setup of [
+    (repo) => writeFileSync(join(repo, 'lefthook.yml'), 'pre-commit: {}\n'),
+    (repo) => writeFileSync(join(repo, '.pre-commit-config.yaml'), 'repos: []\n'),
+    (repo) => writeFileSync(join(repo, '.git/hooks/pre-commit'), '#!/bin/sh\n', { mode: 0o755 }),
+    (repo) => quiet(repo, 'git', ['config', 'core.hooksPath', '.config/hooks']),
+  ]) {
+    const repo = makeRepo(tmp('apply-hooks'))
+    setup(repo)
+    const out = quiet(KIT, 'node', ['apply.mjs', repo])
+    assert.match(out, /so the kit's hook is not installed: add {2}node scripts\/release-kit\/commit-msg\.mjs "\$1"/)
+    assert.ok(!existsSync(join(repo, '.githooks')))
+    assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts.prepare, undefined)
+    assert.notEqual(attempt(repo, 'git', ['config', '--local', 'core.hooksPath']).stdout.trim(), '.githooks')
+  }
+
+  const repo = makeRepo(tmp('apply-script'), { scripts: { release: 'semantic-release', build: 'echo b' } })
+  writeFileSync(join(repo, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n')
+  const out = quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.match(out, /already has a "release" script \(semantic-release\); left alone/)
+  assert.match(out, /pnpm-lock\.yaml but no package-lock\.json: the workflows install with npm ci/)
+  assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts.release, 'semantic-release')
+  quiet(KIT, 'node', ['apply.mjs', repo, '--force'])
+  assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts.release, 'node scripts/release-kit/release.mjs')
+})
+
+test('--train-checks lists the workflows the train runs on its release commit, and upgrades keep them', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-checks'))
+  const config = () => JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8'))
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo, '--train-checks', 'ci.yml, commits.yml']), /now: ci\.yml, commits\.yml/)
+  assert.deepEqual(config().train, { schedule: '0 16 * * 1', checks: ['ci.yml', 'commits.yml'] })
+  quiet(KIT, 'node', ['apply.mjs', repo, '--schedule', '0 9 * * 5'])
+  assert.deepEqual(config().train, { schedule: '0 9 * * 5', checks: ['ci.yml', 'commits.yml'] })
+  assert.match(attempt(KIT, 'node', ['apply.mjs', repo, '--train-checks', 'ci.yml;id']).stderr, /takes workflow file names/)
+})

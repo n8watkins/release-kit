@@ -22,6 +22,7 @@
   "files": [
     "apply.mjs",
     "template",
+    "reusable",
     "STANDARD.md",
     "README.md",
     "LICENSE"

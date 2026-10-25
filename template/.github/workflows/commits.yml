@@ -1,11 +1,17 @@
 # release-kit: every pushed commit follows Conventional Commits, including
 # commits that skipped the local hook (an agent, a web edit, --no-verify).
+#
+# Vendored into a repo by apply.mjs, or called from n8watkins/release-kit:
+#   uses: n8watkins/release-kit/.github/workflows/commits.yml@vX.Y.Z
 name: Commit messages
 
 on:
   push:
     branches: [main, master]
   pull_request:
+  # The release train runs it on its release commit (see release-train.yml).
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -13,10 +19,34 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      # Called from another repo: run the kit's scripts at the exact commit the
+      # caller pinned. A vendored copy runs the repo's own scripts/release-kit.
+      - name: Fetch the release-kit scripts
+        if: job.workflow_repository != '' && job.workflow_repository != github.repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .release-kit-source
+          sparse-checkout: template/scripts/release-kit
+          persist-credentials: false
+
+      - name: Locate the release-kit scripts
+        run: |
+          if [ -d .release-kit-source ]; then
+            mv .release-kit-source/template/scripts/release-kit "$RUNNER_TEMP/release-kit"
+            rm -rf .release-kit-source
+            echo "RELEASE_KIT=$RUNNER_TEMP/release-kit" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_KIT=scripts/release-kit" >> "$GITHUB_ENV"
+          fi
 
       - name: Check the new commits
         env:
@@ -25,6 +55,9 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           from="${BASE:-$BEFORE}"
-          # A new branch or a force push has no usable "before": check the last commit only.
-          if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then from="$HEAD_SHA~1"; fi
-          node scripts/release-kit/commit-msg.mjs --range "$from..$HEAD_SHA"
+          # A new branch or a force push has no usable "before": check the last
+          # commit only (or the only commit, in a brand new repo).
+          if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then
+            if git cat-file -e "$HEAD_SHA~1^{commit}" 2>/dev/null; then from="$HEAD_SHA~1"; else from=""; fi
+          fi
+          node "$RELEASE_KIT/commit-msg.mjs" --range "$from..$HEAD_SHA"
