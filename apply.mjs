@@ -55,6 +55,11 @@ for (const source of walk(TEMPLATE)) {
 }
 write('scripts/release-kit/VERSION', `${KIT_VERSION}\n`)
 
+// The workflows use npm ci and npm caching, which need a lock file.
+if (!existsSync(join(repo, 'package-lock.json'))) {
+  skipped.push('no package-lock.json: run npm install and commit it, or the Release workflow fails at setup')
+}
+
 // 2. Files that also carry the version.
 if (!existsSync(join(repo, '.release.json'))) {
   const candidates = ['manifest.json', 'src/manifest.json', 'public/manifest.json', 'src-tauri/tauri.conf.json', 'app/src-tauri/tauri.conf.json']
