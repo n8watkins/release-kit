@@ -27,7 +27,7 @@ test('the previous release is the highest vX.Y.Z on the branch, whatever else is
   run(repo, 'git', ['tag', 'v9.0.0'])
   run(repo, 'git', ['switch', '-q', 'main'])
   const dry = run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run'])
-  assert.match(dry, /2\.0\.0 -> 2\.1\.0 \(minor\), 1 commits since v2\.0\.0/)
+  assert.match(dry, /2\.0\.0 -> 2\.1\.0 \(minor\), 1 commit since v2\.0\.0/)
   assert.equal(run(repo, 'node', [`${SCRIPTS}/notes.mjs`]), '### Features\n\n- A\n')
 })
 
