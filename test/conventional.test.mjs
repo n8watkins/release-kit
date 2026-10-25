@@ -105,10 +105,10 @@ test('bot commits neither bump the version nor count as user-facing', () => {
 
 test('the release train plans a release only for user-facing work', () => {
   const c = (message, author = 'N') => ({ author, message })
-  assert.deepEqual(planRelease({ current: '1.1.0', commits: [] }), { release: false, reason: 'no commits since the last release' })
+  assert.deepEqual(planRelease({ current: '1.1.0', commits: [] }), { release: false, reason: 'no commits' })
   const chores = planRelease({ current: '1.1.0', commits: [c('docs: a'), c('chore: b'), c('test: c'), c('chore(release): v1.1.0', 'github-actions[bot]')] })
   assert.equal(chores.release, false)
-  assert.match(chores.reason, /4 commits since the last release, none user-facing/)
+  assert.match(chores.reason, /4 commits, none user-facing/)
   assert.deepEqual(planRelease({ current: '1.1.0', commits: [c('docs: a'), c('fix: b')] }), { release: true, reason: '1 user-facing of 2 commits', bump: 'patch', version: '1.1.1' })
   assert.equal(planRelease({ current: '1.1.0', commits: [c('perf: a')] }).version, '1.1.1')
   assert.equal(planRelease({ current: '1.1.0', commits: [c('fix: a'), c('feat(ui): b')] }).version, '1.2.0')

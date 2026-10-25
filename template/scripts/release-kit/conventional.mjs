@@ -124,11 +124,11 @@ export function userFacing(commits) {
  */
 export function planRelease({ current, commits, bump = 'auto' }) {
   const count = (n) => `${n} commit${n === 1 ? '' : 's'}`
-  if (!commits.length) return { release: false, reason: 'no commits since the last release' }
+  if (!commits.length) return { release: false, reason: 'no commits' }
   if (bump === 'auto') {
     const shown = userFacing(commits)
     if (!shown.length) {
-      return { release: false, reason: `${count(commits.length)} since the last release, none user-facing (feat, fix, perf, security)` }
+      return { release: false, reason: `${count(commits.length)}, none user-facing (feat, fix, perf, security)` }
     }
     const kind = suggestedBump(commits)
     return { release: true, reason: `${shown.length} user-facing of ${count(commits.length)}`, bump: kind, version: nextVersion(current, kind) }

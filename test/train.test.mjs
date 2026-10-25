@@ -55,7 +55,7 @@ test('a week of chores releases nothing; a fix releases a patch; the next run fi
   const quiet = plan(checkout(root, remote, 'week1'))
   assert.equal(quiet.status, 0, quiet.stderr)
   assert.equal(quiet.out.release, 'false')
-  assert.match(quiet.out.reason, /2 commits since the last release, none user-facing/)
+  assert.match(quiet.out.reason, /2 commits, none user-facing/)
   assert.equal(quiet.out.since, 'v1.1.0')
   assert.equal(quiet.out.version, undefined)
 
@@ -94,7 +94,7 @@ test('a week of chores releases nothing; a fix releases a patch; the next run fi
   // Straight after the release, the train finds nothing: its own commit doesn't count.
   const after = plan(checkout(root, remote, 'week3'))
   assert.equal(after.out.release, 'false')
-  assert.equal(after.out.reason, 'no commits since the last release')
+  assert.equal(after.out.reason, 'no commits')
   assert.equal(after.out.since, 'v1.1.1')
 })
 
