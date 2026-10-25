@@ -53,11 +53,29 @@ Its schedule is in `.release.json` (`train.schedule`, a cron line in UTC).
 - On each run it looks at the commits on `main` since the last tag.
 - When at least one is user-facing (`feat`, `fix`, `perf`, `security`, a revert or a breaking change), it runs `npm run release:check` on that commit, then makes the release commit and tag with the bump the commits call for, exactly like `npm run release`.
 - If `.release.json` lists `train.checks` (workflow files, such as the ones whose checks branch protection requires on `main`), it pushes the release commit to a temporary `release-train/vX.Y.Z` branch, runs each of them there and waits for them to pass, then deletes the branch. Each of those workflows needs `workflow_dispatch:` in its `on:`.
-- Then it pushes `main` and the tag in one atomic push and starts the Release workflow on the tag.
+- Then it pushes `main` and the tag in one atomic push and makes sure the Release workflow runs on the tag.
 - When there are only docs, chores, tests or refactors, it releases nothing.
 - "Run workflow" on the Release train runs it now; pick a bump to force one (it then releases any commits, user-facing or not), or tick "dry run" to see the plan and the notes without cutting anything.
-- The release commit and tag are pushed by `github-actions[bot]` with the workflow's own token, which starts no other workflow by itself; that is why the train starts `train.checks` and the Release workflow explicitly, and why it can't trigger itself.
-- No secret is needed: a commit whose required checks have passed may be pushed to a protected `main` with that token (as long as protection doesn't also require a pull request).
+- The release commit is made by `github-actions[bot]`, and its pushes made with the workflow's own token start no other workflow; that is why the train starts `train.checks` and the Release workflow explicitly.
+- The train runs only on its schedule or from "Run workflow", so nothing it pushes can trigger it again.
+
+### A protected main
+
+GitHub doesn't count checks from runs started with `workflow_dispatch`, the only runs the train's token can start.
+So on a `main` protected by required checks, the train's push is rejected even though `train.checks` passed on that exact commit.
+The fix is a deploy key that the branch's protection lets through, stored as the `RELEASE_TRAIN_KEY` secret; the train's checkout pushes with it when it exists.
+The train still runs `train.checks` first and pushes only when they pass, so the key never lets an unchecked commit onto `main`.
+A tag pushed with the key starts the Release workflow by itself, and pushing `main` with it runs CI there as usual.
+
+Set it up once, as an admin, with the gh CLI signed in:
+
+```sh
+node scripts/release-kit/protect.mjs --dry-run   # what it will do
+node scripts/release-kit/protect.mjs
+```
+
+It creates the ruleset `release-kit: protect main` (no deletion, no force push, the required checks that classic protection had, or `--checks "CI result,check"`), lets the deploy key and repository admins bypass it (`--no-admin-bypass` to drop admins), adds a new write deploy key `release-kit train` with its private half only in the secret, and then removes classic branch protection, which a deploy key can't bypass.
+Run it again to rotate the key.
 - If `main` moves while it runs, or a check fails, nothing is released and the release commit is thrown away; run it again, or let the next scheduled run pick it up.
 - It stops instead of guessing when there is no release tag yet (run `npm run release -- --baseline` first), when the last tag isn't on `main`, or when `package.json` doesn't match the last tag.
 

@@ -67,14 +67,16 @@ With `--train`, a scheduled workflow cuts releases so nobody has to remember:
 2. It runs `npm run release:check` on that exact commit.
 3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version>`: version bump, `CHANGELOG.md`, `chore(release): vX.Y.Z`, tag.
 4. With `train.checks` in `.release.json` (`--train-checks ci.yml,commits.yml`), it pushes that commit to a temporary `release-train/vX.Y.Z` branch, starts each listed workflow there and waits for it to pass.
-5. It pushes `main` and the tag in one atomic push, then starts the Release workflow on the tag, which publishes the GitHub Release as usual.
+5. It pushes `main` and the tag in one atomic push, then makes sure the Release workflow runs on the tag, which publishes the GitHub Release as usual.
 
 Why steps 4 and 5 start workflows explicitly: GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITHUB_TOKEN`, so the pushes alone would check and publish nothing.
 `workflow_dispatch` is the exception, and the train uses it; each workflow in `train.checks` needs `workflow_dispatch:` in its `on:`.
 The same rule means the train can't loop; the commit check also skips bot commits.
 
-On a `main` protected by required status checks, list the workflows that produce those checks in `train.checks`: the release commit then carries passing checks before `main` moves to it, so the push is accepted with the default token and no extra secret.
-This doesn't work if protection also requires pull requests; that needs a token that may bypass it, which the kit doesn't ask for.
+On a `main` protected by required status checks, list the workflows that produce those checks in `train.checks`, so the release commit passes them before `main` moves to it.
+GitHub doesn't count checks from `workflow_dispatch` runs toward protection, though, so the push itself needs a deploy key the protection lets through.
+`node scripts/release-kit/protect.mjs` sets that up once: a ruleset with the required checks that the key (and admins) may bypass, the deploy key, and the `RELEASE_TRAIN_KEY` secret the train's checkout pushes with (see RELEASING.md).
+A tag pushed with the key starts the Release workflow by itself; without the key, the train starts it.
 
 "Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
 It needs a release tag to start from, so baseline a new repo first.

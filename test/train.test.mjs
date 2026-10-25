@@ -170,38 +170,43 @@ test('the train refuses to guess: no tag, a moved tag, a stray version or a side
 })
 
 // --- The cut against a protected main -----------------------------------------
-// A fake gh records what the train asks GitHub to do, "runs" a started
-// workflow by recording its check on the branch's commit, and a pre-receive
-// hook on the remote plays branch protection: main only moves to a commit
-// whose required checks passed.
+// A fake gh records what the train asks GitHub to do and "runs" a started
+// workflow by recording its check on the branch's commit. A pre-receive hook
+// on the remote plays branch protection the way GitHub applies it: checks
+// from workflow_dispatch runs (the only ones the train can start) don't
+// count, so main only moves for a bypass actor, the train's deploy key.
 const FAKE_GH = `#!/usr/bin/env node
 const { appendFileSync, readFileSync } = require('node:fs')
 const { execFileSync } = require('node:child_process')
 const args = process.argv.slice(2)
 const env = process.env
 appendFileSync(env.FAKE_GH_LOG, args.filter((a, i) => args[i - 1] !== '--repo' && a !== '--repo').join(' ') + '\\n')
-const shaOf = (branch) => execFileSync('git', ['ls-remote', 'origin', 'refs/heads/' + branch], { encoding: 'utf8' }).split('\\t')[0]
+const shaOf = (ref) => execFileSync('git', ['ls-remote', 'origin', ref], { encoding: 'utf8' }).split('\\t')[0]
 const list = (name) => (env[name] || '').split(',').filter(Boolean)
 if (args[0] === 'workflow' && args[1] === 'run') {
   if (list('FAKE_GH_NO_DISPATCH').includes(args[2])) { console.error("HTTP 422: Workflow does not have 'workflow_dispatch' trigger"); process.exit(1) }
 } else if (args[0] === 'run' && args[1] === 'list') {
   const workflow = args[args.indexOf('--workflow') + 1]
   const branch = args[args.indexOf('--branch') + 1]
-  const sha = shaOf(branch)
+  // A tag pushed with the deploy key starts the Release workflow by itself (FAKE_GH_TAG_STARTS).
+  const sha = args[args.indexOf('--event') + 1] === 'push'
+    ? (env.FAKE_GH_TAG_STARTS ? shaOf('refs/tags/' + branch + '^{}') : '')
+    : shaOf('refs/heads/' + branch)
   console.log(JSON.stringify(sha ? [{ databaseId: workflow + '@' + branch, headSha: sha, url: 'https://example.test/' + workflow }] : []))
 } else if (args[0] === 'run' && args[1] === 'watch') {
   const [workflow, branch] = args[2].split('@')
   if (list('FAKE_GH_FAIL').includes(workflow)) process.exit(1)
-  appendFileSync(env.FAKE_GH_CHECKS, workflow + ' ' + shaOf(branch) + '\\n')
+  appendFileSync(env.FAKE_GH_CHECKS, workflow + ' ' + shaOf('refs/heads/' + branch) + '\\n')
 }
 `
 const PROTECTION = `#!/bin/sh
-# Required checks on main: every workflow in $REQUIRED must have passed on the new commit.
+# Required checks on main ($REQUIRED): only a push with the deploy key bypasses them.
+[ -s "$REQUIRED" ] || exit 0
 while read old new ref; do
   [ "$ref" = refs/heads/main ] || continue
-  for workflow in $(cat "$REQUIRED"); do
-    grep -qx "$workflow $new" "$CHECKS" 2>/dev/null || { echo "protected branch: $workflow has not passed on $new" >&2; exit 1; }
-  done
+  [ "$FAKE_DEPLOY_KEY" = 1 ] && { echo "Bypassed rule violations for $ref" >&2; continue; }
+  echo "protected branch: required status check $(head -n 1 "$REQUIRED") is expected" >&2
+  exit 1
 done
 `
 
@@ -240,34 +245,58 @@ function protectedRepo({ checks, required = ['ci.yml', 'commits.yml'] } = {}) {
   return { dir, planned, cutIt, remoteState, local, log }
 }
 
-test('on a protected main the train runs the required checks on its release commit, then pushes', () => {
+const checksRun = [
+  'workflow run ci.yml --ref release-train/v1.1.1',
+  'workflow run commits.yml --ref release-train/v1.1.1',
+  'run list --workflow ci.yml --branch release-train/v1.1.1 --event workflow_dispatch --json databaseId,headSha,url --limit 20',
+  'run watch ci.yml@release-train/v1.1.1 --exit-status --interval 1',
+  'run list --workflow commits.yml --branch release-train/v1.1.1 --event workflow_dispatch --json databaseId,headSha,url --limit 20',
+  'run watch commits.yml@release-train/v1.1.1 --exit-status --interval 1',
+]
+const withKey = { RELEASE_TRAIN_KEY: 'true', FAKE_DEPLOY_KEY: '1' }
+const releaseByPush = 'run list --workflow release.yml --branch v1.1.1 --event push --json databaseId,headSha,url --limit 20'
+
+test('on a protected main the train runs the required checks on its release commit, then pushes with its deploy key', () => {
   const { planned, cutIt, remoteState, log } = protectedRepo({ checks: ['ci.yml', 'commits.yml'] })
-  const result = cutIt()
+  const result = cutIt({ ...withKey, FAKE_GH_TAG_STARTS: '1' })
   assert.equal(result.status, 0, result.stderr)
   assert.equal(planned.tag, 'v1.1.1')
-  assert.equal(log(), [
-    'workflow run ci.yml --ref release-train/v1.1.1',
-    'workflow run commits.yml --ref release-train/v1.1.1',
-    'run list --workflow ci.yml --branch release-train/v1.1.1 --event workflow_dispatch --json databaseId,headSha,url --limit 20',
-    'run watch ci.yml@release-train/v1.1.1 --exit-status --interval 1',
-    'run list --workflow commits.yml --branch release-train/v1.1.1 --event workflow_dispatch --json databaseId,headSha,url --limit 20',
-    'run watch commits.yml@release-train/v1.1.1 --exit-status --interval 1',
-    'workflow run release.yml --ref v1.1.1',
-    '',
-  ].join('\n'))
+  // The tag push started the Release workflow, so the train doesn't start a second one.
+  assert.equal(log(), [...checksRun, releaseByPush, ''].join('\n'))
   const after = remoteState()
   assert.equal(after.tags, 'v1.1.0\nv1.1.1')
   assert.equal(after.branches, '* main', 'the temporary branch is deleted')
-  assert.match(result.stdout, /pushed v1\.1\.1/)
+  assert.match(result.stdout, /pushed v1\.1\.1 with the deploy key/)
+  assert.match(result.stdout, /the tag started release\.yml: https:\/\/example\.test\/release\.yml/)
 })
 
-test('without the required checks, protection rejects the push and the train undoes its release', () => {
-  const { cutIt, remoteState, local } = protectedRepo()
+test('with the deploy key, if the tag push starts no Release run the train starts one', () => {
+  const { cutIt, remoteState, log } = protectedRepo({ checks: ['ci.yml'] })
+  const result = cutIt(withKey)
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(remoteState().tags, 'v1.1.0\nv1.1.1')
+  const calls = log().trim().split('\n')
+  assert.ok(calls.filter((line) => line === releaseByPush).length > 1, 'it waits for the push to start one')
+  assert.equal(calls.at(-1), 'workflow run release.yml --ref v1.1.1')
+})
+
+test("with only the workflow token, protection rejects the push even after the checks pass (GitHub doesn't count dispatched runs), and the train undoes its release", () => {
+  const { cutIt, remoteState, local, log } = protectedRepo({ checks: ['ci.yml', 'commits.yml'] })
   const before = [remoteState(), local()]
   const result = cutIt()
   assert.notEqual(result.status, 0)
-  assert.match(result.stderr, /the push was rejected \(did main move, or does branch protection need checks that \.release\.json train\.checks doesn't run\?\); nothing was released/)
-  assert.match(result.stderr, /protected branch: ci\.yml has not passed/)
+  assert.equal(log(), [...checksRun, ''].join('\n'))
+  assert.match(result.stderr, /the push was rejected \(did main move\? If main is protected: GitHub doesn't count checks from runs the train starts, so give the train a deploy key .*protect\.mjs.*\); nothing was released/)
+  assert.match(result.stderr, /required status check ci\.yml is expected/)
+  assert.deepEqual([remoteState(), local()], before)
+})
+
+test("a deploy key the protection doesn't let through is named in the error", () => {
+  const { cutIt, remoteState, local } = protectedRepo()
+  const before = [remoteState(), local()]
+  const result = cutIt({ RELEASE_TRAIN_KEY: 'true' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /leave the train's deploy key off its bypass list\?\); nothing was released/)
   assert.deepEqual([remoteState(), local()], before)
 })
 
