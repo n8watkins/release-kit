@@ -118,13 +118,15 @@ jobs:
           REASON: ${{ steps.plan.outputs.reason }}
           SINCE: ${{ steps.plan.outputs.since }}
         run: |
-          if [ "$RELEASE" = "true" ]; then
-            echo "Next release: v$VERSION ($REASON since $SINCE)." >> "$GITHUB_STEP_SUMMARY"
-            echo >> "$GITHUB_STEP_SUMMARY"
-            node "$RELEASE_KIT/notes.mjs" --from "$SINCE" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Nothing to release: $REASON since $SINCE." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            if [ "$RELEASE" = "true" ]; then
+              echo "Next release: v$VERSION ($REASON since $SINCE)."
+              echo
+              node "$RELEASE_KIT/notes.mjs" --from "$SINCE"
+            else
+              echo "Nothing to release: $REASON since $SINCE."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # The same checks the Release workflow runs on the tag, on the commit the
   # train is about to tag: a red main is never tagged.

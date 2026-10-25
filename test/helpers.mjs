@@ -12,6 +12,8 @@ const identity = (name = 'T', email = 't@t') => ({ GIT_AUTHOR_NAME: name, GIT_AU
 const ENV = { ...process.env, ...identity(), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
 delete ENV.GITHUB_OUTPUT
 delete ENV.GITHUB_STEP_SUMMARY
+delete ENV.GITHUB_REPOSITORY
+delete ENV.GITHUB_SERVER_URL
 
 export const run = (cwd, cmd, args, env = {}) => execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 1024 ** 3, env: { ...ENV, ...env } })
 export const attempt = (cwd, cmd, args, env = {}, input = undefined) => spawnSync(cmd, args, { cwd, input, encoding: 'utf8', maxBuffer: 1024 ** 3, env: { ...ENV, ...env } })
