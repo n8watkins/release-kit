@@ -66,7 +66,9 @@ Repos that ship continuously (a website deploying every merge) turn it on with `
 - From "Run workflow" a bump can be forced, and a dry run shows the plan and the notes.
 - It runs `release:check` on the exact commit before tagging it, so a red main is never released.
 - It never guesses: no release tag yet, a moved tag or a `package.json` that doesn't match the last tag stops it.
-- GitHub doesn't start workflows from pushes made with a workflow's own token, and branch protection won't let `main` move to a commit without its required checks. So the train, as `github-actions[bot]`, pushes its release commit to a temporary branch, starts the workflows listed in `.release.json` `train.checks` there with `workflow_dispatch` (the one trigger that token may use) and waits for them, then pushes `main` and the tag together and starts the Release workflow on the tag. No extra secret is needed, and the full CI runs on exactly what is released. Its pushes start nothing else: nothing loops. The commit check skips bot commits anyway.
+- GitHub doesn't start workflows from pushes made with a workflow's own token. So the train, as `github-actions[bot]`, pushes its release commit to a temporary branch, starts the workflows listed in `.release.json` `train.checks` there with `workflow_dispatch` (the one trigger that token may use) and waits for them, then pushes `main` and the tag together and makes sure the Release workflow runs on the tag. The full CI runs on exactly what is released.
+- Branch protection doesn't count those `workflow_dispatch` checks, so a protected `main` gets a ruleset that one deploy key may bypass, and the train pushes with that key (`RELEASE_TRAIN_KEY`, set up by `scripts/release-kit/protect.mjs`). The train still pushes only after `train.checks` pass.
+- The train runs only on a schedule or by hand, so nothing it pushes starts it again. The commit check skips bot commits anyway.
 - If main moves while it runs, or a check fails, nothing is released.
 
 ### Workflows

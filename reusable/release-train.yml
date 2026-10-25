@@ -1,7 +1,8 @@
 # release-kit (reusable): the release train. On a schedule, and from "Run
 # workflow", it cuts a release when user-facing work (feat, fix, perf) has
 # landed since the last tag, running .release.json train.checks on the release
-# commit before it moves main. The steps live in the release-kit repo, pinned
+# commit before it moves main (with the RELEASE_TRAIN_KEY deploy key when main
+# is protected; see protect.mjs). The steps live in the release-kit repo, pinned
 # below; apply.mjs updates the pin and the schedule (.release.json).
 name: Release train
 
@@ -32,3 +33,5 @@ jobs:
     with:
       bump: ${{ inputs.bump || 'auto' }}
       dry-run: ${{ inputs.dry-run == true }}
+    secrets:
+      RELEASE_TRAIN_KEY: ${{ secrets.RELEASE_TRAIN_KEY }}

@@ -240,4 +240,5 @@ console.log(`
 Next:
   1. Review the diff (git -C ${repo} diff) and commit it: chore: adopt release-kit ${KIT_VERSION}
   2. Preview the first release: npm run release -- --dry-run
-  3. Cut it: npm run release -- --push${train ? `\n  The release train needs a release tag to start from (npm run release -- --baseline on a new repo).\n  If main is protected by required checks, list the workflows that produce them: --train-checks ci.yml,commits.yml${train.checks.length ? ` (now: ${train.checks.join(', ')})` : ''}` : ''}`)
+  3. Cut it: npm run release -- --push${train ? `\n  The release train needs a release tag to start from (npm run release -- --baseline on a new repo).\n  If main is protected by required checks, list the workflows that produce them: --train-checks ci.yml,commits.yml${train.checks.length ? ` (now: ${train.checks.join(', ')})` : ''}
+  and give the train a deploy key that protection lets through: node scripts/release-kit/protect.mjs` : ''}`)

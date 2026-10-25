@@ -3,14 +3,17 @@
 # has landed on main since the last tag, with the bump those commits call for.
 # Weeks with only docs, chores or tests release nothing.
 #
-# A push made with the workflow's GITHUB_TOKEN starts no other workflow, and
-# branch protection rejects a commit on main without its required checks. So
+# A push made with the workflow's GITHUB_TOKEN starts no other workflow, so
 # the train starts the checks itself (workflow_dispatch is the one trigger
 # GitHub allows from that token): it pushes the release commit to a temporary
 # release-train/vX.Y.Z branch, runs the workflows listed in .release.json
 # train.checks there, and only when they pass pushes main and the tag. Then it
-# starts the Release workflow on the tag. Its pushes start nothing else, so the
-# train can't trigger itself. No extra secret is needed.
+# makes sure the Release workflow runs on the tag. The train runs only on a
+# schedule or by hand, so its pushes can't trigger it again.
+#
+# Branch protection doesn't count checks from workflow_dispatch runs, so on a
+# protected main the push needs the RELEASE_TRAIN_KEY secret: a deploy key the
+# branch's ruleset lets through. scripts/release-kit/protect.mjs sets up both.
 #
 # Turned on with apply.mjs --train (the schedule comes from .release.json), or
 # called from n8watkins/release-kit:
@@ -44,6 +47,10 @@ on:
         description: "The caller's workflow file that publishes a tag"
         type: string
         default: release.yml
+    secrets:
+      RELEASE_TRAIN_KEY:
+        description: "SSH deploy key that may bypass main's protection (protect.mjs); without it the train pushes with the workflow token"
+        required: false
 
 permissions:
   contents: read
@@ -164,6 +171,9 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           fetch-depth: 0
+          # With the deploy key, origin pushes over SSH as that key, which a
+          # protected main lets through; without it, with the workflow token.
+          ssh-key: ${{ secrets.RELEASE_TRAIN_KEY }}
 
       - name: Fetch the release-kit scripts
         if: job.workflow_repository != '' && job.workflow_repository != github.repository
@@ -190,14 +200,15 @@ jobs:
           node-version: ${{ needs.plan.outputs.node }}
 
       # Exactly the commit that was planned and checked. train.mjs commits and
-      # tags it, runs .release.json train.checks on it (the workflows branch
-      # protection requires), pushes main and the tag atomically, and starts
-      # the Release workflow on the tag. If main moved, nothing is released.
+      # tags it, runs .release.json train.checks on it (the workflows whose
+      # checks guard main), pushes main and the tag atomically, and makes sure
+      # the Release workflow runs on the tag. If main moved, nothing is released.
       - name: Cut, check, push and publish
         env:
           BRANCH: ${{ github.ref_name }}
           VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_WORKFLOW: ${{ inputs.release-workflow || 'release.yml' }}
+          RELEASE_TRAIN_KEY: ${{ secrets.RELEASE_TRAIN_KEY != '' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           case "$BRANCH" in main|master) ;; *) echo "::error::The release train runs on main or master, not '$BRANCH'."; exit 1 ;; esac

@@ -5,17 +5,23 @@
 //   node scripts/release-kit/train.mjs --version x.y.z [--release-workflow release.yml]
 //
 // 1. Commits "chore(release): vX.Y.Z" and tags it (release.mjs, no push).
-// 2. When .release.json lists train.checks (workflow files, such as the ones
-//    branch protection requires), pushes the release commit to a temporary
-//    release-train/vX.Y.Z branch, starts each of them there and waits for them
-//    to pass, so the commit carries its required checks before main points
-//    at it. Pushes made with the workflow's GITHUB_TOKEN start no workflows,
-//    so the train starts them itself (workflow_dispatch is the exception).
+// 2. When .release.json lists train.checks (the workflows whose checks guard
+//    main), pushes the release commit to a temporary release-train/vX.Y.Z
+//    branch, starts each of them there and waits for them to pass: a commit
+//    that fails them is never released. The train starts them itself because
+//    pushes made with the workflow's GITHUB_TOKEN start no workflows
+//    (workflow_dispatch is the exception).
 // 3. Pushes main and the tag in one atomic push. If main moved meanwhile the
-//    push is rejected and nothing is released.
-// 4. Starts the Release workflow on the tag.
+//    push is rejected and nothing is released. Branch protection doesn't
+//    count checks from runs started with workflow_dispatch, so a protected
+//    main only accepts the push from the train's deploy key (protect.mjs),
+//    which the checkout sets up when the RELEASE_TRAIN_KEY secret exists.
+// 4. Makes sure the Release workflow runs on the tag: a tag pushed with the
+//    deploy key starts it by itself; one pushed with the token doesn't, so the
+//    train starts it.
 //
-// Needs the gh CLI with GH_TOKEN (contents: write, actions: write).
+// Needs the gh CLI with GH_TOKEN (contents: write, actions: write), and
+// RELEASE_TRAIN_KEY=true when origin pushes with the deploy key.
 import { execFileSync, spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -49,6 +55,7 @@ for (const file of [releaseWorkflow, ...checks]) {
 const repo = process.env.GITHUB_REPOSITORY
 if (!repo) fail('GITHUB_REPOSITORY is not set (this runs in the release train workflow)')
 const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
+const withKey = process.env.RELEASE_TRAIN_KEY === 'true'
 
 const gh = (...ghArgs) => execFileSync('gh', [...ghArgs, '--repo', repo], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
@@ -63,10 +70,10 @@ function start(workflow, ref) {
   }
 }
 
-/** The run of `workflow` that the train started on `ref` for `sha`, once GitHub lists it. */
-function findRun(workflow, ref, sha) {
-  for (let attempt = 0; attempt < 60; attempt++) {
-    const runs = JSON.parse(gh('run', 'list', '--workflow', workflow, '--branch', ref, '--event', 'workflow_dispatch', '--json', 'databaseId,headSha,url', '--limit', '20') || '[]')
+/** The run of `workflow` on `ref` for `sha` started by `event`, once GitHub lists it. */
+function findRun(workflow, ref, sha, { event = 'workflow_dispatch', attempts = 60 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const runs = JSON.parse(gh('run', 'list', '--workflow', workflow, '--branch', ref, '--event', event, '--json', 'databaseId,headSha,url', '--limit', '20') || '[]')
     const found = runs.find((run) => run.headSha === sha)
     if (found) return found
     sleep(POLL_MS / 2)
@@ -123,14 +130,23 @@ try {
   git('push', '--atomic', 'origin', `HEAD:refs/heads/${branch}`, `refs/tags/${tag}`)
 } catch (error) {
   undo()
-  fail(`the push was rejected (did ${branch} move, or does branch protection need checks that .release.json train.checks doesn't run?); nothing was released:\n${error.stderr?.trim() || error.message}`)
+  const why = withKey
+    ? `did ${branch} move, or does the ruleset on ${branch} leave the train's deploy key off its bypass list?`
+    : `did ${branch} move? If ${branch} is protected: GitHub doesn't count checks from runs the train starts, so give the train a deploy key that may bypass the protection (node scripts/release-kit/protect.mjs, see RELEASING.md)`
+  fail(`the push was rejected (${why}); nothing was released:\n${error.stderr?.trim() || error.message}`)
 }
-console.log(`train: pushed ${tag}`)
+console.log(`train: pushed ${tag}${withKey ? ' with the deploy key' : ''}`)
 
 // 4. Publish. The tag is out, so a failure here is fixed by running the
 // Release workflow on the tag by hand.
-const notStarted = start(releaseWorkflow, tag)
-if (notStarted) fail(`${notStarted}\n  ${tag} is pushed; run the Release workflow on it by hand (Run workflow, Use workflow from: ${tag})`)
-const url = `${process.env.GITHUB_SERVER_URL ?? 'https://github.com'}/${repo}/actions/workflows/${releaseWorkflow}`
-console.log(`train: started ${releaseWorkflow} on ${tag}: ${url}`)
+const byPush = withKey && findRun(releaseWorkflow, tag, sha, { event: 'push', attempts: 24 })
+let url = byPush?.url
+if (byPush) {
+  console.log(`train: the tag started ${releaseWorkflow}: ${url}`)
+} else {
+  const notStarted = start(releaseWorkflow, tag)
+  if (notStarted) fail(`${notStarted}\n  ${tag} is pushed; run the Release workflow on it by hand (Run workflow, Use workflow from: ${tag})`)
+  url = `${process.env.GITHUB_SERVER_URL ?? 'https://github.com'}/${repo}/actions/workflows/${releaseWorkflow}`
+  console.log(`train: started ${releaseWorkflow} on ${tag}: ${url}`)
+}
 summary(`Cut ${tag}. The [Release workflow](${url}) publishes it.`)
