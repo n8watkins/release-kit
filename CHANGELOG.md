@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0 - 2026-10-27
+
+Every repo now installs the kit as a dev dependency, so a new kit release arrives as a Dependabot update PR. Release notes read like patch notes by default: New, Fixed, Faster, Safer.
+
+### New
+
+- Version files beyond JSON (Cargo.toml, Cargo.lock, package-lock.json) ([#4](https://github.com/n8watkins/release-kit/pull/4))
+- Patch-note release notes, and extension manifests found by apply ([#5](https://github.com/n8watkins/release-kit/pull/5))
+- Install the kit as a dev dependency, kept current by Dependabot, with plain notes ([#6](https://github.com/n8watkins/release-kit/pull/6))
+
+### Fixed
+
+- Say "1 commit", not "1 commits" ([#3](https://github.com/n8watkins/release-kit/pull/3))
+
 ## 1.2.0 - 2026-10-25
 
 ### Features
