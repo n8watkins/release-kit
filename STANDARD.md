@@ -43,7 +43,7 @@ What the standard changes:
 
 ### Versions
 
-- SemVer, `vX.Y.Z` tags, the version in `package.json` (plus any `.release.json` `versionFiles`).
+- SemVer, `vX.Y.Z` tags, the version in `package.json` (plus any `.release.json` `versionFiles`: JSON files, `package-lock.json`, a `Cargo.toml` and its `Cargo.lock`).
 - Before 1.0, minor carries features and patch carries fixes.
 - 1.0.0 means ready for people who aren't the author.
 - The bump comes from the commits unless forced: breaking means major, a feature means minor, otherwise patch.

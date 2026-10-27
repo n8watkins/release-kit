@@ -24,6 +24,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSy
 import { execFileSync } from 'node:child_process'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readVersion } from './template/scripts/release-kit/versions.mjs'
 
 const KIT = dirname(fileURLToPath(import.meta.url))
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
@@ -89,10 +90,15 @@ const train = config.train ? { schedule: config.train.schedule ?? DEFAULT_SCHEDU
 
 // Files that also carry the version, detected on the first run.
 if (!hadConfig) {
-  const candidates = ['manifest.json', 'src/manifest.json', 'public/manifest.json', 'src-tauri/tauri.conf.json', 'app/src-tauri/tauri.conf.json']
+  // A Tauri app keeps it in tauri.conf.json, Cargo.toml and Cargo.lock too;
+  // one in a subfolder (app/) has its own package.json and lock there as well.
+  const tauri = ['src-tauri', 'app/src-tauri'].flatMap((dir) => ['tauri.conf.json', 'Cargo.toml', 'Cargo.lock'].map((f) => `${dir}/${f}`))
+  const candidates = ['manifest.json', 'src/manifest.json', 'public/manifest.json', ...tauri, 'app/package.json', 'app/package-lock.json']
   config.versionFiles = candidates.filter((p) => {
+    // A subfolder's package files count only beside a Tauri app there.
+    if (p.startsWith('app/package') && !existsSync(join(repo, 'app/src-tauri/tauri.conf.json'))) return false
     try {
-      return typeof JSON.parse(read(p)).version === 'string'
+      return typeof readVersion(join(repo, p)) === 'string'
     } catch {
       return false
     }
