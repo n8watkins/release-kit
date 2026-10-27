@@ -279,8 +279,12 @@ function writeDependabot() {
   const path = '.github/dependabot.yml'
   if (existsSync(join(repo, path))) {
     const current = read(path)
-    const missing = ['npm', 'github-actions'].filter((e) => !new RegExp(`package-ecosystem:\\s*["']?${e}["']?`).test(current))
-    if (missing.length) skipped.push(`${path} has no ${missing.join(' or ')} entry: add one so kit releases arrive as update PRs`)
+    // An entry per ecosystem for the repo root, where the dev dependency and the workflows are.
+    const entries = current.split(/\n(?=\s*-\s*package-ecosystem:)/)
+    const atRoot = (ecosystem) =>
+      entries.some((e) => new RegExp(`package-ecosystem:\\s*["']?${ecosystem}["']?`).test(e) && /directory:\s*["']?\/["']?\s*(\n|$)/.test(e))
+    const missing = ['npm', 'github-actions'].filter((e) => !atRoot(e))
+    if (missing.length) skipped.push(`${path} has no ${missing.join(' or ')} entry for directory "/": add one so kit releases arrive as update PRs`)
     else if (/release-kit/.test(current)) skipped.push(`${path} mentions release-kit: make sure it doesn't ignore it`)
     return
   }
@@ -314,6 +318,8 @@ function otherHooks() {
     hooksPath = execFileSync('git', ['-C', repo, 'config', '--local', 'core.hooksPath'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
   } catch {}
   if (hooksPath && hooksPath.replace(/\/$/, '') !== '.githooks') return `core.hooksPath is already ${hooksPath}`
+  // Already the kit's own .githooks: nothing else to look for.
+  if (hooksPath) return null
   try {
     const gitDir = execFileSync('git', ['-C', repo, 'rev-parse', '--git-path', 'hooks'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
     const hooks = readdirSync(resolve(repo, gitDir)).filter((name) => !name.endsWith('.sample'))

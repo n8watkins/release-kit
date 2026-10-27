@@ -279,3 +279,20 @@ test('package mode (the default): the kit is a dev dependency, run from node_mod
   assert.equal(back.scripts['release:check'], 'npm run lint')
   assert.ok(existsSync(join(repo, 'scripts/release-kit/release.mjs')))
 })
+
+test("package mode: the kit's own .githooks isn't mistaken for another hook manager, and dependabot.yml must cover the root", async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-rerun'))
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: [], workflows: 'vendored' }))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  // Re-applying (now in package mode) with core.hooksPath already .githooks rewrites the hook.
+  const out = quiet(KIT, 'node', ['apply.mjs', repo, '--package'])
+  assert.doesNotMatch(out, /has its own hooks/)
+  assert.match(readFileSync(join(repo, '.githooks/commit-msg'), 'utf8'), /node_modules\/\.bin\/release-kit/)
+
+  run(repo, 'mkdir', ['-p', '.github'])
+  writeFileSync(join(repo, '.github/dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /app\n  - package-ecosystem: github-actions\n    directory: /\n')
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /has no npm entry for directory "\/"/)
+  writeFileSync(join(repo, '.github/dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n  - package-ecosystem: "github-actions"\n    directory: "/"\n')
+  assert.doesNotMatch(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml has no/)
+})
