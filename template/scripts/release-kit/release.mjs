@@ -28,13 +28,16 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { RELEASE_TAG, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
 import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags } from './git.mjs'
 import { renderNotes } from './notes.mjs'
+import { readVersion, setVersion } from './versions.mjs'
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(`--${name}`)
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'))
 
-// Other files that carry the version (an extension manifest, tauri.conf.json),
-// listed in .release.json as { "versionFiles": ["path/to/file.json"] }.
+// Other files that carry the version (an extension manifest, tauri.conf.json,
+// a Cargo.toml and its Cargo.lock, a package.json and package-lock.json in a
+// subfolder), listed in .release.json as { "versionFiles": ["path/to/file"] }.
+// versions.mjs knows how each kind keeps it.
 const config = existsSync('.release.json') ? readJson('.release.json') : {}
 const versionFiles = config.versionFiles ?? []
 // The whole line a baseline tag's message carries, and nothing else does: a
@@ -45,7 +48,7 @@ const BRANCHES = ['main', 'master']
 
 function versions() {
   const found = { 'package.json': readJson('package.json').version }
-  for (const path of versionFiles) found[path] = readJson(path).version
+  for (const path of versionFiles) found[path] = readVersion(path)
   return found
 }
 
@@ -200,11 +203,7 @@ if (push && !flag('no-check')) {
 
 // package.json and package-lock.json, the way npm does it.
 execFileSync('npm', ['version', version, '--no-git-tag-version', '--allow-same-version'], { stdio: 'ignore' })
-for (const path of versionFiles) {
-  const json = readJson(path)
-  json.version = version
-  writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`)
-}
+for (const path of versionFiles) setVersion(path, version)
 
 const TITLE = '# Changelog'
 const existing = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf8').replace(/\r\n?/g, '\n') : `${TITLE}\n`
