@@ -93,11 +93,15 @@ if (!hadConfig) {
   // A Tauri app keeps it in tauri.conf.json, Cargo.toml and Cargo.lock too;
   // one in a subfolder (app/) has its own package.json and lock there as well.
   const tauri = ['src-tauri', 'app/src-tauri'].flatMap((dir) => ['tauri.conf.json', 'Cargo.toml', 'Cargo.lock'].map((f) => `${dir}/${f}`))
-  const candidates = ['manifest.json', 'src/manifest.json', 'public/manifest.json', ...tauri, 'app/package.json', 'app/package-lock.json']
+  // A browser extension's manifest.json, at the root or in the folder it is
+  // loaded from; a website's web-app manifest (no manifest_version) isn't one.
+  const manifests = ['manifest.json', 'src/manifest.json', 'public/manifest.json', 'extension/manifest.json']
+  const candidates = [...manifests, ...tauri, 'app/package.json', 'app/package-lock.json']
   config.versionFiles = candidates.filter((p) => {
     // A subfolder's package files count only beside a Tauri app there.
     if (p.startsWith('app/package') && !existsSync(join(repo, 'app/src-tauri/tauri.conf.json'))) return false
     try {
+      if (manifests.includes(p) && !('manifest_version' in JSON.parse(read(p)))) return false
       return typeof readVersion(join(repo, p)) === 'string'
     } catch {
       return false
@@ -106,6 +110,18 @@ if (!hadConfig) {
   done.push(`.release.json (versionFiles: ${config.versionFiles.join(', ') || 'none'})`)
 }
 config.versionFiles ??= []
+// Every version file must say what package.json says, or the first tag check fails.
+const pkgVersion = JSON.parse(read('package.json')).version
+for (const p of config.versionFiles) {
+  let found
+  try {
+    found = readVersion(join(repo, p))
+  } catch (error) {
+    skipped.push(`${p}: ${error.message}`)
+    continue
+  }
+  if (found !== pkgVersion) skipped.push(`${p} has version ${found} but package.json has ${pkgVersion}: make them match before the first release, or the tag check fails`)
+}
 const { versionFiles, ...choices } = config
 write('.release.json', `${JSON.stringify({ versionFiles, ...choices }, null, 2)}\n`)
 

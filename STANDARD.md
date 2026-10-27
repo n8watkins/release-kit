@@ -37,13 +37,14 @@ What the standard changes:
 - Conventional Commits: `type(scope): subject`, header at most 100 characters.
 - Types: `feat`, `fix`, `perf`, `security` (these reach the release notes), and `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`.
 - `feat` and `fix` only for changes a user would notice. They are the public record.
+- Subjects that reach the notes are written as patch notes, for users, not developers. A `Release-note:` body line rewords one for the notes, and `Release-note: skip` keeps one out.
 - Breaking changes: `!` after the type, or a `BREAKING CHANGE:` footer.
 - Merge, revert, fixup and bot commits pass the check; bot commits never reach the notes.
 - `security` isn't in the Conventional Commits spec, but these repos already used it for hardening a user should hear about, so it has its own notes section and a patch bump.
 
 ### Versions
 
-- SemVer, `vX.Y.Z` tags, the version in `package.json` (plus any `.release.json` `versionFiles`: JSON files, `package-lock.json`, a `Cargo.toml` and its `Cargo.lock`).
+- SemVer, `vX.Y.Z` tags, the version in `package.json` (plus any `.release.json` `versionFiles`: JSON files such as an extension `manifest.json` or `tauri.conf.json`, `package-lock.json`, a `Cargo.toml` and its `Cargo.lock`). `apply.mjs` finds them on the first run and warns when one disagrees with `package.json`.
 - Before 1.0, minor carries features and patch carries fixes.
 - 1.0.0 means ready for people who aren't the author.
 - The bump comes from the commits unless forced: breaking means major, a feature means minor, otherwise patch.
@@ -52,7 +53,8 @@ What the standard changes:
 
 - `npm run release -- --push` from a clean main that isn't behind origin: `release:check`, bump, changelog section, `chore(release): vX.Y.Z` commit, annotated tag, one atomic push of the branch and the tag. A rejected push undoes the commit and the tag.
 - Changelog dates are in the repo's `.release.json` `timeZone` (the machine's zone if unset).
-- The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the generated notes, download-and-verify.
+- The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the notes the release wrote into the tag (the same section as `CHANGELOG.md`), download-and-verify.
+- `--summary "<text>"` opens a release with a line in the releaser's words, and `.release.json` `notes` sets how the notes read (`"style": "plain"` for New, Fixed, Faster, Safer and no scopes).
 - A failed Release run is retried by running the Release workflow on the tag; a pushed tag is never moved or re-pushed.
 - Release when something worth telling a user about has landed.
 - The previous release is the highest `vX.Y.Z` tag on the branch's history. Other tags (`v2.0.0-beta`, `vnext`) are ignored, and a version tag that isn't on the branch (moved, or made elsewhere) stops the release.

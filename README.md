@@ -94,6 +94,17 @@ The workflows install with `npm ci`, so a pnpm, yarn or bun repo needs a `packag
 
 If the repo ships files, add a `release:artifacts` script that writes them into `release-artifacts/` (for a WXT extension: `wxt zip && cp .output/*.zip release-artifacts/`).
 
+## Notes people want to read
+
+The notes come from `feat`, `fix`, `perf` and `security` subjects, so write those for users: what they can now do, or what works better.
+
+- A `Release-note: <plain sentence>` line in the commit body rewords a change for the notes; `Release-note: skip` leaves one out.
+- `npm run release -- --summary "Dark mode, and a faster homepage."` opens the release with a line in your words.
+- `.release.json` `"notes": { "style": "plain" }` uses the headings New, Fixed, Faster and Safer and drops scope labels; `headings` and `scopes` tune them one by one.
+- The GitHub Release shows exactly the section written to `CHANGELOG.md`, and `(#12)` links to its pull request.
+
+See [template/RELEASING.md](template/RELEASING.md) for examples.
+
 ## When a Release run fails
 
 Fix the cause, then run the Release workflow on the tag: Actions, Release, "Run workflow", and pick the tag under "Use workflow from".
