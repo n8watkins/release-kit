@@ -34,17 +34,26 @@ const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
  */
 const normalize = (message) => message.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(/^\s*\n/, '')
 
+// A "Release-note:" trailer in the body says how the change reads in the
+// release notes, in place of the subject; "Release-note: skip" (or "none")
+// keeps a feat or fix out of them, for one no user would notice.
+const NOTE = /^Release-note:[ \t]*(.*)$/im
+const SKIP = /^(skip|none|-)$/i
+
 /** Parse a commit message. Returns null when the header is not conventional. */
 export function parse(message) {
   const [header = '', ...rest] = normalize(message).split('\n')
   const match = HEADER.exec(header.trim())
   if (!match || !(match.groups.type in TYPES)) return null
   const body = rest.join('\n')
+  const note = NOTE.exec(body)?.[1].trim() || null
   return {
     type: match.groups.type,
     scope: match.groups.scope ?? null,
     subject: match.groups.subject.trim(),
     breaking: Boolean(match.groups.bang) || /^BREAKING[ -]CHANGE: /m.test(body),
+    note: note && !SKIP.test(note) ? note : null,
+    skip: Boolean(note && SKIP.test(note)),
   }
 }
 
@@ -68,10 +77,11 @@ export function lint(message) {
   return 'expected "type(scope): subject", for example "feat: add dark mode" or "fix(popup): keep the last tab"'
 }
 
-/** The release-notes section a commit belongs in, or null to leave it out. */
+/** The release-notes section a commit belongs in, or null to leave it out. A breaking change is always listed. */
 export function sectionFor(parsed) {
   if (!parsed) return null
   if (parsed.breaking) return 'Breaking changes'
+  if (parsed.skip) return null
   return TYPES[parsed.type]
 }
 

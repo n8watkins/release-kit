@@ -71,3 +71,14 @@ export function commitsBetween(from, to = 'HEAD') {
 export function isMain(url) {
   return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(url))
 }
+
+/** The GitHub address of `origin` (https://github.com/owner/repo), or undefined for any other remote. */
+export function repoUrl() {
+  try {
+    const url = git('remote', 'get-url', 'origin')
+    const match = /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url)
+    return match ? `https://github.com/${match[1]}` : undefined
+  } catch {
+    return undefined
+  }
+}
