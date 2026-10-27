@@ -17,10 +17,11 @@
     "url": "git+https://github.com/n8watkins/release-kit.git"
   },
   "bin": {
-    "release-kit": "apply.mjs"
+    "release-kit": "bin/release-kit.mjs"
   },
   "files": [
     "apply.mjs",
+    "bin",
     "template",
     "reusable",
     "STANDARD.md",

@@ -78,7 +78,7 @@ const actionlint = spawnSync('actionlint', ['--version']).status === 0
 test('applied workflows pass actionlint', { skip: !actionlint && 'actionlint is not installed' }, () => {
   for (const options of [['--train'], ['--train', '--reusable'], ['--reusable', '--kit-ref', 'a'.repeat(40)]]) {
     const repo = makeRepo(tmp('lint'))
-    run(KIT, 'node', ['apply.mjs', repo, ...options])
+    run(KIT, 'node', ['apply.mjs', repo, ...(options.includes('--reusable') ? [] : ['--vendored']), ...options])
     const lint = spawnSync('actionlint', [
       // actionlint doesn't know the job context's workflow_* properties yet; GitHub documents them in the contexts reference.
       '-ignore', 'property "workflow_(repository|sha)" is not defined',

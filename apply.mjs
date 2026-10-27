@@ -10,15 +10,20 @@
 //                        workflows the train runs on its release commit before
 //                        pushing it to main: the ones branch protection requires
 //   --no-train           remove the release train
-//   --reusable           workflows call one pinned copy in the release-kit repo
-//                        instead of carrying the steps themselves
-//   --vendored           workflows carry the steps (the default)
-//   --kit-ref <ref>      the release-kit tag or commit --reusable pins (default vX.Y.Z of this kit)
+//   --package            (the default) release-kit is a dev dependency pinned to a
+//                        tag: the hook and npm run release run it from node_modules,
+//                        the workflows call the kit at the same tag, and Dependabot
+//                        opens an update PR when the kit releases
+//   --reusable           workflows call one pinned copy in the release-kit repo;
+//                        the scripts are copied into scripts/release-kit/
+//   --vendored           workflows carry the steps; the scripts are copied
+//   --kit-ref <ref>      the release-kit tag or commit to pin (default vX.Y.Z of this kit)
 //   --force              replace workflows with the same name the kit didn't write
 //
 // The choices are saved in .release.json, so re-running with no options keeps
-// them. Kit-owned files (scripts/release-kit/, the workflows, the hook,
-// RELEASING.md) are overwritten on every run, so re-running upgrades a repo.
+// them (a repo applied before package mode existed moves to it). Kit-owned
+// files (scripts/release-kit/, the workflows, the hook, RELEASING.md) are
+// overwritten on every run, so re-running upgrades a repo.
 // package.json scripts and agent instructions are merged, never replaced.
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -47,7 +52,7 @@ function valueOf(name) {
 }
 function usage(problem) {
   if (problem) console.error(`apply: ${problem}`)
-  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--reusable | --vendored] [--kit-ref <ref>] [--force]')
+  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--force]')
   process.exit(1)
 }
 
@@ -55,7 +60,7 @@ const valued = new Set(['--schedule', '--kit-ref', '--train-checks'])
 const repo = argv.find((a, i) => !a.startsWith('--') && !valued.has(argv[i - 1]))
 if (!repo || !existsSync(join(repo, 'package.json'))) usage('the repo needs a package.json')
 const force = has('force')
-if (has('reusable') && has('vendored')) usage('pick one of --reusable and --vendored')
+if (['package', 'reusable', 'vendored'].filter(has).length > 1) usage('pick one of --package, --reusable and --vendored')
 if (has('train') && has('no-train')) usage('pick one of --train and --no-train')
 const schedule = valueOf('schedule')
 const trainChecks = valueOf('train-checks')?.split(',').map((s) => s.trim()).filter(Boolean)
@@ -78,14 +83,17 @@ const write = (p, content) => {
 // 0. The repo's choices, saved in .release.json.
 const hadConfig = existsSync(join(repo, '.release.json'))
 const config = hadConfig ? JSON.parse(read('.release.json')) : {}
-if (has('reusable')) config.workflows = 'reusable'
-if (has('vendored')) delete config.workflows
+for (const mode of ['package', 'reusable', 'vendored']) if (has(mode)) config.workflows = mode
+// Repos applied before package mode existed had no setting (vendored): they move to it.
+if (!['package', 'reusable', 'vendored'].includes(config.workflows)) config.workflows = 'package'
 if (has('no-train')) delete config.train
 else if (has('train') || schedule !== undefined || trainChecks) {
   config.train = { ...config.train, schedule: schedule ?? config.train?.schedule ?? DEFAULT_SCHEDULE }
   if (trainChecks) config.train.checks = trainChecks
 }
-const reusable = config.workflows === 'reusable'
+const packaged = config.workflows === 'package'
+// Package mode calls the kit's workflows at the pinned tag, like reusable mode.
+const reusable = config.workflows !== 'vendored'
 const train = config.train ? { schedule: config.train.schedule ?? DEFAULT_SCHEDULE, checks: config.train.checks ?? [] } : null
 
 // Files that also carry the version, detected on the first run.
@@ -143,6 +151,16 @@ function writeWorkflow(path, content) {
   done.push(path)
 }
 
+// The commit-msg hook in package mode: the kit from node_modules, skipped
+// (with a note) until npm install has run; CI checks every commit either way.
+const PACKAGE_HOOK = `# release-kit: reject commit messages that aren't Conventional Commits.
+kit="$(git rev-parse --show-toplevel)/node_modules/.bin/release-kit"
+if [ ! -x "$kit" ]; then
+  echo "release-kit: not installed yet (npm install), so the commit message isn't checked here" >&2
+  exit 0
+fi
+exec "$kit" commit-msg "$1"
+`
 const usesHusky = existsSync(join(repo, '.husky'))
 const pkg = JSON.parse(read('package.json'))
 const hookManager = usesHusky ? null : otherHooks()
@@ -170,13 +188,25 @@ for (const source of walk(TEMPLATE)) {
     writeWorkflow(path, content)
     continue
   }
+  // Package mode runs the scripts from node_modules instead of copies.
+  if (packaged && path.startsWith('scripts/release-kit/')) continue
   const target = join(repo, path)
   mkdirSync(dirname(target), { recursive: true })
-  copyFileSync(source, target)
+  if (packaged && path.startsWith('.githooks/')) writeFileSync(target, `#!/bin/sh\n${PACKAGE_HOOK}`)
+  // RELEASING.md names the kit's commands as package mode runs them.
+  else if (!packaged && path === 'RELEASING.md') writeFileSync(target, readFileSync(source, 'utf8').replaceAll('npx release-kit protect', 'node scripts/release-kit/protect.mjs'))
+  else copyFileSync(source, target)
   if (path.startsWith('.githooks/')) chmodSync(target, 0o755)
   done.push(path)
 }
-write('scripts/release-kit/VERSION', `${KIT_VERSION}\n`)
+if (packaged) {
+  if (existsSync(join(repo, 'scripts/release-kit'))) {
+    rmSync(join(repo, 'scripts/release-kit'), { recursive: true, force: true })
+    done.push('scripts/release-kit/ removed (the kit now runs from node_modules)')
+  }
+} else {
+  write('scripts/release-kit/VERSION', `${KIT_VERSION}\n`)
+}
 if (reusable) done.push(`workflows call ${KIT_REPO}@${kitRef}`)
 
 // The workflows use npm ci and npm caching, which need npm's lock file.
@@ -190,8 +220,9 @@ if (!existsSync(join(repo, 'package-lock.json'))) {
 // 2. package.json scripts.
 pkg.scripts ??= {}
 const scripts = pkg.scripts
-const RELEASE = 'node scripts/release-kit/release.mjs'
-if (scripts.release && scripts.release !== RELEASE && !force) {
+const RELEASE = packaged ? 'release-kit release' : 'node scripts/release-kit/release.mjs'
+const KIT_RELEASES = ['release-kit release', 'node scripts/release-kit/release.mjs']
+if (scripts.release && !KIT_RELEASES.includes(scripts.release) && !force) {
   skipped.push(`package.json already has a "release" script (${scripts.release}); left alone, so npm run release won't run the kit (rerun with --force to replace it)`)
 } else {
   scripts.release = RELEASE
@@ -201,13 +232,30 @@ if (!scripts['release:check']) {
   scripts['release:check'] = checks.length ? checks.map((s) => (s === 'test' ? 'npm test' : `npm run ${s}`)).join(' && ') : 'echo "release:check: define lint/test/build checks" && exit 1'
   done.push(`release:check = ${scripts['release:check']}`)
 }
+// Package mode: release:check also warns when the kit is behind its newest release.
+const CHECK = 'release-kit check'
+if (packaged && !scripts['release:check'].includes(CHECK)) scripts['release:check'] = `${CHECK} && ${scripts['release:check']}`
+if (!packaged && scripts['release:check'].startsWith(`${CHECK} && `)) scripts['release:check'] = scripts['release:check'].slice(CHECK.length + 4)
+if (packaged) {
+  pkg.devDependencies ??= {}
+  const spec = `github:${KIT_REPO}#${kitRef}`
+  if (pkg.devDependencies['release-kit'] !== spec) {
+    pkg.devDependencies['release-kit'] = spec
+    pkg.devDependencies = Object.fromEntries(Object.entries(pkg.devDependencies).sort(([a], [b]) => a.localeCompare(b)))
+    done.push(`devDependencies: release-kit ${spec} (run npm install to update the lock)`)
+  }
+  writeDependabot()
+} else if (pkg.devDependencies?.['release-kit']) {
+  delete pkg.devDependencies['release-kit']
+  done.push('devDependencies: release-kit removed (copied scripts instead)')
+}
 if (usesHusky) {
-  write('.husky/commit-msg', 'node scripts/release-kit/commit-msg.mjs "$1"\n')
+  write('.husky/commit-msg', packaged ? PACKAGE_HOOK : 'node scripts/release-kit/commit-msg.mjs "$1"\n')
   chmodSync(join(repo, '.husky/commit-msg'), 0o755)
   done.push('.husky/commit-msg (the repo uses husky)')
 } else if (hookManager) {
   // Pointing core.hooksPath at .githooks would switch the repo's own hooks off.
-  skipped.push(`${hookManager}, so the kit's hook is not installed: add  node scripts/release-kit/commit-msg.mjs "$1"  to the commit-msg hook there (the CI check runs either way)`)
+  skipped.push(`${hookManager}, so the kit's hook is not installed: add  ${packaged ? 'npx --no-install release-kit commit-msg' : 'node scripts/release-kit/commit-msg.mjs'} "$1"  to the commit-msg hook there (the CI check runs either way)`)
 } else {
   const hook = 'git config core.hooksPath .githooks || true'
   if (!scripts.prepare) scripts.prepare = hook
@@ -221,6 +269,39 @@ if (usesHusky) {
 }
 write('package.json', `${JSON.stringify(pkg, null, 2)}\n`)
 done.push('package.json scripts: release, release:check')
+
+/**
+ * Package mode: Dependabot keeps the kit current, the dev dependency (npm) and
+ * the workflow pins (github-actions). A repo with its own dependabot.yml keeps
+ * it; it needs both ecosystems listed, and nothing ignoring release-kit.
+ */
+function writeDependabot() {
+  const path = '.github/dependabot.yml'
+  if (existsSync(join(repo, path))) {
+    const current = read(path)
+    const missing = ['npm', 'github-actions'].filter((e) => !new RegExp(`package-ecosystem:\\s*["']?${e}["']?`).test(current))
+    if (missing.length) skipped.push(`${path} has no ${missing.join(' or ')} entry: add one so kit releases arrive as update PRs`)
+    else if (/release-kit/.test(current)) skipped.push(`${path} mentions release-kit: make sure it doesn't ignore it`)
+    return
+  }
+  write(path, `# release-kit: a new kit release arrives as update PRs (the dev dependency and the workflow pins).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+    allow:
+      - dependency-name: release-kit
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    allow:
+      - dependency-name: ${KIT_REPO}*
+`)
+  done.push(path)
+}
 
 /** What already manages this repo's git hooks (other than the kit or husky), or null. */
 function otherHooks() {
@@ -255,12 +336,12 @@ for (const p of agentFiles.length ? agentFiles : ['AGENTS.md']) {
   done.push(`${p}: commit and release rules`)
 }
 
-console.log(`release-kit ${KIT_VERSION} applied to ${repo} (${reusable ? 'reusable' : 'vendored'} workflows${train ? `, release train "${train.schedule}"` : ''})\n`)
+console.log(`release-kit ${KIT_VERSION} applied to ${repo} (${config.workflows} mode${train ? `, release train "${train.schedule}"` : ''})\n`)
 for (const line of done) console.log(`  + ${line}`)
 for (const line of skipped) console.log(`  ! ${line}`)
 console.log(`
 Next:
-  1. Review the diff (git -C ${repo} diff) and commit it: chore: adopt release-kit ${KIT_VERSION}
+  1. ${packaged ? `npm install (in ${repo}), then review` : 'Review'} the diff (git -C ${repo} diff) and commit it: chore: adopt release-kit ${KIT_VERSION}
   2. Preview the first release: npm run release -- --dry-run
   3. Cut it: npm run release -- --push${train ? `\n  The release train needs a release tag to start from (npm run release -- --baseline on a new repo).\n  If main is protected by required checks, list the workflows that produce them: --train-checks ci.yml,commits.yml${train.checks.length ? ` (now: ${train.checks.join(', ')})` : ''}
-  and give the train a deploy key that protection lets through: node scripts/release-kit/protect.mjs` : ''}`)
+  and give the train a deploy key that protection lets through: ${packaged ? 'npx release-kit protect' : 'node scripts/release-kit/protect.mjs'}` : ''}`)

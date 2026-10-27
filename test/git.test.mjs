@@ -8,7 +8,7 @@ import { KIT, attempt, commit, makeRepo, run, tmp } from './helpers.mjs'
 const SCRIPTS = 'scripts/release-kit'
 const applied = (options) => {
   const repo = makeRepo(tmp('git'), options)
-  run(KIT, 'node', ['apply.mjs', repo])
+  run(KIT, 'node', ['apply.mjs', repo, '--vendored', '--vendored'])
   run(repo, 'git', ['add', '-A'])
   run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
   return repo
@@ -28,7 +28,7 @@ test('the previous release is the highest vX.Y.Z on the branch, whatever else is
   run(repo, 'git', ['switch', '-q', 'main'])
   const dry = run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run'])
   assert.match(dry, /2\.0\.0 -> 2\.1\.0 \(minor\), 1 commit since v2\.0\.0/)
-  assert.equal(run(repo, 'node', [`${SCRIPTS}/notes.mjs`]), '### Features\n\n- A\n')
+  assert.equal(run(repo, 'node', [`${SCRIPTS}/notes.mjs`]), '### New\n\n- A\n')
 })
 
 test('a long history without a tag (more than 1 MB of git log) still lists every commit', () => {
@@ -42,7 +42,7 @@ test('a long history without a tag (more than 1 MB of git log) still lists every
   }
   const proc = attempt(repo, 'git', ['fast-import', '--quiet'], {}, stream)
   assert.equal(proc.status, 0)
-  run(KIT, 'node', ['apply.mjs', repo])
+  run(KIT, 'node', ['apply.mjs', repo, '--vendored', '--vendored'])
   run(repo, 'git', ['add', '-A'])
   run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
   const dry = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run'])
@@ -68,7 +68,7 @@ test('tag names and refs are checked before git or the shell sees them', () => {
   assert.match(option.stderr, /"-p" is not a commit/)
   // A version that isn't x.y.z never becomes a tag.
   const odd = makeRepo(tmp('odd'), { version: '1.0.0-rc.1' })
-  run(KIT, 'node', ['apply.mjs', odd])
+  run(KIT, 'node', ['apply.mjs', odd, '--vendored'])
   assert.match(attempt(odd, 'node', [`${SCRIPTS}/release.mjs`, '--baseline']).stderr, /has version "1\.0\.0-rc\.1", not x\.y\.z/)
   assert.equal(run(odd, 'git', ['tag', '--list']), '')
 })
@@ -87,7 +87,7 @@ test('the hook accepts CRLF and BOM messages, and git commit -v', () => {
   run(repo, 'git', ['commit', '-q', '-v'], { GIT_EDITOR: editor })
   // git keeps the BOM in the stored message; the notes don't show it.
   assert.match(run(repo, 'git', ['log', '-2', '--format=%s']), /^fix: verbose commit\n\uFEFF?feat: written on Windows\n$/)
-  assert.equal(run(repo, 'node', [`${SCRIPTS}/notes.mjs`, '--from', 'HEAD~2']), '### Features\n\n- Written on Windows\n\n### Fixes\n\n- Verbose commit\n')
+  assert.equal(run(repo, 'node', [`${SCRIPTS}/notes.mjs`, '--from', 'HEAD~2']), '### New\n\n- Written on Windows\n\n### Fixed\n\n- Verbose commit\n')
   // A Windows line ending doesn't let a bad message through.
   writeFileSync(join(repo, 'z.txt'), 'z')
   run(repo, 'git', ['add', 'z.txt'])

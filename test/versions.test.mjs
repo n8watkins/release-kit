@@ -99,7 +99,7 @@ test('a Tauri app in app/: apply finds every version file, and a release bumps t
   tauriApp(repo)
   run(repo, 'git', ['add', '-A'])
   run(repo, 'git', ['commit', '-q', '-m', 'chore: the app'])
-  run(KIT, 'node', ['apply.mjs', repo])
+  run(KIT, 'node', ['apply.mjs', repo, '--vendored', '--vendored'])
   const config = JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8'))
   const files = ['app/src-tauri/tauri.conf.json', 'app/src-tauri/Cargo.toml', 'app/src-tauri/Cargo.lock', 'app/package.json', 'app/package-lock.json']
   assert.deepEqual(config.versionFiles, files)
@@ -111,5 +111,5 @@ test('a Tauri app in app/: apply finds every version file, and a release bumps t
   run(repo, 'node', ['scripts/release-kit/release.mjs', '--verify-tag', 'v0.9.0'])
   for (const file of files) assert.equal(readVersion(join(repo, file)), '0.9.0', file)
   assert.equal(run(repo, 'git', ['status', '--porcelain']), '')
-  assert.match(readFileSync(join(repo, 'CHANGELOG.md'), 'utf8'), /## 0\.9\.0 - \d{4}-\d{2}-\d{2}\n\n### Features\n\n- Dictate into any app\n/)
+  assert.match(readFileSync(join(repo, 'CHANGELOG.md'), 'utf8'), /## 0\.9\.0 - \d{4}-\d{2}-\d{2}\n\n### New\n\n- Dictate into any app\n/)
 })

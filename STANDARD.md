@@ -54,7 +54,7 @@ What the standard changes:
 - `npm run release -- --push` from a clean main that isn't behind origin: `release:check`, bump, changelog section, `chore(release): vX.Y.Z` commit, annotated tag, one atomic push of the branch and the tag. A rejected push undoes the commit and the tag.
 - Changelog dates are in the repo's `.release.json` `timeZone` (the machine's zone if unset).
 - The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the notes the release wrote into the tag (the same section as `CHANGELOG.md`), download-and-verify.
-- `--summary "<text>"` opens a release with a line in the releaser's words, and `.release.json` `notes` sets how the notes read (`"style": "plain"` for New, Fixed, Faster, Safer and no scopes).
+- `--summary "<text>"` opens a release with a line in the releaser's words, and `.release.json` `notes` sets how the notes read (the default reads New, Fixed, Faster, Safer with no scopes; `"style": "classic"` keeps commit-type headings and scopes).
 - A failed Release run is retried by running the Release workflow on the tag; a pushed tag is never moved or re-pushed.
 - Release when something worth telling a user about has landed.
 - The previous release is the highest `vX.Y.Z` tag on the branch's history. Other tags (`v2.0.0-beta`, `vnext`) are ignored, and a version tag that isn't on the branch (moved, or made elsewhere) stops the release.
@@ -69,7 +69,7 @@ Repos that ship continuously (a website deploying every merge) turn it on with `
 - It runs `release:check` on the exact commit before tagging it, so a red main is never released.
 - It never guesses: no release tag yet, a moved tag or a `package.json` that doesn't match the last tag stops it.
 - GitHub doesn't start workflows from pushes made with a workflow's own token. So the train, as `github-actions[bot]`, pushes its release commit to a temporary branch, starts the workflows listed in `.release.json` `train.checks` there with `workflow_dispatch` (the one trigger that token may use) and waits for them, then pushes `main` and the tag together and makes sure the Release workflow runs on the tag. The full CI runs on exactly what is released.
-- Branch protection doesn't count those `workflow_dispatch` checks, so a protected `main` gets a ruleset that one deploy key may bypass, and the train pushes with that key (`RELEASE_TRAIN_KEY`, set up by `scripts/release-kit/protect.mjs`). The train still pushes only after `train.checks` pass.
+- Branch protection doesn't count those `workflow_dispatch` checks, so a protected `main` gets a ruleset that one deploy key may bypass, and the train pushes with that key (`RELEASE_TRAIN_KEY`, set up by `npx release-kit protect`). The train still pushes only after `train.checks` pass.
 - The train runs only on a schedule or by hand, so nothing it pushes starts it again. The commit check skips bot commits anyway.
 - If main moves while it runs, or a check fails, nothing is released.
 
@@ -92,10 +92,13 @@ Repos that ship continuously (a website deploying every merge) turn it on with `
 ## Adopting it in a repo
 
 See README.md.
-In short: `node apply.mjs <repo>` (add `--train` for scheduled releases, `--reusable` to call the kit's workflows), commit, `npm run release -- --baseline`, push the tag.
+In short: `node apply.mjs <repo>` (add `--train` for scheduled releases), `npm install`, commit, `npm run release -- --baseline`, push the tag.
+Every repo installs the kit as a dev dependency pinned to a release tag (package mode), and its workflows call the kit's at the same tag.
 
 ## Changing the standard
 
-Edit this kit, run its tests (`npm test`), release it with `npm run release`, and re-run `apply.mjs` on each repo.
-Kit-owned files are replaced; each repo's `scripts/release-kit/VERSION` shows which kit version it runs.
+Edit this kit, run its tests (`npm test`) and release it with `npm run release`.
+Dependabot then opens update PRs in every repo (the dev dependency and the workflow pins), and each repo's CI tests the new kit before it is merged.
+`npm run release:check` warns in any repo still behind the newest kit.
+When a release changes what `apply.mjs` writes, re-run `npx release-kit apply .` in each repo once the update lands.
 The kit's own `.github/workflows/` are the shipped workflows (the train without a schedule), because reusable-mode repos call them there; a test fails if they drift.
