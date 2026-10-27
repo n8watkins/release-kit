@@ -24,19 +24,22 @@ test('a Release-note trailer rewords a change, and "skip" keeps it out', () => {
     c('fix(ui): debounce resize observer in marquee\n\nRelease-note: the logo strip no longer stutters when you resize the window'),
     c('fix: flaky webkit test\n\nRelease-note: skip'),
   ])
-  assert.equal(notes, '### Fixes\n\n- **ui:** The logo strip no longer stutters when you resize the window\n')
+  assert.equal(notes, '### Fixed\n\n- The logo strip no longer stutters when you resize the window\n')
 })
 
-test('the plain style uses plain headings and hides scopes; scopes can be renamed or dropped', () => {
+test('the plain style (the default) uses plain headings and hides scopes; scopes can be renamed or dropped', () => {
   const commits = [c('feat(popup): add dark mode'), c('fix(a11y): bigger tap targets'), c('perf: lazy load charts'), c('security: pin actions')]
   assert.equal(
     renderNotes(commits, { style: noteStyle({ style: 'plain' }) }),
     '### New\n\n- Add dark mode\n\n### Fixed\n\n- Bigger tap targets\n\n### Safer\n\n- Pin actions\n\n### Faster\n\n- Lazy load charts\n',
   )
-  const mapped = renderNotes(commits.slice(0, 2), { style: noteStyle({ headings: { Features: "What's new" }, scopes: { a11y: 'Accessibility', popup: false } }) })
+  const mapped = renderNotes(commits.slice(0, 2), {
+    style: noteStyle({ style: 'classic', headings: { Features: "What's new" }, scopes: { a11y: 'Accessibility', popup: false } }),
+  })
   assert.equal(mapped, "### What's new\n\n- Add dark mode\n\n### Fixes\n\n- **Accessibility:** Bigger tap targets\n")
-  // The default style is unchanged for repos that set nothing.
-  assert.match(renderNotes(commits), /### Features\n\n- \*\*popup:\*\* Add dark mode/)
+  // A repo that sets nothing gets the plain style; "classic" keeps commit-type headings and scopes.
+  assert.equal(renderNotes(commits), renderNotes(commits, { style: noteStyle({ style: 'plain' }) }))
+  assert.match(renderNotes(commits, { style: noteStyle({ style: 'classic' }) }), /### Features\n\n- \*\*popup:\*\* Add dark mode/)
 })
 
 test('a summary leads the notes, and pull request numbers link to their PRs', () => {
@@ -45,14 +48,14 @@ test('a summary leads the notes, and pull request numbers link to their PRs', ()
     repoUrl: 'https://github.com/o/r',
     commitLinks: false,
   })
-  assert.equal(notes, '### Features\n\n- Owner round 10 ([#61](https://github.com/o/r/pull/61))\n\n### Fixes\n\n- A\n'.replace('### Features', 'Dark mode, and a faster homepage.\n\n### Features'))
+  assert.equal(notes, 'Dark mode, and a faster homepage.\n\n### New\n\n- Owner round 10 ([#61](https://github.com/o/r/pull/61))\n\n### Fixed\n\n- A\n')
   // A release with only a summary still says something.
   assert.equal(renderNotes([c('chore: deps')], { summary: 'Security updates.' }), 'Security updates.\n')
 })
 
 test('release --summary and .release.json notes reach the changelog, the tag and the GitHub Release notes', () => {
   const repo = makeRepo(tmp('notes'), { version: '1.0.0' })
-  run(KIT, 'node', ['apply.mjs', repo])
+  run(KIT, 'node', ['apply.mjs', repo, '--vendored', '--vendored'])
   const config = JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8'))
   writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...config, notes: { style: 'plain' } }, null, 2))
   run(repo, 'git', ['remote', 'add', 'origin', 'https://github.com/o/r.git'])
@@ -84,7 +87,7 @@ test('apply finds an extension manifest in extension/, skips a web-app manifest,
   writeFileSync(join(repo, 'extension/manifest.json'), JSON.stringify({ manifest_version: 3, name: 'x', version: '0.9.0' }, null, 2))
   mkdirSync(join(repo, 'public'))
   writeFileSync(join(repo, 'public/manifest.json'), JSON.stringify({ name: 'site', version: '1.0.0', display: 'standalone' }, null, 2))
-  const out = run(KIT, 'node', ['apply.mjs', repo])
+  const out = run(KIT, 'node', ['apply.mjs', repo, '--vendored', '--vendored'])
   assert.deepEqual(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')).versionFiles, ['extension/manifest.json'])
   assert.match(out, /extension\/manifest\.json has version 0\.9\.0 but package\.json has 1\.0\.0/)
 })

@@ -54,8 +54,8 @@ test('notes keep user-facing changes, grouped, and drop chores, docs and bots', 
     { hash: 'e'.repeat(40), author: 'Nathan', message: 'Lower first-sentence latency' },
   ], { heading: '## 1.1.0 - 2026-10-23', repoUrl: 'https://github.com/o/r' })
   assert.match(notes, /^## 1\.1\.0 - 2026-10-23/)
-  assert.match(notes, /### Features\n\n- \*\*popup:\*\* Add dark mode \(\[aaaaaaa\]/)
-  assert.match(notes, /### Fixes\n\n- Keep the last tab open/)
+  assert.match(notes, /### New\n\n- Add dark mode \(\[aaaaaaa\]/)
+  assert.match(notes, /### Fixed\n\n- Keep the last tab open/)
   assert.doesNotMatch(notes, /README|sync portfolios|latency/)
   assert.match(renderNotes([{ hash: 'x', author: 'N', message: 'chore: deps' }]), /Maintenance release/)
 })
@@ -135,7 +135,7 @@ test('security commits pass the check and get their own section', () => {
     { hash: 'b', author: 'N', message: 'fix: a' },
     { hash: 'c', author: 'N', message: 'perf: b' },
   ])
-  assert.equal(notes, '### Fixes\n\n- A\n\n### Security\n\n- Verify downloads\n\n### Performance\n\n- B\n')
+  assert.equal(notes, '### Fixed\n\n- A\n\n### Safer\n\n- Verify downloads\n\n### Faster\n\n- B\n')
   assert.equal(suggestedBump([{ message: 'security: a' }]), 'patch')
   assert.equal(planRelease({ current: '1.0.0', commits: [{ author: 'N', message: 'security: a' }] }).version, '1.0.1')
 })

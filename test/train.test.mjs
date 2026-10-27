@@ -13,7 +13,7 @@ function adopted() {
   const root = tmp('train')
   run(root, 'git', ['init', '-q', '--bare', '-b', 'main', 'remote.git'])
   const dev = makeRepo(join(root, 'dev'), { version: '1.1.0' })
-  run(KIT, 'node', ['apply.mjs', dev, '--train'])
+  run(KIT, 'node', ['apply.mjs', dev, '--vendored', '--train'])
   run(dev, 'git', ['add', '-A'])
   run(dev, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
   run(dev, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
@@ -83,8 +83,8 @@ test('a week of chores releases nothing; a fix releases a patch; the next run fi
   const release = checkout(root, remote, 'release')
   run(release, 'git', ['checkout', '-q', 'v1.1.1'])
   assert.match(run(release, 'node', [`${SCRIPTS}/release.mjs`, '--verify-tag', 'v1.1.1']), /matches package\.json/)
-  assert.equal(run(release, 'node', [`${SCRIPTS}/notes.mjs`, '--to', 'v1.1.1']), '### Fixes\n\n- **nav:** Keep the menu open\n')
-  assert.match(readFileSync(join(release, 'CHANGELOG.md'), 'utf8'), /^# Changelog\n\n## 1\.1\.1 - \d{4}-\d{2}-\d{2}\n\n### Fixes\n\n- \*\*nav:\*\* Keep the menu open\n/)
+  assert.equal(run(release, 'node', [`${SCRIPTS}/notes.mjs`, '--to', 'v1.1.1']), '### Fixed\n\n- Keep the menu open\n')
+  assert.match(readFileSync(join(release, 'CHANGELOG.md'), 'utf8'), /^# Changelog\n\n## 1\.1\.1 - \d{4}-\d{2}-\d{2}\n\n### Fixed\n\n- Keep the menu open\n/)
 
   // The commit check, on the next push that includes the bot's release commit, passes.
   const next = checkout(root, remote, 'next')
@@ -132,7 +132,7 @@ test('an explicit bump from "Run workflow" releases even without user-facing wor
 test('the train refuses to guess: no tag, a moved tag, a stray version or a side branch stop it', () => {
   // No release tag yet.
   const fresh = makeRepo(tmp('notag'))
-  run(KIT, 'node', ['apply.mjs', fresh, '--train'])
+  run(KIT, 'node', ['apply.mjs', fresh, '--vendored', '--train'])
   run(fresh, 'git', ['add', '-A'])
   run(fresh, 'git', ['commit', '-q', '-m', 'feat: everything'])
   const none = plan(fresh)

@@ -15,7 +15,7 @@ import { commitsBetween, git, isBot, isMain, previousTag, repoUrl as originUrl }
 
 const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 
-// Plain headings for people who don't read commit types ("style": "plain").
+// Plain headings for people who don't read commit types: the default style.
 const PLAIN_HEADINGS = {
   'Breaking changes': 'Breaking changes',
   Features: 'New',
@@ -27,12 +27,13 @@ const PLAIN_HEADINGS = {
 
 /**
  * How the notes are worded, from .release.json "notes":
- *   - "style": "plain" turns on plain headings (New, Fixed, Faster, Safer) and hides scopes;
+ *   - "style": "plain" (the default) uses plain headings (New, Fixed, Faster, Safer) and hides
+ *     scopes; "classic" keeps the commit-type headings (Features, Fixes, ...) and shows scopes;
  *   - "headings": { "Features": "What's new", ... } renames any section;
  *   - "scopes": "show" (the default), "hide", or { "a11y": "Accessibility", "ci": false } to rename or drop them.
  */
 export function noteStyle(config = {}) {
-  const plain = config.style === 'plain'
+  const plain = config.style !== 'classic'
   return {
     headings: { ...(plain ? PLAIN_HEADINGS : {}), ...(config.headings ?? {}) },
     scopes: config.scopes ?? (plain ? 'hide' : 'show'),

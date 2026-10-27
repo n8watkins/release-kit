@@ -48,7 +48,8 @@ Write them as patch notes: what a user can now do, or what works better, in plai
 
 Set `notes` in `.release.json`:
 
-- `"style": "plain"`: headings New, Fixed, Faster and Safer instead of Features, Fixes, Performance and Security, and no scope labels.
+- The default style: headings New, Fixed, Faster and Safer, and no scope labels.
+- `"style": "classic"`: the commit-type headings Features, Fixes, Performance and Security, with scope labels.
 - `"headings": { "Features": "What's new" }`: rename any heading.
 - `"scopes": "hide"`, or `{ "a11y": "Accessibility", "ci": false }` to rename some scopes and drop others.
 
@@ -105,8 +106,8 @@ A tag pushed with the key starts the Release workflow by itself, and pushing `ma
 Set it up once, as an admin, with the gh CLI signed in:
 
 ```sh
-node scripts/release-kit/protect.mjs --dry-run   # what it will do
-node scripts/release-kit/protect.mjs
+npx release-kit protect --dry-run   # what it will do
+npx release-kit protect
 ```
 
 It creates the ruleset `release-kit: protect main` (no deletion, no force push, the required checks that classic protection had, or `--checks "CI result,check"`), lets the deploy key and repository admins bypass it (`--no-admin-bypass` to drop admins), adds a new write deploy key `release-kit train` with its private half only in the secret, and then removes classic branch protection, which a deploy key can't bypass.
