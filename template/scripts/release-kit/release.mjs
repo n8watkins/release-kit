@@ -3,7 +3,8 @@
 // section from the commits, commits "chore(release): vX.Y.Z" and makes an
 // annotated tag. Pushing the tag runs .github/workflows/release.yml.
 //
-//   npm run release -- [patch|minor|major|x.y.z] [--dry-run] [--push] [--no-check]
+//   npm run release -- [patch|minor|major|x.y.z] [--summary "<text>"] [--dry-run] [--push] [--no-check]
+//       --summary puts a line or two, in your words, at the top of the notes.
 //       --push first checks the branch is up to date with origin and runs
 //       npm run release:check (skip it with --no-check), so a tag is only
 //       pushed for a commit that passes; if the push fails, the release
@@ -26,8 +27,8 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { RELEASE_TAG, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
-import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags } from './git.mjs'
-import { renderNotes } from './notes.mjs'
+import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
+import { noteStyle, renderNotes } from './notes.mjs'
 import { readVersion, setVersion } from './versions.mjs'
 
 const args = process.argv.slice(2)
@@ -170,7 +171,10 @@ if (push) {
   }
 }
 
-const kind = args.find((a) => !a.startsWith('--')) ?? suggestedBump(commits)
+const summary = valueOf('summary')
+if (flag('summary') && !summary) fail('--summary needs the text, in quotes: --summary "Dark mode is here."')
+// The bump is the one bare argument that isn't --summary's text.
+const kind = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--summary') ?? suggestedBump(commits)
 let version
 try {
   version = nextVersion(current, kind)
@@ -189,7 +193,14 @@ try {
 } catch {
   fail(`.release.json timeZone "${config.timeZone}" is not a time zone, like America/Los_Angeles`)
 }
-const section = renderNotes(commits, { heading: `## ${version} - ${date}` })
+const section = renderNotes(commits, {
+  heading: `## ${version} - ${date}`,
+  summary,
+  // Pull request numbers link to their PRs; the changelog skips commit hashes.
+  repoUrl: repoUrl(),
+  commitLinks: false,
+  style: noteStyle(config.notes),
+})
 
 console.log(`release: ${current} -> ${version} (${kind}), ${commits.length} commit${commits.length === 1 ? '' : 's'} since ${since ?? 'the start'}\n`)
 console.log(section)
@@ -214,7 +225,8 @@ const files = ['package.json', 'CHANGELOG.md', ...versionFiles]
 if (existsSync('package-lock.json')) files.push('package-lock.json')
 git('add', '--', ...files)
 git('commit', '-m', `chore(release): ${tag}`)
-git('tag', '-a', tag, '-m', `${tag}\n\n${section}`)
+// Verbatim: git would otherwise drop the notes' headings as # comments.
+git('tag', '-a', '--cleanup=verbatim', tag, '-m', `${tag}\n\n${section}`)
 console.log(`release: committed and tagged ${tag}`)
 
 if (push) {
