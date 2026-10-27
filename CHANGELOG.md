@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1 - 2026-10-27
+
+### Fixed
+
+- Re-applying keeps the kit's hook, and Dependabot must watch the repo root ([#7](https://github.com/n8watkins/release-kit/pull/7))
+
 ## 2.0.0 - 2026-10-27
 
 Every repo now installs the kit as a dev dependency, so a new kit release arrives as a Dependabot update PR. Release notes read like patch notes by default: New, Fixed, Faster, Safer.

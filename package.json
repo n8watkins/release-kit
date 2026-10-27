@@ -1,6 +1,6 @@
 {
   "name": "release-kit",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "The n8 release standard: Conventional Commits, SemVer tags and GitHub Releases, applied to any repo with one command.",
   "type": "module",
