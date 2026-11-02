@@ -30,13 +30,39 @@ It is a poor fit today for monorepos with several independently versioned packag
 | | release-kit | semantic-release | release-please | changesets |
 |---|---|---|---|---|
 | Version comes from | Conventional Commits | Conventional Commits | Conventional Commits | Changeset files written per change |
-| Checks commit messages | Yes, hook and CI | No (add commitlint) | No | Not applicable |
+| Checks commit messages | Yes: a hook, CI on every commit, and pull request titles | No (add commitlint) | No | Not applicable |
 | When it releases | `npm run release`, or a scheduled train when there is user-facing work | Every push to a release branch | When the release PR is merged | When the version PR is merged |
 | Notes | Plain headings for users, `Release-note:` rewording | Developer changelog | Developer changelog | Written by hand |
-| Monorepos | No | Community add-on | Yes | Yes |
+| Agent instructions | Writes and keeps a block in AGENTS.md / CLAUDE.md | No | No | No |
+| Dependency scan | OSV, blocks malicious and high-severity packages | No | No | No |
+| Runtime dependencies | None | Many | Many | Many |
+| Reviewable release PR | Planned | No | Yes | Yes |
+| Pre-releases | Planned | Yes | Yes | Yes |
+| Monorepos | Planned, not soon | Community add-on | Yes | Yes |
 | Publishes to npm | No | Yes | No | Yes |
-| Agent instructions and a dependency scan | Yes | No | No | No |
+| Provenance / signed artifacts | Checksums today; attestations planned | Via npm provenance | No | Via npm provenance |
 
+### What it does differently
+
+- **Commit messages are enforced, not trusted.** A `commit-msg` hook rejects a bad message as it is written, CI checks every pushed commit (including ones that skipped the hook), and pull request titles are checked because a squash merge commits them.
+  The other tools read whatever history they find; matching this means wiring commitlint and a hook manager yourself.
+- **Agents get the rules.** apply writes and maintains a short block in `AGENTS.md` (and `CLAUDE.md`) with the commit and release rules, in words a coding agent follows, so the commits an agent writes pass the check.
+- **Notes for users.** `feat`, `fix`, `perf` and `security` subjects become plain "New, Fixed, Faster, Safer" notes, a `Release-note:` line rewords a technical subject, and chores, docs and bot commits stay out.
+- **A release train that only ships user-facing work.** On a schedule it releases what landed, but a week of chores and docs releases nothing, and it runs the required checks on the exact release commit first.
+- **Security in the same kit, with nothing to install.** A weekly OSV scan blocks malicious packages (which Dependabot alerts don't cover) and high or critical vulnerabilities, every workflow's hardening is enforced by tests, and the kit itself has zero runtime dependencies.
+- **Upgrades that stay in step.** One grouped Dependabot pull request per kit release, a one-minute `release-kit verify` lane for it, and an auto-merge policy that merges patch and minor updates once CI passes and never a major.
+
+### Where it is behind
+
+- **No registry publishing:** it makes GitHub Releases and attaches files; publishing to npm is up to the repo.
+- **Not on the npm registry itself:** it installs as a git dependency, which npm 12 only allows through the `.npmrc` line apply writes, and which carries no provenance (publishing with trusted publishing is planned).
+- **One version per repo:** no monorepo support.
+- **npm only:** pnpm, yarn and bun repos need a `package-lock.json` too (support is planned).
+- **No reviewable release PR or pre-release channels yet** (both planned).
+- **Upgrades that add files** still need a re-run of apply in each repo until the rollout bot exists (planned).
+- **One maintainer.**
+
+The plans are in [docs/ROADMAP.md](docs/ROADMAP.md).
 A longer, sourced comparison (including release-it, git-cliff, auto and the deprecated standard-version) is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#3-competitor-comparison).
 
 ## Quick start
