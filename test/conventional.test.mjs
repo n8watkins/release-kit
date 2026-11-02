@@ -14,6 +14,7 @@ test('accepts conventional messages, including ones from these repos', () => {
     'chore(release): v1.2.0',
     'Merge pull request #7 from n8watkins/dependabot/x',
     'Revert "feat: add dark mode"',
+    'security: verify every model download with SHA-256',
   ]) {
     assert.equal(lint(message), null, message)
   }
@@ -34,7 +35,13 @@ test('detects breaking changes from ! or the footer', () => {
   assert.equal(parse('feat: add').breaking, false)
 })
 
-test('bumps versions and suggests the bump from the commits', () => {
+test('versions compare numerically, bump forward only, and the bump comes from the commits', () => {
+  assert.ok(compareVersions('1.10.0', '1.9.9') > 0)
+  assert.equal(compareVersions('2.0.0', '2.0.0'), 0)
+  assert.throws(() => nextVersion('1.2.0', '1.1.9'), /not higher/)
+  assert.throws(() => nextVersion('1.2.0', '1.2.0'), /not higher/)
+  assert.throws(() => nextVersion('1.2.0', '01.3.0'), /not a valid/)
+  assert.throws(() => nextVersion('1.2.0-beta', 'patch'), /not x\.y\.z/)
   assert.equal(nextVersion('0.3.9', 'patch'), '0.3.10')
   assert.equal(nextVersion('0.3.9', 'minor'), '0.4.0')
   assert.equal(nextVersion('0.3.9', 'major'), '1.0.0')
@@ -43,6 +50,11 @@ test('bumps versions and suggests the bump from the commits', () => {
   assert.equal(suggestedBump([{ message: 'fix: a' }, { message: 'docs: b' }]), 'patch')
   assert.equal(suggestedBump([{ message: 'fix: a' }, { message: 'feat: b' }]), 'minor')
   assert.equal(suggestedBump([{ message: 'feat!: a' }]), 'major')
+  assert.equal(suggestedBump([{ message: 'security: a' }]), 'patch')
+  // Bot commits neither bump the version nor count as user-facing.
+  const botFeat = { author: 'github-actions[bot]', message: 'feat: sync portfolios' }
+  assert.equal(suggestedBump([botFeat, { author: 'N', message: 'fix: a' }]), 'patch')
+  assert.deepEqual(userFacing([botFeat, { author: 'dependabot[bot]', message: 'fix(deps): bump x' }]), [])
 })
 
 test('notes keep user-facing changes, grouped, and drop chores, docs and bots', () => {
@@ -60,13 +72,18 @@ test('notes keep user-facing changes, grouped, and drop chores, docs and bots', 
   assert.match(renderNotes([{ hash: 'x', author: 'N', message: 'chore: deps' }]), /Maintenance release/)
 })
 
-test('CRLF line endings and a byte-order mark change nothing', () => {
+test('CRLF line endings, a byte-order mark and leading blank lines change nothing', () => {
   assert.equal(lint('﻿feat: add dark mode\r\n\r\nbody\r\n'), null)
   assert.equal(lint('fix: a\r\n'), null)
   assert.equal(parse('﻿fix(ui): keep the tab\r\n').subject, 'keep the tab')
   assert.equal(parse('refactor: move\r\n\r\nBREAKING CHANGE: paths changed\r\n').breaking, true)
   assert.equal(parse('feat: a\r\rb').subject, 'a')
   assert.match(lint('﻿Added a thing\r\n'), /expected/)
+  // git drops leading blank lines too.
+  assert.equal(lint('\n\nfeat: a'), null)
+  assert.equal(lint('\r\n  \nfix: b\n'), null)
+  assert.equal(parse('\n\nfix(ui): b').scope, 'ui')
+  assert.match(lint('\n\n'), /empty/)
 })
 
 test('the hook reads the message git will store, not the raw file', () => {
@@ -88,21 +105,6 @@ test('release tags are exactly vX.Y.Z', () => {
   }
 })
 
-test('versions compare numerically and explicit versions must move forward', () => {
-  assert.ok(compareVersions('1.10.0', '1.9.9') > 0)
-  assert.equal(compareVersions('2.0.0', '2.0.0'), 0)
-  assert.throws(() => nextVersion('1.2.0', '1.1.9'), /not higher/)
-  assert.throws(() => nextVersion('1.2.0', '1.2.0'), /not higher/)
-  assert.throws(() => nextVersion('1.2.0', '01.3.0'), /not a valid/)
-  assert.throws(() => nextVersion('1.2.0-beta', 'patch'), /not x\.y\.z/)
-})
-
-test('bot commits neither bump the version nor count as user-facing', () => {
-  const botFeat = { author: 'github-actions[bot]', message: 'feat: sync portfolios' }
-  assert.equal(suggestedBump([botFeat, { author: 'N', message: 'fix: a' }]), 'patch')
-  assert.deepEqual(userFacing([botFeat, { author: 'dependabot[bot]', message: 'fix(deps): bump x' }]), [])
-})
-
 test('the release train plans a release only for user-facing work', () => {
   const c = (message, author = 'N') => ({ author, message })
   assert.deepEqual(planRelease({ current: '1.1.0', commits: [] }), { release: false, reason: 'no commits' })
@@ -111,6 +113,7 @@ test('the release train plans a release only for user-facing work', () => {
   assert.match(chores.reason, /4 commits, none user-facing/)
   assert.deepEqual(planRelease({ current: '1.1.0', commits: [c('docs: a'), c('fix: b')] }), { release: true, reason: '1 user-facing of 2 commits', bump: 'patch', version: '1.1.1' })
   assert.equal(planRelease({ current: '1.1.0', commits: [c('perf: a')] }).version, '1.1.1')
+  assert.equal(planRelease({ current: '1.1.0', commits: [c('security: a')] }).version, '1.1.1')
   assert.equal(planRelease({ current: '1.1.0', commits: [c('fix: a'), c('feat(ui): b')] }).version, '1.2.0')
   assert.equal(planRelease({ current: '1.1.0', commits: [c('refactor!: drop the old API')] }).version, '2.0.0')
   assert.equal(planRelease({ current: '0.4.2', commits: [c('feat: a')] }).version, '0.5.0')
@@ -119,25 +122,6 @@ test('the release train plans a release only for user-facing work', () => {
   assert.deepEqual(planRelease({ current: '1.1.0', commits: [c('docs: a')], bump: 'minor' }), { release: true, reason: 'minor requested, 1 commit', bump: 'minor', version: '1.2.0' })
   assert.equal(planRelease({ current: '1.1.0', commits: [], bump: 'major' }).release, false)
   assert.throws(() => planRelease({ current: '1.1.0', commits: [c('fix: a')], bump: 'huge' }), /unknown bump/)
-})
-
-test('leading blank lines are dropped, as git drops them', () => {
-  assert.equal(lint('\n\nfeat: a'), null)
-  assert.equal(lint('\r\n  \nfix: b\n'), null)
-  assert.equal(parse('\n\nfix(ui): b').scope, 'ui')
-  assert.match(lint('\n\n'), /empty/)
-})
-
-test('security commits pass the check and get their own section', () => {
-  assert.equal(lint('security: verify every model download with SHA-256'), null)
-  const notes = renderNotes([
-    { hash: 'a', author: 'N', message: 'security: verify downloads' },
-    { hash: 'b', author: 'N', message: 'fix: a' },
-    { hash: 'c', author: 'N', message: 'perf: b' },
-  ])
-  assert.equal(notes, '### Fixed\n\n- A\n\n### Safer\n\n- Verify downloads\n\n### Faster\n\n- B\n')
-  assert.equal(suggestedBump([{ message: 'security: a' }]), 'patch')
-  assert.equal(planRelease({ current: '1.0.0', commits: [{ author: 'N', message: 'security: a' }] }).version, '1.0.1')
 })
 
 test('a pull request title is checked as typed, since a squash merge commits it to main', async () => {
