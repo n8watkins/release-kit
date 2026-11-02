@@ -39,7 +39,7 @@ What the standard changes:
 - `feat` and `fix` only for changes a user would notice. They are the public record.
 - Subjects that reach the notes are written as patch notes, for users, not developers. A `Release-note:` body line rewords one for the notes, and `Release-note: skip` keeps one out.
 - Breaking changes: `!` after the type, or a `BREAKING CHANGE:` footer.
-- Merge, revert, fixup and bot commits pass the check; bot commits never reach the notes.
+- Merge commits, git's own `Revert "..."` messages, fixup and bot commits pass the check; bot commits never reach the notes, and git's revert messages don't either (write `revert: <subject>` for a revert users should hear about).
 - `security` isn't in the Conventional Commits spec, but these repos already used it for hardening a user should hear about, so it has its own notes section and a patch bump.
 
 ### Versions
@@ -64,7 +64,7 @@ What the standard changes:
 Repos that ship continuously (a website deploying every merge) turn it on with `apply.mjs --train`.
 
 - It runs on a schedule (default Mondays 16:00 UTC, set per repo in `.release.json`) and from "Run workflow".
-- It releases only when a `feat`, `fix`, `perf`, `security`, revert or breaking change has landed since the last tag, with the bump those commits call for. A quiet week releases nothing.
+- It releases only when a `feat`, `fix`, `perf`, `security` or `revert:` commit, or a breaking change, has landed since the last tag, with the bump those commits call for. A quiet week releases nothing.
 - From "Run workflow" a bump can be forced, and a dry run shows the plan and the notes.
 - It runs `release:check` on the exact commit before tagging it, so a red main is never released.
 - It never guesses: no release tag yet, a moved tag or a `package.json` that doesn't match the last tag stops it.
@@ -77,9 +77,10 @@ Repos that ship continuously (a website deploying every merge) turn it on with `
 
 - Third-party actions pinned to commit SHAs; every workflow reads by default, and only the jobs that publish, push or start a workflow get `contents: write` or `actions: write`.
 - Tag names, branch names and commit messages reach a shell only through environment variables, and a tag only after it is checked to be a plain `vX.Y.Z`.
-- Two ways to carry them, chosen per repo and kept on upgrade (`.release.json` `workflows`):
-  - **Vendored** (the default): the full workflows are copied into the repo. Nothing outside the repo runs.
-  - **Reusable** (`apply.mjs --reusable`): the repo's workflows are short callers of `n8watkins/release-kit/.github/workflows/<file>.yml@vX.Y.Z`. The steps and the scripts they run come from the kit at that exact ref, so an upgrade is a one-line change per workflow (or a Dependabot PR). Pin a commit SHA instead of a tag with `--kit-ref <sha>`.
+- Three ways to carry them, chosen per repo and kept on upgrade (`.release.json` `workflows`):
+  - **Package** (the default): the kit is a dev dependency pinned to a release tag, run from `node_modules`, and the repo's workflows are short callers of the kit's workflows at the same tag. Dependabot opens the update PRs when the kit releases.
+  - **Reusable** (`apply.mjs --reusable`): the repo's workflows are short callers of `n8watkins/release-kit/.github/workflows/<file>.yml@vX.Y.Z`, and the scripts are copied into `scripts/release-kit/` for the local hook and `npm run release`. The steps and the scripts the workflows run come from the kit at that exact ref, so an upgrade is a one-line change per workflow. Pin a commit SHA instead of a tag with `--kit-ref <sha>`.
+  - **Vendored** (`apply.mjs --vendored`): the full workflows and scripts are copied into the repo. Nothing outside the repo runs.
 - The workflows use the Node version in `.release.json` `node`, else `.nvmrc` or `.node-version`, else 22.
 
 ### What each repo provides

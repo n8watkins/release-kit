@@ -13,6 +13,7 @@ type(scope): subject
 - `fix`: a bug fix a user would notice.
 - `perf`: faster or lighter, same behavior.
 - `security`: hardening a user would want to know about (a checksum, a tighter policy).
+- `revert`: takes back an earlier change users saw (`revert: dark mode`); it is listed in the notes under Reverted.
 - `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`: everything else; these stay out of the release notes.
 - Add `!` after the type (`feat!: ...`) or a `BREAKING CHANGE:` line in the body for a breaking change.
 - The scope is optional: `fix(popup): ...`.
@@ -107,7 +108,7 @@ If this repo has `.github/workflows/release-train.yml` (added by `apply.mjs --tr
 Its schedule is in `.release.json` (`train.schedule`, a cron line in UTC).
 
 - On each run it looks at the commits on `main` since the last tag.
-- When at least one is user-facing (`feat`, `fix`, `perf`, `security`, a revert or a breaking change), it runs `npm run release:check` on that commit, then makes the release commit and tag with the bump the commits call for, exactly like `npm run release`.
+- When at least one is user-facing (`feat`, `fix`, `perf`, `security`, a `revert:` commit or a breaking change), it runs `npm run release:check` on that commit, then makes the release commit and tag with the bump the commits call for, exactly like `npm run release`.
 - If `.release.json` lists `train.checks` (workflow files, such as the ones whose checks branch protection requires on `main`), it pushes the release commit to a temporary `release-train/vX.Y.Z` branch, runs each of them there and waits for them to pass, then deletes the branch. Each of those workflows needs `workflow_dispatch:` in its `on:`.
 - Then it pushes `main` and the tag in one atomic push and makes sure the Release workflow runs on the tag.
 - When there are only docs, chores, tests or refactors, it releases nothing.

@@ -1,6 +1,7 @@
 # release-kit: the release train. On a schedule, and from "Run workflow", it
-# cuts a release when a feature, fix, performance change or breaking change
-# has landed on main since the last tag, with the bump those commits call for.
+# cuts a release when a feature, fix, performance, security or revert: commit,
+# or a breaking change, has landed on main since the last tag, with the bump
+# those commits call for.
 # Weeks with only docs, chores or tests release nothing.
 #
 # A push made with the workflow's GITHUB_TOKEN starts no other workflow, so

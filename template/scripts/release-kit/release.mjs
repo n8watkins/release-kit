@@ -13,7 +13,8 @@
 //       What the release train would do now, without changing anything:
 //       key=value lines for $GITHUB_OUTPUT on stdout, a summary on stderr.
 //       With "auto" (the default) it releases only when a feature, fix,
-//       performance change or breaking change landed since the last tag.
+//       performance, security or revert: commit, or a breaking change, landed
+//       since the last tag.
 //   npm run release -- --verify-tag v1.2.3     (CI: the tag matches every version file)
 //   npm run release -- --tag-kind v1.2.3       (CI: baseline=true for a --baseline tag)
 //   npm run release -- --baseline [commit] [--publish]
