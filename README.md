@@ -6,7 +6,7 @@ Releases that explain themselves, from commits that are checked as they are writ
 
 release-kit sets up a whole release process in a GitHub repo with one command:
 
-- **Commit messages are checked**, by a `commit-msg` hook and by a CI check on every pushed commit, so the history follows [Conventional Commits](https://www.conventionalcommits.org) before release time, not after.
+- **Commit messages are checked**, by a `commit-msg` hook and by a CI check on every pushed commit and every pull request title (a squash merge commits the title), so the history follows [Conventional Commits](https://www.conventionalcommits.org) before release time, not after.
 - **Versions follow SemVer**, picked from the commits: a breaking change is major, a feature is minor, anything else is a patch.
 - **Release notes are written for users**, under the headings New, Fixed, Faster and Safer, from `feat`, `fix`, `perf` and `security` commits; chores, docs and bot commits stay out.
 - **A tag publishes a GitHub Release** through a workflow that checks the tag against every version file, runs the repo's checks again, and checksums any files it ships.
@@ -70,6 +70,8 @@ npm run release -- --dry-run      # preview the next version and the notes
 npm run release -- --push         # check, bump, changelog, commit, tag and push; the workflow publishes
 npm run release -- --plan         # what the release train would do now
 ```
+
+If the repo squash-merges pull requests, make the pull request title the squash commit's message (apply prints the `gh` command; see [template/RELEASING.md](template/RELEASING.md#pull-requests)): the title is what lands on main, and CI checks it.
 
 ## How upgrades reach your repos
 

@@ -379,5 +379,8 @@ console.log(`
 Next:
   1. ${packaged ? `npm install (in ${repo}), then review` : 'Review'} the diff (git -C ${repo} diff) and commit it: chore: adopt release-kit ${KIT_VERSION}
   2. Preview the first release: npm run release -- --dry-run
-  3. Cut it: npm run release -- --push${train ? `\n  The release train needs a release tag to start from (npm run release -- --baseline on a new repo).\n  If main is protected by required checks, list the workflows that produce them: --train-checks ci.yml,commits.yml${train.checks.length ? ` (now: ${train.checks.join(', ')})` : ''}
+  3. Cut it: npm run release -- --push
+  4. A squash merge commits the pull request title, which the Commit messages check now checks too.
+     Make the title (and the description, where Release-note: and BREAKING CHANGE: lines go) the squash default, in ${repo}:
+     gh api -X PATCH repos/{owner}/{repo} -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY${train ? `\n  The release train needs a release tag to start from (npm run release -- --baseline on a new repo).\n  If main is protected by required checks, list the workflows that produce them: --train-checks ci.yml,commits.yml${train.checks.length ? ` (now: ${train.checks.join(', ')})` : ''}
   and give the train a deploy key that protection lets through: ${packaged ? 'npx release-kit protect' : 'node scripts/release-kit/protect.mjs'}` : ''}`)

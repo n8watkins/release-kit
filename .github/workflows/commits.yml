@@ -1,5 +1,6 @@
 # release-kit: every pushed commit follows Conventional Commits, including
-# commits that skipped the local hook (an agent, a web edit, --no-verify).
+# commits that skipped the local hook (an agent, a web edit, --no-verify), and
+# so does every pull request title, which a squash merge commits to main.
 #
 # Vendored into a repo by apply.mjs, or called from n8watkins/release-kit:
 #   uses: n8watkins/release-kit/.github/workflows/commits.yml@vX.Y.Z
@@ -9,6 +10,8 @@ on:
   push:
     branches: [main, master]
   pull_request:
+    # edited: a new title is checked too (a squash merge commits the title).
+    types: [opened, synchronize, reopened, edited]
   # The release train runs it on its release commit (see release-train.yml).
   workflow_dispatch:
   workflow_call:
@@ -48,7 +51,19 @@ jobs:
             echo "RELEASE_KIT=scripts/release-kit" >> "$GITHUB_ENV"
           fi
 
+      # A squash merge makes the pull request's title the commit on main, so it
+      # must pass before merge, not after. Bot pull requests are exempt, like
+      # bot commits.
+      - name: Check the pull request title
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$TITLE" > "$RUNNER_TEMP/pull-request-title.txt"
+          node "$RELEASE_KIT/commit-msg.mjs" --title "$RUNNER_TEMP/pull-request-title.txt"
+
       - name: Check the new commits
+        if: ${{ !cancelled() }}
         env:
           BEFORE: ${{ github.event.before }}
           BASE: ${{ github.event.pull_request.base.sha }}

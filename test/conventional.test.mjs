@@ -139,3 +139,21 @@ test('security commits pass the check and get their own section', () => {
   assert.equal(suggestedBump([{ message: 'security: a' }]), 'patch')
   assert.equal(planRelease({ current: '1.0.0', commits: [{ author: 'N', message: 'security: a' }] }).version, '1.0.1')
 })
+
+test('a pull request title is checked as typed, since a squash merge commits it to main', async () => {
+  const { attempt, tmp } = await import('./helpers.mjs')
+  const { writeFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const dir = tmp('title')
+  const check = (title) => {
+    writeFileSync(join(dir, 'title'), `${title}\n`)
+    return attempt(dir, 'node', [new URL('../template/scripts/release-kit/commit-msg.mjs', import.meta.url).pathname, '--title', join(dir, 'title')])
+  }
+  assert.equal(check('feat: add dark mode (#12)').status, 0)
+  const bad = check('Add dark mode')
+  assert.equal(bad.status, 1)
+  assert.match(bad.stderr, /Pull request title check failed \(a squash merge makes the title the commit message on main/)
+  // A leading "#" is part of a title, not a comment to strip.
+  assert.match(check('#12 fix the menu').stderr, /"#12 fix the menu": expected/)
+  assert.match(check(`feat: ${'x'.repeat(100)}`).stderr, /keep it to 100/)
+})
