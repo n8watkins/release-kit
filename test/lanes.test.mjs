@@ -57,7 +57,8 @@ test('a dependency that ships runs everything', () => {
 })
 
 test('docs only skip the checks; docs with code run everything; a CI file sets ci', () => {
-  assert.deepEqual([lanesFor('docs').lane, lanesFor('docs').docs, lanesFor('docs').checks], ['docs', 'true', 'false'])
+  const docs = lanesFor('docs')
+  assert.deepEqual([docs.lane, docs.docs, docs.checks], ['docs', 'true', 'false'])
   assert.equal(lanesFor('mixed').lane, 'full')
   const ci = lanesFor('ci-file')
   assert.deepEqual([ci.lane, ci.ci, ci.full], ['full', 'true', 'true'])
