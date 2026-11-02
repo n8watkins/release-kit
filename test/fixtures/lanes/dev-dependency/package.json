@@ -1,0 +1,1 @@
+{"name":"site","version":"1.4.0","private":true,"dependencies":{"ms":"2.1.2"},"devDependencies":{"release-kit":"github:n8watkins/release-kit#v2.0.1","typescript":"5.9.3"}}
