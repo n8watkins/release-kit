@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.3.0 - 2026-11-02
+
+Branch and tag protection that fits the release flow, fork-proof release workflows, and no more Dependabot downgrades.
+
+### New
+
+- One grouped Dependabot PR per kit release, dev dependency and workflow pins together ([#20](https://github.com/n8watkins/release-kit/pull/20))
+- A fork can no longer publish releases, and rerunning apply keeps that guard ([#25](https://github.com/n8watkins/release-kit/pull/25))
+- Release-kit protect guards the release branches and tags, and releases still go through ([#26](https://github.com/n8watkins/release-kit/pull/26))
+
+### Fixed
+
+- Dependabot no longer proposes moving the kit back to an older release ([#24](https://github.com/n8watkins/release-kit/pull/24))
+
 ## 2.2.0 - 2026-11-02
 
 ### New
