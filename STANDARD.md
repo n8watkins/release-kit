@@ -55,7 +55,7 @@ What the standard changes:
 - Changelog dates are in the repo's `.release.json` `timeZone` (the machine's zone if unset).
 - The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the notes the release wrote into the tag (the same section as `CHANGELOG.md`), download-and-verify.
 - `--summary "<text>"` opens a release with a line in the releaser's words, and `.release.json` `notes` sets how the notes read (the default reads New, Fixed, Faster, Safer with no scopes; `"style": "classic"` keeps commit-type headings and scopes).
-- A failed Release run is retried by running the Release workflow on the tag; a pushed tag is never moved or re-pushed.
+- A failed Release run is retried with "Re-run failed jobs" (or "Run workflow" with the tag as input); publishing is idempotent, so a release a failed run created is finished, not duplicated. A pushed tag is never moved or re-pushed.
 - Release when something worth telling a user about has landed.
 - The previous release is the highest `vX.Y.Z` tag on the branch's history. Other tags (`v2.0.0-beta`, `vnext`) are ignored, and a version tag that isn't on the branch (moved, or made elsewhere) stops the release.
 

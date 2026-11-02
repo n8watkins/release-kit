@@ -1,8 +1,12 @@
 # release-kit: published by pushing a vX.Y.Z tag (npm run release -- --push),
 # or by running this workflow on a tag ("Run workflow", "Use workflow from":
-# the tag). The release train starts it that way, and it is how to publish a
-# tag again after a failed run.
+# the tag), which is how the release train starts it.
 # Verify, then publish, as two jobs: only the publish job can write to the repo.
+#
+# Safe to run again. When a run fails, fix the cause and use "Re-run failed
+# jobs"; when the fix is in the workflow itself, or the run is older than its
+# 14-day artifacts, use "Run workflow" from main with the tag as input. A
+# release that already exists is finished, not duplicated (publish.mjs).
 #
 # Vendored into a repo by apply.mjs, or called from n8watkins/release-kit:
 #   uses: n8watkins/release-kit/.github/workflows/release.yml@vX.Y.Z
@@ -13,22 +17,33 @@ on:
     tags:
       - "v[0-9]*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing vX.Y.Z tag to publish again (empty: the ref picked above)"
+        type: string
+        default: ""
   workflow_call:
+    inputs:
+      tag:
+        description: "An existing vX.Y.Z tag to publish again (empty: the tag that started the run)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 env:
-  TAG: ${{ github.ref_name }}
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   verify:
     name: Verify and build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       baseline: ${{ steps.kind.outputs.baseline }}
     steps:
@@ -36,7 +51,7 @@ jobs:
       # known to be plain vX.Y.Z.
       - name: A release tag
         env:
-          REF_TYPE: ${{ github.ref_type }}
+          REF_TYPE: ${{ inputs.tag && 'tag' || github.ref_type }}
         run: |
           if [ "$REF_TYPE" != "tag" ] || ! printf '%s' "$TAG" | grep -Eqx 'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'; then
             echo "::error::Release runs on a vX.Y.Z tag; this is the $REF_TYPE '$TAG'."
@@ -45,6 +60,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || '' }}
           fetch-depth: 0 # the notes need the previous tag
 
       # Called from another repo: run the kit's scripts at the exact commit the
@@ -127,24 +143,42 @@ jobs:
     needs: verify
     if: needs.verify.outputs.baseline != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
+      # The scripts from the same commit as this workflow file: the kit's at the
+      # pinned ref when called from another repo, else the repo's own copy.
+      - name: Check out the release-kit scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || github.repository }}
+          ref: ${{ job.workflow_sha || github.sha }}
+          path: .release-kit-source
+          sparse-checkout: |
+            template/scripts/release-kit
+            scripts/release-kit
+          persist-credentials: false
+
+      - name: Locate the release-kit scripts
+        run: |
+          if [ -d .release-kit-source/template/scripts/release-kit ]; then
+            mv .release-kit-source/template/scripts/release-kit "$RUNNER_TEMP/release-kit"
+          else
+            mv .release-kit-source/scripts/release-kit "$RUNNER_TEMP/release-kit"
+          fi
+          rm -rf .release-kit-source
+          echo "RELEASE_KIT=$RUNNER_TEMP/release-kit" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
 
+      # Creates the release, or finishes one an earlier run left behind.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          shopt -s nullglob
-          assets=(release-artifacts/*)
-          gh release create "$TAG" "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TAG" \
-            --notes-file release-notes.md \
-            --verify-tag
+        run: node "$RELEASE_KIT/publish.mjs" --tag "$TAG" --notes release-notes.md --assets release-artifacts
 
       - name: Verify the uploaded files
         if: hashFiles('release-artifacts/SHA256SUMS.txt') != ''

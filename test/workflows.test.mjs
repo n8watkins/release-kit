@@ -48,6 +48,15 @@ test('workflows read by default and grant write only to the jobs that need it', 
   assert.doesNotMatch(read('template/.github/workflows/commits.yml'), /: write/)
 })
 
+test('every job that runs on a runner has a timeout, so a hung step never runs for GitHub\'s default 6 hours', () => {
+  for (const file of files) {
+    const jobs = read(file).split(/^jobs:\n/m)[1] ?? ''
+    for (const job of jobs.split(/^(?= {2}[\w-]+:\n)/m).filter((j) => /^ {4}runs-on:/m.test(j))) {
+      assert.match(job, /^ {4}timeout-minutes: \d+/m, `${file}: job ${job.split(':')[0].trim()} has no timeout-minutes`)
+    }
+  }
+})
+
 test('no ${{ }} expression is pasted into a shell script', () => {
   for (const file of files) {
     const lines = read(file).split('\n')
@@ -128,4 +137,30 @@ test('the workflows pick the Node version from the repo and the scripts from the
   const fetched = step({ '.release-kit-source/template/scripts/release-kit/release.mjs': '' })
   assert.match(fetched.kit, /^RELEASE_KIT=.*\/release-kit$/)
   assert.ok(existsSync(join(fetched.kit.slice('RELEASE_KIT='.length), 'release.mjs')))
+})
+
+test("the publish job finds the scripts beside its workflow: the kit's when called, the repo's own when vendored", () => {
+  const script = stepScript('template/.github/workflows/release.yml', 'Locate the release-kit scripts')
+  for (const layout of ['template/scripts/release-kit', 'scripts/release-kit']) {
+    const dir = tmp('publish-locate')
+    run(dir, 'mkdir', ['-p', join('.release-kit-source', layout)])
+    writeFileSync(join(dir, '.release-kit-source', layout, 'publish.mjs'), '')
+    const env = join(dir, '.env')
+    writeFileSync(env, '')
+    const result = spawnSync('bash', ['-e', '-c', script], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_ENV: env, RUNNER_TEMP: dir } })
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(readFileSync(env, 'utf8').trim(), `RELEASE_KIT=${dir}/release-kit`)
+    assert.ok(existsSync(join(dir, 'release-kit/publish.mjs')), layout)
+    assert.ok(!existsSync(join(dir, '.release-kit-source')))
+  }
+})
+
+test('Release can be run again for an existing tag, from "Run workflow" or a reusable caller', () => {
+  const release = read('template/.github/workflows/release.yml')
+  assert.match(release, /^ {2}workflow_dispatch:\n {4}inputs:\n {6}tag:/m)
+  assert.match(release, /^ {2}workflow_call:\n {4}inputs:\n {6}tag:/m)
+  assert.match(release, /^ {2}TAG: \$\{\{ inputs\.tag \|\| github\.ref_name \}\}$/m)
+  assert.match(release, /node "\$RELEASE_KIT\/publish\.mjs" --tag "\$TAG"/)
+  assert.doesNotMatch(release, /gh release create/, 'publish.mjs creates it, so a rerun finishes it')
+  assert.match(read('reusable/release.yml'), /with:\n {6}tag: \$\{\{ inputs\.tag \|\| '' \}\}/)
 })
