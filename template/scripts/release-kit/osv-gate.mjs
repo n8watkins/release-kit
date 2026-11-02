@@ -12,6 +12,7 @@
 // To accept a finding on purpose, add it to osv-scanner.toml in the repo
 // (an [[IgnoredVulns]] entry with id, ignoreUntil and reason).
 import { readFileSync } from 'node:fs'
+import { isMain } from './git.mjs'
 
 const HIGH = 7
 
@@ -65,7 +66,9 @@ export function gate(report, log = console.log) {
   return blocking.length === 0
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// isMain resolves symlinks and decodes the URL, so the gate also runs through
+// the scripts/release-kit link and from paths with spaces.
+if (isMain(import.meta.url)) {
   const file = process.argv[2]
   if (!file) {
     console.error('usage: osv-gate.mjs <osv-scanner json report>')
