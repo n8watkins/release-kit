@@ -92,7 +92,7 @@ Planned, not built yet:
 
 - A rollout workflow in release-kit that runs apply against every adopting repo on each release and opens one PR per repo through a GitHub App.
 
-Its first design is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#6-roadmap).
+Its design, with the owner's setup steps, is in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along with npm publishing, signed releases, pre-releases and the other planned work.
 
 ## What apply adds
 
