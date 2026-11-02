@@ -8,7 +8,12 @@
 //       --push first checks the branch is up to date with origin and runs
 //       npm run release:check (skip it with --no-check), so a tag is only
 //       pushed for a commit that passes; if the push fails, the release
-//       commit and tag are undone.
+//       commit and tag are undone. When the branch's rules accept changes
+//       only through pull requests (npx release-kit protect), the release
+//       goes through one instead: release-pr.mjs opens it, merges it once
+//       its checks pass, and tags the merged commit. --via-pr does that
+//       without trying the push first; --pr-timeout <minutes> (default 30)
+//       is how long it waits for the checks.
 //   npm run release -- --plan [auto|patch|minor|major|x.y.z]
 //       What the release train would do now, without changing anything:
 //       key=value lines for $GITHUB_OUTPUT on stdout, a summary on stderr.
@@ -31,6 +36,7 @@ import { RELEASE_TAG, isVersion, nextVersion, planRelease, suggestedBump } from 
 import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
 import { noteStyle, renderNotes } from './notes.mjs'
 import { readVersion, setVersion } from './versions.mjs'
+import { RULE_REJECTION, releaseThroughPullRequest } from './release-pr.mjs'
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(`--${name}`)
@@ -58,6 +64,21 @@ function versions() {
   const found = { 'package.json': readJson('package.json').version }
   for (const path of versionFiles) found[path] = readVersion(path)
   return found
+}
+
+/** How --push would land the release on `branch`, read from its rules with gh when it can. */
+function releasePath(branch) {
+  const slug = repoUrl()?.replace('https://github.com/', '')
+  let rules
+  try {
+    rules = slug && JSON.parse(execFileSync('gh', ['api', `repos/${slug}/rules/branches/${encodeURIComponent(branch)}`], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }))
+  } catch {}
+  if (!Array.isArray(rules)) return `push ${branch} and the tag (or, if ${branch}'s rules want a pull request, release through one)`
+  if (flag('via-pr') || rules.some((r) => r.type === 'pull_request')) {
+    const checks = rules.filter((r) => r.type === 'required_status_checks').flatMap((r) => r.parameters.required_status_checks.map((c) => c.context))
+    return `open a release pull request (${branch} takes changes only through pull requests), merge it once its checks pass${checks.length ? ` (required: ${checks.join(', ')})` : ''}, then tag the merged commit and push the tag`
+  }
+  return `push ${branch} and the tag in one atomic push (${branch} has ${rules.length ? `rules: ${[...new Set(rules.map((r) => r.type))].join(', ')}` : 'no rules'})`
 }
 
 function fail(message) {
@@ -181,7 +202,9 @@ if (push) {
 const summary = valueOf('summary')
 if (flag('summary') && !summary) fail('--summary needs the text, in quotes: --summary "Dark mode is here."')
 // The bump is the one bare argument that isn't --summary's text.
-const kind = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--summary') ?? suggestedBump(commits)
+const prTimeout = valueOf('pr-timeout') === undefined ? 30 : Number(valueOf('pr-timeout'))
+if (flag('pr-timeout') && !(prTimeout > 0)) fail('--pr-timeout needs a number of minutes, like --pr-timeout 45')
+const kind = args.find((a, i) => !a.startsWith('--') && !['--summary', '--pr-timeout'].includes(args[i - 1])) ?? suggestedBump(commits)
 let version
 try {
   version = nextVersion(current, kind)
@@ -211,7 +234,10 @@ const section = renderNotes(commits, {
 
 console.log(`release: ${current} -> ${version} (${kind}), ${commits.length} commit${commits.length === 1 ? '' : 's'} since ${since ?? 'the start'}\n`)
 console.log(section)
-if (flag('dry-run')) process.exit(0)
+if (flag('dry-run')) {
+  if (flag('push') || flag('via-pr')) console.log(`release: --push would ${releasePath(branch)}`)
+  process.exit(0)
+}
 
 if (push && !flag('no-check')) {
   console.log('release: npm run release:check')
@@ -237,16 +263,33 @@ git('tag', '-a', '--cleanup=verbatim', tag, '-m', `${tag}\n\n${section}`)
 console.log(`release: committed and tagged ${tag}`)
 
 if (push) {
-  // One atomic push: the branch and the tag land together or not at all.
-  try {
-    git('push', '--atomic', 'origin', branch, `refs/tags/${tag}`)
-  } catch (error) {
-    // Nothing reached origin: undo the release commit and tag, so a rerun starts clean.
-    git('tag', '--delete', tag)
-    git('reset', '--hard', 'HEAD~1')
-    fail(`the push was rejected, so the release commit and ${tag} were undone:\n${error.stderr?.trim() || error.message}`)
+  const throughPullRequest = () => {
+    try {
+      releaseThroughPullRequest({ branch, tag, section, timeoutMinutes: prTimeout })
+    } catch (error) {
+      fail(error.message)
+    }
   }
-  console.log(`release: pushed ${tag}; the Release workflow publishes it`)
+  if (flag('via-pr')) throughPullRequest()
+  else {
+    // One atomic push: the branch and the tag land together or not at all.
+    let rejected
+    try {
+      git('push', '--atomic', 'origin', branch, `refs/tags/${tag}`)
+    } catch (error) {
+      rejected = error
+    }
+    if (!rejected) console.log(`release: pushed ${tag}; the Release workflow publishes it`)
+    else if (RULE_REJECTION.test(rejected.stderr ?? '')) {
+      console.log(`release: ${branch} rejected the push (its rules want a pull request), so the release goes through one`)
+      throughPullRequest()
+    } else {
+      // Nothing reached origin: undo the release commit and tag, so a rerun starts clean.
+      git('tag', '--delete', tag)
+      git('reset', '--hard', 'HEAD~1')
+      fail(`the push was rejected, so the release commit and ${tag} were undone:\n${rejected.stderr?.trim() || rejected.message}`)
+    }
+  }
 } else {
   console.log(`release: push with  git push --atomic origin ${branch} ${tag}`)
 }

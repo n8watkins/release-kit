@@ -6,8 +6,10 @@
 //   release-kit commit-msg <file> check a commit message (the commit-msg hook)
 //   release-kit notes [...]       print release notes for a range
 //   release-kit train [...]       the release train's last step (CI)
-//   release-kit protect [...]     set up the ruleset and deploy key for the train
-//   release-kit check             warn when this kit is behind the newest release
+//   release-kit protect [...]     branch and tag rulesets for the release flow
+//                                 (and the train's deploy key)
+//   release-kit check             warn when this kit is behind the newest release,
+//                                 or the repo's rulesets drifted from protect's
 //   release-kit verify            the fast check a kit-only update runs: the kit
 //                                 installs, every pin agrees, the workflows lint,
 //                                 and the notes render (fails on any problem)
@@ -20,6 +22,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { protectionWarnings } from '../template/scripts/release-kit/protect.mjs'
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPTS = join(KIT, 'template', 'scripts', 'release-kit')
@@ -60,6 +63,11 @@ function check() {
   warnings.push(...pinMismatches(installed))
   warnings.push(...branchGaps())
   warnings.push(...staleFiles())
+  // The rulesets, when gh can read them (it can't in CI without a token: then nothing is said).
+  if (!process.env.RELEASE_KIT_OFFLINE) {
+    const config = existsSync('.release.json') ? JSON.parse(readFileSync('.release.json', 'utf8')) : {}
+    warnings.push(...protectionWarnings({ repo: typeof config.repository === 'string' ? config.repository : undefined }))
+  }
   for (const w of warnings) console.warn(`release-kit: ${w}`)
   if (!warnings.length) console.log(`release-kit ${installed}: up to date`)
 }

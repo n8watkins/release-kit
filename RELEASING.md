@@ -80,6 +80,7 @@ npm run release -- --push      # check, bump, changelog, commit, tag, push
 - Force one with `npm run release -- minor` (or `patch`, `major`, or an exact `1.4.0`).
 - It bumps `package.json`, `package-lock.json` and any file listed in `.release.json` `versionFiles`, adds a section to `CHANGELOG.md`, commits `chore(release): vX.Y.Z` and tags it.
 - With `--push` it first makes sure `main` isn't behind `origin/main` and runs `npm run release:check` (skip that with `--no-check`), so a tag is only pushed for a commit that passes. If the push is rejected, the release commit and tag are undone.
+  On a branch that takes changes only through pull requests, it releases through one instead (see [Protecting the branch and the tags](#protecting-the-branch-and-the-tags)).
 - Releases are cut from `main` or `master`; a repo that ships from another long-lived branch lists it in `.release.json` `branches` (for example `["master", "release/1.x"]`).
   The Commit messages workflow checks pushes to those branches as well as `main` and `master`: rerun apply after changing the list (`npx release-kit apply .` in a package-mode repo, where `npm run release:check` warns until you do).
   The release train still runs on `main` or `master` only.
@@ -121,24 +122,45 @@ Its schedule is in `.release.json` (`train.schedule`, a cron line in UTC).
 
 GitHub doesn't count checks from runs started with `workflow_dispatch`, the only runs the train's token can start.
 So on a `main` protected by required checks, the train's push is rejected even though `train.checks` passed on that exact commit.
-The fix is a deploy key that the branch's protection lets through, stored as the `RELEASE_TRAIN_KEY` secret; the train's checkout pushes with it when it exists.
+The fix is a deploy key that the branch's rules let through, stored as the `RELEASE_TRAIN_KEY` secret; the train's checkout pushes with it when it exists.
 The train still runs `train.checks` first and pushes only when they pass, so the key never lets an unchecked commit onto `main`.
 A tag pushed with the key starts the Release workflow by itself, and pushing `main` with it runs CI there as usual.
+`node scripts/release-kit/protect.mjs` (see [Protecting the branch and the tags](#protecting-the-branch-and-the-tags)) makes the key, once, in a repo with a train.
 
-Set it up once, as an admin, with the gh CLI signed in:
-
-```sh
-node scripts/release-kit/protect.mjs --dry-run   # what it will do (npx release-kit protect in a package-mode repo)
-node scripts/release-kit/protect.mjs
-```
-
-It creates the ruleset `release-kit: protect main` (no deletion, no force push, the required checks that classic protection had, or `--checks "CI result,check"`), lets the deploy key and repository admins bypass it (`--no-admin-bypass` to drop admins), adds a new write deploy key `release-kit train` with its private half only in the secret, and then removes classic branch protection, which a deploy key can't bypass.
-Run it again to rotate the key.
 - If `main` moves while it runs, or a check fails, nothing is released and the release commit is thrown away; run it again, or let the next scheduled run pick it up.
 - It stops instead of guessing when there is no release tag yet (run `npm run release -- --baseline` first), when the last tag isn't on `main`, or when `package.json` doesn't match the last tag.
 
 Preview what it would do with `npm run release -- --plan`.
 Releasing by hand still works at any time; the train just finds less to do.
+
+## Protecting the branch and the tags
+
+Set it up once, as an admin, with the gh CLI signed in:
+
+```sh
+node scripts/release-kit/protect.mjs --dry-run   # what it will do
+node scripts/release-kit/protect.mjs
+```
+
+It writes two GitHub rulesets:
+
+- **`release-kit: branches`**, on the default branch and any other branch in `.release.json` `branches`: no deletion, no force push, changes only through a pull request (no approvals needed), and the repo's CI checks must pass.
+- **`release-kit: release tags`**, on `refs/tags/v*`: anyone who can push may create a release tag, nobody may delete or move one.
+
+The required checks are, in order: `--checks "CI result,check / check"`, `"protect": { "checks": [...] }` in `.release.json`, the ones the ruleset already requires (a rerun keeps them), or else the GitHub Actions checks that passed on each of the last five merged pull requests.
+That last way leaves out a job that only runs on some pull requests (the auto-merge job, the security scan), and in a workflow with a `CI result` job (see CI lanes) only that job is required, since it stands for the others.
+
+Nobody bypasses the branch rules, admins included, so a coding agent signed in as an admin can't push to `main` either.
+Releases still work:
+
+- `npm run release -- --push` tries its usual push; when the rules reject it, it pushes the release commit to a `release/vX.Y.Z` branch, opens a pull request, merges it once its checks pass (up to `--pr-timeout`, default 30 minutes), and tags the merged commit.
+  If a check fails, it closes the pull request and undoes the release commit, so nothing is tagged.
+  `--via-pr` goes straight to the pull request, and `npm run release -- --dry-run --push` says which path it will take.
+- With a release train, the train's deploy key may bypass the branch rules (see [A protected main](#a-protected-main)); `--rotate-key` replaces the key.
+- `--admin-bypass` lets repository admins push straight to the branch again, for a repo that wants that trade-off.
+
+`npm run release:check` warns when the rulesets drift from what protect would set (a rule removed by hand, a different bypass list, other required checks than `.release.json` names), whenever gh can read them.
+Rulesets need a public repo, or GitHub Pro for a private one; protect says so instead of failing halfway.
 
 ## Baselines and backfills
 

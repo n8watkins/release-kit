@@ -55,6 +55,7 @@ What the standard changes:
 - Changelog dates are in the repo's `.release.json` `timeZone` (the machine's zone if unset).
 - The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the notes the release wrote into the tag (the same section as `CHANGELOG.md`), download-and-verify.
 - `--summary "<text>"` opens a release with a line in the releaser's words, and `.release.json` `notes` sets how the notes read (the default reads New, Fixed, Faster, Safer with no scopes; `"style": "classic"` keeps commit-type headings and scopes).
+- Release branches and tags are protected by `npx release-kit protect`: the default branch (and the other release branches) takes changes only through pull requests whose CI checks pass, and a `vX.Y.Z` tag is never deleted or moved. Nobody bypasses the branch rules, so `npm run release -- --push` releases through a pull request there and tags the merged commit; only the release train's deploy key may push directly, after its checks pass.
 - A fork never publishes: the Release and train jobs run only in the repo named in `.release.json` `repository`.
 - A failed Release run is retried with "Re-run failed jobs" (or "Run workflow" with the tag as input); publishing is idempotent, so a release a failed run created is finished, not duplicated. A pushed tag is never moved or re-pushed.
 - Release when something worth telling a user about has landed.
