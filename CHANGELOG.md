@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0 - 2026-11-02
+
+### New
+
+- A weekly OSV security scan that blocks malicious and high-severity packages ([#9](https://github.com/n8watkins/release-kit/pull/9))
+- Release from a long-lived branch other than main, listed in .release.json branches ([#10](https://github.com/n8watkins/release-kit/pull/10))
+
 ## 2.0.1 - 2026-10-27
 
 ### Fixed
