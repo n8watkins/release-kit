@@ -100,7 +100,7 @@ The design for these is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#6-roa
 - `.github/workflows/release.yml`, `commits.yml` and `security.yml`, plus `release-train.yml` with `--train`.
 - `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script.
   A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
-- `.release.json`: other files that carry the version (it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode and the train's schedule.
+- `.release.json`: other files that carry the version (`versionFiles`; it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode (`workflows`: `package`, `reusable` or `vendored`) and the train's schedule (`train`).
   Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`) and `notes` (see below).
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
@@ -136,7 +136,7 @@ jobs:
   release:
     permissions:
       contents: write
-    uses: n8watkins/release-kit/.github/workflows/release.yml@v2.1.0
+    uses: n8watkins/release-kit/.github/workflows/release.yml@vX.Y.Z  # the installed kit version
 ```
 
 The called workflow fetches the kit's scripts at the same ref, so the pin decides everything that runs in CI.
