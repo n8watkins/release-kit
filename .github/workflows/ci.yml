@@ -11,9 +11,16 @@ permissions:
   contents: read
 
 jobs:
+  # Once with the npm the runner ships, once with npm 12, which refuses git
+  # dependencies unless .npmrc allows them (the kit installs as one).
   test:
+    name: test (npm ${{ matrix.npm }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        npm: [bundled, "12"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -31,6 +38,11 @@ jobs:
           echo "$SHA256  actionlint.tar.gz" | sha256sum --check
           tar xzf actionlint.tar.gz actionlint
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Use npm ${{ matrix.npm }}
+        if: matrix.npm != 'bundled'
+        env:
+          NPM_VERSION: ${{ matrix.npm }}
+        run: npm install --global "npm@$NPM_VERSION"
       - run: npm test
 
   # The shipped workflows, called the way a repo in reusable mode calls them.

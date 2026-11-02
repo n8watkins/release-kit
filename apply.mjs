@@ -40,6 +40,7 @@ const REUSABLE = join(KIT, 'reusable')
 const MARKER = 'release-kit'
 const DEFAULT_SCHEDULE = '0 16 * * 1'
 const SCHEDULE_LINE = /- cron: "[^"\n]*" # release-kit: schedule/
+const NPMRC_NOTE = '# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.'
 
 const argv = process.argv.slice(2)
 const has = (name) => argv.includes(`--${name}`)
@@ -245,9 +246,17 @@ if (packaged) {
     done.push(`devDependencies: release-kit ${spec} (run npm install to update the lock)`)
   }
   writeDependabot()
+  writeNpmrc()
 } else if (pkg.devDependencies?.['release-kit']) {
   delete pkg.devDependencies['release-kit']
   done.push('devDependencies: release-kit removed (copied scripts instead)')
+}
+// Copied scripts need no git dependency: drop the line package mode added.
+if (!packaged && existsSync(join(repo, '.npmrc')) && read('.npmrc').includes(`${NPMRC_NOTE}\nallow-git=root\n`)) {
+  const rest = read('.npmrc').replace(`${NPMRC_NOTE}\nallow-git=root\n`, '')
+  if (rest.trim()) write('.npmrc', rest)
+  else rmSync(join(repo, '.npmrc'))
+  done.push('.npmrc: allow-git removed (no git dependency in this mode)')
 }
 if (usesHusky) {
   write('.husky/commit-msg', packaged ? PACKAGE_HOOK : 'node scripts/release-kit/commit-msg.mjs "$1"\n')
@@ -305,6 +314,27 @@ updates:
       - dependency-name: ${KIT_REPO}*
 `)
   done.push(path)
+}
+
+/**
+ * Package mode: npm 12 refuses git dependencies unless .npmrc allows them
+ * (EALLOWGIT), and the kit is one. "root" is the narrowest setting that works:
+ * git dependencies listed in this package.json, and none pulled in by others.
+ * Older npm versions accept the setting too.
+ */
+function writeNpmrc() {
+  const path = '.npmrc'
+  const current = existsSync(join(repo, path)) ? read(path) : ''
+  const setting = /^[ \t]*allow-git[ \t]*=[ \t]*(\S*)[ \t]*$/m.exec(current)
+  if (setting && ['root', 'all'].includes(setting[1])) return
+  const line = `${NPMRC_NOTE}\nallow-git=root\n`
+  if (setting) {
+    write(path, current.replace(setting[0], 'allow-git=root'))
+    done.push(`${path}: allow-git=${setting[1] || '(empty)'} -> root (npm 12 installs the kit only from an allowed git dependency)`)
+  } else {
+    write(path, current ? `${current.replace(/\n*$/, '\n')}${line}` : line)
+    done.push(`${path}: allow-git=root (npm 12 installs git dependencies, like the kit, only when allowed)`)
+  }
 }
 
 /** What already manages this repo's git hooks (other than the kit or husky), or null. */
