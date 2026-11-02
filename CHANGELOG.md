@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.2 - 2026-11-02
+
+### Fixed
+
+- Release-kit protect reads the required checks from the latest merged pull request ([#30](https://github.com/n8watkins/release-kit/pull/30))
+
 ## 2.3.1 - 2026-11-02
 
 ### Fixed
