@@ -80,7 +80,13 @@ Pushing the tag runs `.github/workflows/release.yml`:
 3. `npm run release:artifacts`, if defined, writes shippable files into `release-artifacts/`; they get SHA-256 checksums.
 4. The GitHub Release is created with the generated notes and the files, and the uploaded files are re-downloaded and checked.
 
-If a Release run fails after the tag is pushed (a flaky check, an outage), fix the cause and run the Release workflow again on the tag: Actions, Release, "Run workflow", and pick the tag under "Use workflow from".
+If a Release run fails after the tag is pushed (a flaky check, an outage), fix the cause and retry; the workflow is safe to run again:
+
+- **Re-run failed jobs** on the failed run is the usual retry.
+  It keeps the run's build, and a release that a failed run already created is finished (notes refreshed, missing files uploaded), not duplicated.
+- **Run workflow** from `main` with the tag in the "tag" box is for when the fix is in the workflow itself, or the run is older than its 14-day build artifacts.
+- If the release already has files that differ from the new build, the run stops instead of replacing files people may have downloaded; delete those files (or the release) first.
+
 Don't delete and re-push the tag.
 
 ## The release train

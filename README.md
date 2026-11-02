@@ -187,7 +187,10 @@ OSV also lists malicious packages, which Dependabot alerts don't cover, so the t
 
 ## When a Release run fails
 
-Fix the cause, then run the Release workflow on the tag: Actions, Release, "Run workflow", and pick the tag under "Use workflow from".
+Fix the cause, then use **Re-run failed jobs** on the run: the workflow is safe to run again, and a release a failed run already created is finished instead of duplicated.
+When the fix is in the workflow itself, or the run is older than its 14-day build artifacts, use Actions, Release, "Run workflow" from `main` with the tag in the "tag" box.
+If the release already has files that differ from the new build, the run stops rather than replace files people may have downloaded.
+Every job has a timeout, so a hung check fails within 30 minutes instead of GitHub's default 6 hours.
 Don't move or re-push a tag that is already on GitHub.
 
 ## Backfilling past milestones
