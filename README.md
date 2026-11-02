@@ -99,7 +99,7 @@ It needs a release tag to start from, so baseline a new repo first.
 What `apply.mjs` adds or changes:
 
 - In package mode, the `release-kit` dev dependency and `.github/dependabot.yml`; otherwise `scripts/release-kit/`, the release, notes and commit-check scripts.
-- `.github/workflows/release.yml` and `commits.yml`, plus `release-train.yml` with `--train`.
+- `.github/workflows/release.yml`, `commits.yml` and `security.yml`, plus `release-train.yml` with `--train`.
 - `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script. A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
 - `.release.json`: other files that carry the version (it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`; Cargo files and npm locks are edited in place), the workflow mode and the train's schedule. Optional: `node`, the Node version for the workflows (else `.nvmrc` or `.node-version`, else 22), and `timeZone` for changelog dates (for example `"America/Los_Angeles"`).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
@@ -108,6 +108,16 @@ What `apply.mjs` adds or changes:
 The workflows install with `npm ci`, so a pnpm, yarn or bun repo needs a `package-lock.json` too (apply warns).
 
 If the repo ships files, add a `release:artifacts` script that writes them into `release-artifacts/` (for a WXT extension: `wxt zip && cp .output/*.zip release-artifacts/`).
+
+## Security scan
+
+`security.yml` scans every lockfile in the repo (npm, pnpm, yarn, bun, Cargo, uv, poetry, pip, Go) against [OSV.dev](https://osv.dev) every Monday and on any pull request that changes a lockfile.
+OSV also lists malicious packages, which Dependabot alerts don't cover, so the two complement each other: Dependabot opens fix PRs for known vulnerabilities, the scan catches a hijacked package.
+
+- **It fails** on a malicious package (an OSV `MAL-` entry) or a high or critical vulnerability (CVSS 7.0 or more, or rated HIGH or CRITICAL by its advisory).
+- **It warns** on everything else, as annotations on the run, so moderate advisories in dev-only tooling don't keep the check red.
+- **To accept a finding on purpose**, add an `[[IgnoredVulns]]` entry (`id`, `ignoreUntil`, `reason`) to `osv-scanner.toml` next to the lockfile.
+- OSV-Scanner is a pinned release, checked against its published SHA-256 before it runs; the gate is `scripts/release-kit/osv-gate.mjs`.
 
 ## Notes people want to read
 

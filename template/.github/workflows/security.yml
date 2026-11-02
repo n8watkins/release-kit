@@ -1,0 +1,82 @@
+# release-kit: scan every lockfile against OSV.dev once a week and when one
+# changes. OSV also lists malicious packages, which Dependabot alerts don't.
+# Blocks on a malicious package or a high or critical vulnerability; lists the
+# rest as warnings (see scripts/release-kit/osv-gate.mjs). Accept a finding on
+# purpose in osv-scanner.toml.
+#
+# Vendored into a repo by apply.mjs, or called from n8watkins/release-kit:
+#   uses: n8watkins/release-kit/.github/workflows/security.yml@vX.Y.Z
+name: Security scan
+
+on:
+  schedule:
+    - cron: "0 15 * * 1"
+  pull_request:
+    paths:
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/yarn.lock"
+      - "**/bun.lock"
+      - "**/Cargo.lock"
+      - "**/uv.lock"
+      - "**/poetry.lock"
+      - "**/requirements*.txt"
+      - "**/go.sum"
+      - "**/osv-scanner.toml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  osv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Called from another repo: run the kit's gate at the exact commit the
+      # caller pinned. A vendored copy runs the repo's own scripts/release-kit.
+      - name: Fetch the release-kit scripts
+        if: job.workflow_repository != '' && job.workflow_repository != github.repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .release-kit-source
+          sparse-checkout: template/scripts/release-kit
+          persist-credentials: false
+
+      - name: Locate the release-kit scripts
+        run: |
+          if [ -d .release-kit-source ]; then
+            mv .release-kit-source/template/scripts/release-kit "$RUNNER_TEMP/release-kit"
+            rm -rf .release-kit-source
+            echo "RELEASE_KIT=$RUNNER_TEMP/release-kit" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_KIT=scripts/release-kit" >> "$GITHUB_ENV"
+          fi
+
+      # A pinned release, checked against the checksum published with it.
+      - name: Install OSV-Scanner
+        env:
+          OSV_VERSION: v2.7.0
+          OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/osv-scanner" "https://github.com/google/osv-scanner/releases/download/$OSV_VERSION/osv-scanner_linux_amd64"
+          echo "$OSV_SHA256  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+
+      - name: Scan the lockfiles
+        run: |
+          # Exit 1 only means "found something"; the gate decides what blocks.
+          status=0
+          "$RUNNER_TEMP/osv-scanner" scan source --recursive --format json . > "$RUNNER_TEMP/osv.json" || status=$?
+          if [ "$status" -gt 1 ] && [ "$status" -ne 128 ]; then
+            echo "OSV-Scanner failed with exit code $status" >&2
+            exit "$status"
+          fi
+          node "$RELEASE_KIT/osv-gate.mjs" "$RUNNER_TEMP/osv.json"
