@@ -129,7 +129,7 @@ Its design, with the owner's setup steps, is in [docs/ROADMAP.md](docs/ROADMAP.m
 - `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script.
   A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
 - `.release.json`: other files that carry the version (`versionFiles`; it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode (`workflows`: `package`, `reusable` or `vendored`) and the train's schedule (`train`).
-  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)) and `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in).
+  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in) and `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`).
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
@@ -198,12 +198,32 @@ With `--train`, a scheduled workflow cuts releases so nobody has to remember:
 GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITHUB_TOKEN`, so the train starts the checks and the Release workflow itself with `workflow_dispatch`; each workflow in `train.checks` needs `workflow_dispatch:` in its `on:`.
 The same rule means the train can't loop.
 
-GitHub doesn't count checks from `workflow_dispatch` runs toward branch protection, so on a protected `main` the push needs a deploy key the protection lets through.
-`npx release-kit protect` (`node scripts/release-kit/protect.mjs` in a vendored repo) sets that up once: a ruleset with the required checks that deploy keys (and admins) may bypass, the deploy key, and the `RELEASE_TRAIN_KEY` secret (see [RELEASING.md](RELEASING.md)).
+GitHub doesn't count checks from `workflow_dispatch` runs toward branch protection, so on a protected `main` the push needs a deploy key the branch's rules let through.
+In a repo with a train, `npx release-kit protect` (see [Protecting the release flow](#protecting-the-release-flow)) makes that key once, stores it as the `RELEASE_TRAIN_KEY` secret, and lets deploy keys bypass the branch rules.
 Note that a ruleset's deploy-key bypass applies to every write deploy key on the repo, not only the train's.
 
 "Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
 It needs a release tag to start from, so baseline a new repo first.
+
+## Protecting the release flow
+
+`npx release-kit protect` (`node scripts/release-kit/protect.mjs` in a vendored repo) sets up two GitHub rulesets that match how the kit releases, using the gh CLI's sign-in; `--dry-run` prints the plan first.
+
+| Ruleset | On | Rules |
+|---|---|---|
+| `release-kit: branches` | The default branch, and the other branches in `.release.json` `branches` | No deletion, no force push, changes only through a pull request (0 approvals), the repo's CI checks must pass |
+| `release-kit: release tags` | `refs/tags/v*` | No deletion, no update: a release tag is created once and never moved |
+
+- **Required checks** are `--checks "CI result,check / check"`, or `.release.json` `protect.checks`, or the ones the ruleset already requires, or else the GitHub Actions checks that passed on each of the last five merged pull requests (only `CI result` from a workflow that has one).
+- **Nobody bypasses the branch rules by default, admins included**, so an agent using the owner's sign-in can't push to `main` either.
+- **`npm run release -- --push` still works:** when the push of the release commit is rejected, it opens a `release/vX.Y.Z` pull request, merges it once its checks pass, and tags the merged commit; if a check fails it closes the pull request and tags nothing.
+- **The release train** pushes with its deploy key, the one bypass (only in a repo with a train).
+- **The trade-off:** a release takes as long as the pull request's checks, instead of one push.
+  `--admin-bypass` lets admins push straight to the branch instead, at the cost of letting anything signed in as an admin do the same.
+- **Drift:** `npm run release:check` (through `release-kit check`) warns when the rulesets no longer match, whenever gh can read them.
+- Rulesets need a public repo, or GitHub Pro for a private one.
+
+[RELEASING.md](RELEASING.md#protecting-the-branch-and-the-tags) has the details.
 
 ## CI lanes
 
