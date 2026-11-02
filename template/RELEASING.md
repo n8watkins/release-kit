@@ -147,8 +147,8 @@ It writes two GitHub rulesets:
 - **`release-kit: branches`**, on the default branch and any other branch in `.release.json` `branches`: no deletion, no force push, changes only through a pull request (no approvals needed), and the repo's CI checks must pass.
 - **`release-kit: release tags`**, on `refs/tags/v*`: anyone who can push may create a release tag, nobody may delete or move one.
 
-The required checks are, in order: `--checks "CI result,check / check"`, `"protect": { "checks": [...] }` in `.release.json`, the ones the ruleset already requires (a rerun keeps them), or else the GitHub Actions checks that passed on each of the last five merged pull requests.
-That last way leaves out a job that only runs on some pull requests (the auto-merge job, the security scan), and in a workflow with a `CI result` job (see CI lanes) only that job is required, since it stands for the others.
+The required checks are, in order: `--checks "CI result,check / check"`, `"protect": { "checks": [...] }` in `.release.json`, the ones the ruleset already requires (a rerun keeps them), or else the GitHub Actions checks that passed on the latest merged pull request.
+That last way leaves out workflows that run on only some pull requests (a `paths` filter, like the security scan's, or auto-merge), and in a workflow with a `CI result` job (see CI lanes) only that job is required, since it stands for the others.
 
 Nobody bypasses the branch rules, admins included, so a coding agent signed in as an admin can't push to `main` either.
 Releases still work:

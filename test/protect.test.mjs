@@ -20,7 +20,7 @@ const PULLS = [
   { number: 1, merged_at: '2026-11-01T00:00:00Z', head: { sha: 'c1' } },
 ]
 const RUNS = {
-  c3: [run('CI result'), run('check / check'), run('auto-merge / Auto-merge', 'skipped'), run('osv / OSV-Scanner')],
+  c3: [run('CI result'), run('check / check'), run('auto-merge / Auto-merge', 'skipped'), { ...run('osv / OSV-Scanner'), check_suite: { id: 9 } }],
   c2: [run('CI result'), run('check / check'), run('auto-merge / Auto-merge', 'success')].concat([run('Vercel', 'success', { id: 8329 })]),
   c1: [run('Vercel', 'success', { id: 8329 })],
 }
@@ -70,7 +70,9 @@ function protect(args = [], state = {}, config = {}) {
   const dir = tmp('protect')
   writeFileSync(join(dir, '.release.json'), JSON.stringify(config))
   const scratch = tmp('protect-tmp')
-  const gh = fakeGh({ pulls: PULLS, runs: RUNS, ...state })
+  // The security scan runs only when a lock file changes, so it is never required.
+  const security = { suites: { 9: '.github/workflows/security.yml' }, workflows: { '.github/workflows/security.yml': 'on:\n  pull_request:\n    paths: ["**/package-lock.json"]\n' } }
+  const gh = fakeGh({ pulls: PULLS, runs: RUNS, ...security, ...state })
   const result = attempt(dir, 'node', [join(KIT, 'template/scripts/release-kit/protect.mjs'), ...args], { ...gh.env, TMPDIR: scratch })
   return { ...result, calls: gh.calls(), leftovers: readdirSync(scratch) }
 }
@@ -79,15 +81,15 @@ const writes = (calls) => calls.filter(({ args }) => args[0] === 'secret' || (ar
 const describe = ({ args }) => (args[0] === 'secret' ? `secret ${args[2]}` : `${args[args.indexOf('-X') + 1]} ${args.find((a) => a.startsWith('repos/'))}`)
 const CHECKS = [{ context: 'CI result', integration_id: 15368 }, { context: 'check / check', integration_id: 15368 }]
 
-test('the required checks are the GitHub Actions checks that passed on every recent merged pull request', () => {
-  assert.deepEqual(requiredChecksFrom([RUNS.c3, RUNS.c2]), CHECKS)
-  // A pull request with no Actions checks says nothing either way.
-  assert.deepEqual(requiredChecksFrom([RUNS.c3, RUNS.c1]), requiredChecksFrom([RUNS.c3]))
+test('the required checks are the GitHub Actions checks that passed on the latest merged pull request', () => {
+  // A skipped job and a third-party check are left out.
+  assert.deepEqual(requiredChecksFrom(RUNS.c3), [...CHECKS, { context: 'osv / OSV-Scanner', integration_id: 15368 }])
+  assert.deepEqual(requiredChecksFrom(RUNS.c1), [])
   assert.deepEqual(requiredChecksFrom([]), [])
   // A CI with lanes: its "CI result" job stands for the jobs in the same workflow run.
   const suite = (name, id, conclusion) => ({ ...run(name, conclusion), check_suite: { id } })
   const lanes = [suite('CI result', 1), suite('E2E (webkit 1/2)', 1), suite('Lint', 1), suite('check / check', 2)]
-  assert.deepEqual(requiredChecksFrom([lanes]).map((c) => c.context), ['CI result', 'check / check'])
+  assert.deepEqual(requiredChecksFrom(lanes).map((c) => c.context), ['CI result', 'check / check'])
 })
 
 test('the rulesets: the default and release branches take pull requests only, release tags never move', () => {
@@ -134,7 +136,8 @@ test('--dry-run reads the plan, checks and all, and changes nothing', () => {
   assert.deepEqual(writes(result.calls), [])
   assert.match(result.stdout, /ruleset "release-kit: branches": create\n {4}on ~DEFAULT_BRANCH, refs\/heads\/review\/v1\n {4}no deletion; no force push; pull request only \(0 approvals; squash\); required checks: CI result \(app 15368\), check \/ check \(app 15368\)\n {4}bypass: nobody/)
   assert.match(result.stdout, /ruleset "release-kit: release tags": create/)
-  assert.match(result.stdout, /required checks from the checks that passed on each of the last 2 merged pull requests \(#3, #2\)/)
+  // #4 was closed without merging; #3 is the latest merged one.
+  assert.match(result.stdout, /required checks from the checks that passed on the latest merged pull request, #3/)
   assert.match(result.stdout, /not on GitHub, so not protected yet: gone/)
   assert.match(result.stdout, /npm run release -- --push opens a release pull request/)
 })

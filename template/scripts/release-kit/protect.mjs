@@ -15,10 +15,9 @@
 //                                create one, nobody may delete or move one.
 //
 // The required checks are --checks, else .release.json "protect.checks", else
-// the ones the ruleset already requires, else
-// the GitHub Actions checks that passed on each of the last few merged pull
-// requests (a job skipped on some pull requests, like the auto-merge job, is
-// left out), else the ones classic branch protection requires.
+// the ones the ruleset already requires, else the GitHub Actions checks that
+// passed on the latest merged pull request (leaving out workflows that run on
+// only some pull requests), else the ones classic branch protection requires.
 //
 // Nobody bypasses the branch rules, admins included (--admin-bypass lets
 // admins through), so an agent signed in as the owner can't push to main
@@ -52,8 +51,8 @@ export const TAG_RULESET = 'release-kit: release tags'
 const LEGACY_RULESET = /^release-kit: protect /
 export const GITHUB_ACTIONS_APP = 15368
 const ADMIN_ROLE = 5
-// How many merged pull requests the required checks are read from.
-const SAMPLE = 5
+// How many merged pull requests to look through for one with GitHub Actions checks.
+const LOOKBACK = 10
 
 /**
  * The ruleset for the default branch and `branches` (other release branches).
@@ -117,23 +116,22 @@ export function tagRuleset() {
 export const AGGREGATE = 'CI result'
 
 /**
- * The checks to require, from the check runs of recent merged pull requests
- * (one array of { name, app: { id }, conclusion, check_suite: { id } } per
- * pull request): the GitHub Actions checks that passed on every one of them.
- * In a workflow with a "CI result" job, only that job counts: the others are
- * skipped by lane, and it stands for them.
+ * The checks to require, from the check runs of the latest merged pull
+ * request ({ name, app: { id }, conclusion, check_suite: { id } }): the
+ * GitHub Actions checks that passed on it. In a workflow with a "CI result"
+ * job, only that job counts: the others are skipped by lane, and it stands
+ * for them. Older pull requests aren't asked: they may predate a workflow.
+ * The caller leaves out workflows that run on only some pull requests; a
+ * job skipped by its own if: still reports, as skipped, which GitHub counts
+ * as passing, so requiring it never blocks a pull request.
  */
-export function requiredChecksFrom(pulls) {
-  const passed = (runs) => {
-    const aggregated = new Set(runs.filter((r) => r.name === AGGREGATE).map((r) => r.check_suite?.id).filter(Boolean))
-    return new Set(runs
-      .filter((r) => r.app?.id === GITHUB_ACTIONS_APP && r.conclusion === 'success')
-      .filter((r) => r.name === AGGREGATE || !aggregated.has(r.check_suite?.id))
-      .map((r) => r.name))
-  }
-  const sets = pulls.map(passed).filter((s) => s.size)
-  if (!sets.length) return []
-  return [...sets[0]].filter((name) => sets.every((s) => s.has(name))).sort().map((context) => ({ context, integration_id: GITHUB_ACTIONS_APP }))
+export function requiredChecksFrom(runs) {
+  const aggregated = new Set(runs.filter((r) => r.name === AGGREGATE).map((r) => r.check_suite?.id).filter(Boolean))
+  const names = runs
+    .filter((r) => r.app?.id === GITHUB_ACTIONS_APP && r.conclusion === 'success')
+    .filter((r) => r.name === AGGREGATE || !aggregated.has(r.check_suite?.id))
+    .map((r) => r.name)
+  return [...new Set(names)].sort().map((context) => ({ context, integration_id: GITHUB_ACTIONS_APP }))
 }
 
 /**
@@ -252,11 +250,13 @@ export function plan({ api, maybe }, repo, { checks: checksFlag, adminBypass = f
     const pulls = (api(`repos/${repo}/pulls?state=closed&base=${encodeURIComponent(branch)}&sort=updated&direction=desc&per_page=50`) ?? [])
       .filter((p) => p.merged_at)
       .sort((x, y) => y.merged_at.localeCompare(x.merged_at))
-    const sampled = []
-    for (const pull of pulls) {
-      if (sampled.length === SAMPLE) break
+    let latest = null
+    for (const pull of pulls.slice(0, LOOKBACK)) {
       const runs = api(`repos/${repo}/commits/${pull.head.sha}/check-runs?per_page=100`)?.check_runs ?? []
-      if (runs.some((r) => r.app?.id === GITHUB_ACTIONS_APP)) sampled.push({ number: pull.number, runs })
+      if (runs.some((r) => r.app?.id === GITHUB_ACTIONS_APP)) {
+        latest = { number: pull.number, runs }
+        break
+      }
     }
     // A workflow that runs only on some pull requests can't be required:
     // where it doesn't run, its check never reports and the pull request
@@ -274,8 +274,8 @@ export function plan({ api, maybe }, repo, { checks: checksFlag, adminBypass = f
       }
       return conditional.get(path)
     }
-    checks = requiredChecksFrom(sampled.map((s) => s.runs.filter((r) => r.app?.id === GITHUB_ACTIONS_APP && !isConditional(r.check_suite?.id))))
-    checksFrom = sampled.length ? `the checks that passed on each of the last ${sampled.length} merged pull requests (${sampled.map((s) => `#${s.number}`).join(', ')})` : 'no merged pull request with GitHub Actions checks'
+    checks = requiredChecksFrom((latest?.runs ?? []).filter((r) => r.app?.id === GITHUB_ACTIONS_APP && !isConditional(r.check_suite?.id)))
+    checksFrom = latest ? `the checks that passed on the latest merged pull request, #${latest.number}` : 'no merged pull request with GitHub Actions checks'
     if (!checks.length && classic?.required_status_checks?.checks?.length) {
       checks = classic.required_status_checks.checks.map(({ context, app_id }) => ({ context, integration_id: app_id ?? undefined }))
       checksFrom = 'classic branch protection'
