@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.2.0 - 2026-11-02
+
+### New
+
+- A failed Release run can be re-run safely, and every job has a timeout ([#14](https://github.com/n8watkins/release-kit/pull/14))
+- Pull request titles are checked, since a squash merge commits the title to main ([#15](https://github.com/n8watkins/release-kit/pull/15))
+- CI lanes, so a docs or kit-only pull request skips the full suite, and release-kit verify ([#18](https://github.com/n8watkins/release-kit/pull/18))
+- Auto-merge kit and Dependabot updates, never majors, with a merge-when-green fallback ([#19](https://github.com/n8watkins/release-kit/pull/19))
+
+### Fixed
+
+- The security gate fails the build when run through the scripts link ([#12](https://github.com/n8watkins/release-kit/pull/12))
+- Npm 12 installs the kit, because apply allows it as a git dependency in .npmrc ([#13](https://github.com/n8watkins/release-kit/pull/13))
+- Commit messages are checked on the branches releases are cut from ([#16](https://github.com/n8watkins/release-kit/pull/16))
+
 ## 2.1.0 - 2026-11-02
 
 ### New
