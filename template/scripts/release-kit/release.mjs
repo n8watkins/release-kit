@@ -45,7 +45,13 @@ const versionFiles = config.versionFiles ?? []
 // release tag's message is its changelog section, whose lines are headings
 // or "- " items.
 const BASELINE_NOTE = 'release-kit baseline: tagged when adopting release-kit; no GitHub Release.'
-const BRANCHES = ['main', 'master']
+// The branches releases are cut from: main or master, or the list in
+// .release.json "branches" (for a repo whose shipped build lives on another
+// long-lived branch).
+const BRANCHES = config.branches ?? ['main', 'master']
+if (!Array.isArray(BRANCHES) || !BRANCHES.length || BRANCHES.some((b) => typeof b !== 'string' || !b)) {
+  fail('.release.json "branches" must be a list of branch names, like ["main"]')
+}
 
 function versions() {
   const found = { 'package.json': readJson('package.json').version }
@@ -111,7 +117,7 @@ if (flag('baseline')) {
 function state({ strict }) {
   const warn = strict ? fail : (message) => console.error(`release: warning: ${message}`)
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
-  if (!BRANCHES.includes(branch)) fail(`releases are cut from main or master, not "${branch}"`)
+  if (!BRANCHES.includes(branch)) fail(`releases are cut from ${BRANCHES.join(' or ')}, not "${branch}"`)
   const current = readJson('package.json').version
   if (!isVersion(current)) fail(`package.json version "${current}" is not x.y.z`)
 

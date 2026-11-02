@@ -125,6 +125,23 @@ test('the changelog date is in .release.json timeZone', () => {
   assert.match(attempt(bad, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run']).stderr, /timeZone "Mars\/Olympus" is not a time zone/)
 })
 
+test('releases are cut from main or master, or the branches in .release.json', () => {
+  const repo = applied()
+  commit(repo, 'fix: a')
+  run(repo, 'git', ['checkout', '-q', '-b', 'review/shipped'])
+  assert.match(attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run']).stderr, /releases are cut from main or master, not "review\/shipped"/)
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: [], branches: ['review/shipped'] }))
+  run(repo, 'git', ['commit', '-q', '-am', 'chore: release from the review branch'])
+  assert.match(run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run']), /## 1\.0\.1 - /)
+  run(repo, 'git', ['checkout', '-q', 'main'])
+  run(repo, 'git', ['merge', '-q', '--ff-only', 'review/shipped'])
+  assert.match(attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run']).stderr, /releases are cut from review\/shipped, not "main"/)
+  for (const branches of ['main', [], [''], [1]]) {
+    writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: [], branches }))
+    assert.match(attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--verify-tag', 'v1.0.0']).stderr, /"branches" must be a list of branch names/, JSON.stringify(branches))
+  }
+})
+
 test('--push checks origin and release:check first, and undoes the release if the push fails', () => {
   const root = tmp('push')
   run(root, 'git', ['init', '-q', '--bare', '-b', 'main', 'remote.git'])

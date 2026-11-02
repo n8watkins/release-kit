@@ -102,6 +102,8 @@ What `apply.mjs` adds or changes:
 - `.github/workflows/release.yml`, `commits.yml` and `security.yml`, plus `release-train.yml` with `--train`.
 - `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script. A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
 - `.release.json`: other files that carry the version (it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`; Cargo files and npm locks are edited in place), the workflow mode and the train's schedule. Optional: `node`, the Node version for the workflows (else `.nvmrc` or `.node-version`, else 22), and `timeZone` for changelog dates (for example `"America/Los_Angeles"`).
+  Also optional: `branches`, the branches `npm run release` cuts releases from (default `["main", "master"]`), for a repo whose shipped build lives on another long-lived branch.
+  The release train still runs on main or master only.
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
 
