@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { KIT, makeRepo, run, tmp } from './helpers.mjs'
 
 const read = (path) => readFileSync(join(KIT, path), 'utf8')
-const dirs = ['template/.github/workflows', '.github/workflows', 'reusable']
+const dirs = ['template/.github/workflows', '.github/workflows', 'reusable', 'docs/examples']
 const files = dirs.flatMap((dir) => readdirSync(join(KIT, dir)).map((name) => join(dir, name)))
 
 test("the kit's own workflows are the ones it ships, so repos can call them", () => {
@@ -31,7 +31,8 @@ test("the kit's own workflows are the ones it ships, so repos can call them", ()
 test('third-party actions are pinned to commit SHAs', () => {
   for (const file of files) {
     for (const [, ref] of read(file).matchAll(/^\s*(?:- )?uses: (\S+)/gm)) {
-      if (ref.startsWith('./') || ref.startsWith('KIT_REPO/')) continue
+      // The kit's own workflows are pinned by version on purpose: Dependabot and apply move the pin.
+      if (ref.startsWith('./') || ref.startsWith('KIT_REPO/') || ref.startsWith('n8watkins/release-kit/')) continue
       assert.match(ref, /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/, `${file}: ${ref}`)
     }
   }
@@ -75,8 +76,8 @@ test('no ${{ }} expression is pasted into a shell script', () => {
 
 test('every job that runs the kit fetches its scripts the same way', () => {
   const step = /- name: Fetch the release-kit scripts\n[\s\S]*?persist-credentials: false\n/g
-  const copies = ['commits.yml', 'release.yml', 'release-train.yml'].flatMap((name) => read(`template/.github/workflows/${name}`).match(step))
-  assert.equal(copies.length, 4)
+  const copies = [...['commits.yml', 'release.yml', 'release-train.yml'].map((name) => `template/.github/workflows/${name}`), '.github/workflows/changes.yml'].flatMap((file) => read(file).match(step))
+  assert.equal(copies.length, 5)
   assert.equal(new Set(copies).size, 1)
   assert.match(copies[0], /ref: \$\{\{ job\.workflow_sha \}\}/)
 })
@@ -174,4 +175,21 @@ test('pull request titles are checked, on edit too, and bot pull requests are ex
   assert.match(stepScript('template/.github/workflows/commits.yml', 'Check the pull request title'), /commit-msg\.mjs" --title /)
   // The commits are still checked when the title fails, so both problems show at once.
   assert.match(commits, /- name: Check the new commits\n {8}if: \$\{\{ !cancelled\(\) \}\}/)
+})
+
+test('the example ci.yml has one required check, which fails on a failed or cancelled job and passes skipped ones', () => {
+  const example = read('docs/examples/ci.yml')
+  assert.match(example, /uses: n8watkins\/release-kit\/\.github\/workflows\/changes\.yml@/)
+  assert.doesNotMatch(example, /^ {4}paths(-ignore)?:/m, 'no path filters: a required check from a skipped workflow never reports')
+  // Every lane job is behind a job-level condition on the classifier.
+  for (const job of ['kit', 'checks', 'e2e']) assert.match(example, new RegExp(`^ {2}${job}:\\n(?: {4}.*\\n)*? {4}if: needs\\.changes\\.outputs\\.\\w+ == 'true'`, 'm'), job)
+  assert.match(example, /^ {2}result:\n {4}name: CI result\n {4}if: always\(\)\n {4}needs: \[changes, kit, checks, e2e\]/m)
+  const script = stepScript('docs/examples/ci.yml', 'Every job passed, or was skipped by its lane')
+  const result = (results) => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, RESULTS: results } }).status
+  assert.equal(result('success skipped skipped success'), 0)
+  assert.equal(result('success failure skipped success'), 1)
+  assert.equal(result('success success cancelled skipped'), 1)
+  // The classifier's outputs are the ones the docs and the example use.
+  const changes = read('.github/workflows/changes.yml')
+  for (const output of ['lane', 'docs', 'kit', 'checks', 'full', 'ci']) assert.match(changes, new RegExp(`^ {6}${output}:\\n {8}description:`, 'm'), output)
 })

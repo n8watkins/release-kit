@@ -89,7 +89,6 @@ Each repo installs the kit as a dev dependency pinned to a release tag, `"releas
 Planned, not built yet:
 
 - A rollout workflow in release-kit that runs apply against every adopting repo on each release and opens one PR per repo through a GitHub App.
-- CI "lanes" shipped by the kit, so a PR that only updates the kit runs a one-minute check instead of the repo's full CI.
 - One grouped Dependabot PR per kit release instead of several.
 
 The design for these is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#6-roadmap).
@@ -101,7 +100,7 @@ The design for these is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#6-roa
 - `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script.
   A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
 - `.release.json`: other files that carry the version (`versionFiles`; it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode (`workflows`: `package`, `reusable` or `vendored`) and the train's schedule (`train`).
-  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`) and `notes` (see below).
+  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`), `notes` (see below) and `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)).
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
@@ -127,7 +126,7 @@ The choices are saved in `.release.json`, so re-running apply to upgrade keeps t
 ### Package, reusable and vendored modes
 
 In package mode nothing of the kit is copied into the repo: `npm run release` runs `release-kit release`, and the commit-msg hook runs `release-kit commit-msg` from `node_modules` (before `npm install` it lets commits through with a note; CI checks every commit anyway).
-The `release-kit` command also runs `notes`, `train`, `protect`, `check` and `apply`.
+The `release-kit` command also runs `notes`, `train`, `protect`, `check`, `verify`, `lanes` and `apply`.
 
 Package and reusable mode write short callers of the kit's workflows, for example:
 
@@ -175,6 +174,16 @@ Note that a ruleset's deploy-key bypass applies to every write deploy key on the
 
 "Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
 It needs a release tag to start from, so baseline a new repo first.
+
+## CI lanes
+
+A pull request that only edits docs, or only updates the kit, doesn't need the repo's full CI.
+The kit ships a reusable `changes.yml` workflow that classifies a pull request's diff into a lane (`docs`, `kit`, `deps` or `full`), and `npx release-kit verify`, the one-minute check a kit-only update runs instead of the full suite.
+A repo's `ci.yml` calls `changes.yml` first, runs each of its jobs with a job-level `if:` on the lane, and requires only one always-running "CI result" job.
+Pushes to main, manual runs and anything the classifier doesn't recognise run everything.
+
+Never use workflow-level `paths` filters for this: a required check from a skipped workflow is never reported, and the pull request waits forever.
+[docs/CI_LANES.md](docs/CI_LANES.md) explains the lanes, the settings and the pitfall, and [docs/examples/ci.yml](docs/examples/ci.yml) is a ready-to-copy `ci.yml`.
 
 ## Security scan
 

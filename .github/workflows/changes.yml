@@ -1,0 +1,94 @@
+# release-kit: what changed, for CI lanes. A repo's ci.yml calls it first and
+# runs each of its own jobs only in the lanes that need them, with job-level
+# `if:` conditions, and one always-running "CI result" job as the only
+# required check (see docs/CI_LANES.md):
+#
+#   jobs:
+#     changes:
+#       uses: n8watkins/release-kit/.github/workflows/changes.yml@vX.Y.Z
+#     test:
+#       needs: changes
+#       if: needs.changes.outputs.checks == 'true'
+#
+# Outputs (strings "true"/"false", and lane):
+#   lane    docs | kit | deps | full
+#   docs    only docs changed
+#   kit     a kit-owned file changed: run npx release-kit verify
+#   checks  deps or full: install, lint, types, unit tests, build
+#   full    everything, including E2E and OS matrices
+#   ci      a workflow or CI file the kit doesn't own changed
+# A push, a manual run, a missing base or any error is "full".
+name: What changed
+
+on:
+  workflow_call:
+    outputs:
+      lane:
+        description: "docs, kit, deps or full"
+        value: ${{ jobs.classify.outputs.lane }}
+      docs:
+        description: "Only docs changed"
+        value: ${{ jobs.classify.outputs.docs }}
+      kit:
+        description: "A kit-owned file changed (run release-kit verify)"
+        value: ${{ jobs.classify.outputs.kit }}
+      checks:
+        description: "Run install, lint, types, unit tests and build"
+        value: ${{ jobs.classify.outputs.checks }}
+      full:
+        description: "Run everything"
+        value: ${{ jobs.classify.outputs.full }}
+      ci:
+        description: "A workflow or CI file the kit doesn't own changed"
+        value: ${{ jobs.classify.outputs.ci }}
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.lanes.outputs.lane }}
+      docs: ${{ steps.lanes.outputs.docs }}
+      kit: ${{ steps.lanes.outputs.kit }}
+      checks: ${{ steps.lanes.outputs.checks }}
+      full: ${{ steps.lanes.outputs.full }}
+      ci: ${{ steps.lanes.outputs.ci }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the merge base and both sides of the diff
+          persist-credentials: false
+
+      # Called from another repo: run the kit's scripts at the exact commit the
+      # caller pinned. A vendored copy runs the repo's own scripts/release-kit.
+      - name: Fetch the release-kit scripts
+        if: job.workflow_repository != '' && job.workflow_repository != github.repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .release-kit-source
+          sparse-checkout: template/scripts/release-kit
+          persist-credentials: false
+
+      - name: Locate the release-kit scripts
+        run: |
+          if [ -d .release-kit-source ]; then
+            mv .release-kit-source/template/scripts/release-kit "$RUNNER_TEMP/release-kit"
+            rm -rf .release-kit-source
+            echo "RELEASE_KIT=$RUNNER_TEMP/release-kit" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_KIT=scripts/release-kit" >> "$GITHUB_ENV"
+          fi
+
+      - name: Classify the change
+        id: lanes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: node "$RELEASE_KIT/lanes.mjs" --event "$EVENT" --base "$BASE" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"

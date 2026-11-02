@@ -8,6 +8,10 @@
 //   release-kit train [...]       the release train's last step (CI)
 //   release-kit protect [...]     set up the ruleset and deploy key for the train
 //   release-kit check             warn when this kit is behind the newest release
+//   release-kit verify            the fast check a kit-only update runs: the kit
+//                                 installs, every pin agrees, the workflows lint,
+//                                 and the notes render (fails on any problem)
+//   release-kit lanes [...]       which CI lane a change needs (lanes.mjs)
 //   release-kit apply <repo> [...] apply or upgrade the kit in a repo
 //   release-kit <repo> [...]      the same as apply
 //
@@ -21,7 +25,7 @@ const KIT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPTS = join(KIT, 'template', 'scripts', 'release-kit')
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
 const KIT_REPO = /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(kitPackage.repository?.url ?? '')?.[1] ?? 'n8watkins/release-kit'
-const SCRIPT_COMMANDS = new Set(['release', 'commit-msg', 'notes', 'train', 'protect'])
+const SCRIPT_COMMANDS = new Set(['release', 'commit-msg', 'notes', 'train', 'protect', 'lanes'])
 
 const [command, ...rest] = process.argv.slice(2)
 
@@ -53,24 +57,77 @@ function check() {
       warnings.push(`release-kit ${installed} is installed, but ${latest} is out: npm install -D "release-kit@github:${KIT_REPO}#${latest}" (Dependabot opens this update on its own)`)
     }
   }
-  // The reusable workflows should pin the same version as package.json.
-  const dir = '.github/workflows'
-  if (existsSync(dir)) {
-    const pin = new RegExp(`${KIT_REPO.replace('/', '\\/')}\\/\\.github\\/workflows\\/[\\w.-]+@(v\\d+\\.\\d+\\.\\d+)`)
-    for (const file of readdirSync(dir)) {
-      const found = pin.exec(readFileSync(join(dir, file), 'utf8'))?.[1]
-      if (found && found !== `v${installed}`) warnings.push(`${dir}/${file} calls release-kit ${found}, but ${installed} is installed: rerun npx release-kit apply . to line them up`)
-    }
-  }
+  warnings.push(...pinMismatches(installed))
   for (const w of warnings) console.warn(`release-kit: ${w}`)
   if (!warnings.length) console.log(`release-kit ${installed}: up to date`)
 }
 
+/** Workflows that call the kit at another version than the one installed. */
+function pinMismatches(installed) {
+  const out = []
+  const dir = '.github/workflows'
+  if (!existsSync(dir)) return out
+  const pin = new RegExp(`${KIT_REPO.replace('/', '\\/')}\\/\\.github\\/workflows\\/[\\w.-]+@(v\\d+\\.\\d+\\.\\d+)`)
+  for (const file of readdirSync(dir).sort()) {
+    const found = pin.exec(readFileSync(join(dir, file), 'utf8'))?.[1]
+    if (found && found !== `v${installed}`) out.push(`${dir}/${file} calls release-kit ${found}, but ${installed} is installed: rerun npx release-kit apply . to line them up`)
+  }
+  return out
+}
+
+/**
+ * The fast check for a pull request that only updates the kit: everything
+ * the update could break, without the repo's own build and tests.
+ */
+function verify() {
+  const installed = kitPackage.version
+  const results = []
+  const step = (name, problems, detail = '') => results.push({ name, problems, detail })
+  const readJson = (path) => (existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null)
+
+  // 1. The kit installs: package.json, the lock and node_modules agree, and npm 12 may fetch it.
+  const install = []
+  const spec = readJson('package.json')?.devDependencies?.['release-kit']
+  const ref = /#(.+)$/.exec(spec ?? '')?.[1]
+  if (!spec) install.push('package.json has no release-kit dev dependency (package mode)')
+  else if (/^v\d+\.\d+\.\d+$/.test(ref ?? '') && ref !== `v${installed}`) install.push(`package.json pins release-kit ${ref}, but ${installed} is installed: run npm install`)
+  const locked = readJson('package-lock.json')?.packages?.['node_modules/release-kit']
+  if (spec && !locked) install.push('package-lock.json has no release-kit entry: run npm install and commit the lock')
+  else if (locked && locked.version !== installed) install.push(`package-lock.json has release-kit ${locked.version}, but ${installed} is installed: run npm install and commit the lock`)
+  else if (locked && /^[0-9a-f]{40}$/.test(ref ?? '') && !String(locked.resolved).endsWith(`#${ref}`)) install.push(`package-lock.json resolves release-kit to ${locked.resolved}, not ${ref}`)
+  const npmrc = existsSync('.npmrc') ? readFileSync('.npmrc', 'utf8') : ''
+  if (spec && !/^[ \t]*allow-git[ \t]*=[ \t]*(root|all)[ \t]*$/m.test(npmrc)) install.push('.npmrc does not allow git dependencies, so npm 12 refuses to install the kit: rerun npx release-kit apply .')
+  step('install', install, `release-kit ${installed}`)
+
+  // 2. Every workflow pins the version that is installed.
+  step('pins', pinMismatches(installed))
+
+  // 3. The workflows lint, when actionlint is installed.
+  // ACTIONLINT names another binary (tests use it).
+  const lint = spawnSync(process.env.ACTIONLINT || 'actionlint', ['-ignore', 'property "workflow_(repository|sha)" is not defined'], { encoding: 'utf8' })
+  if (lint.error) step('workflows', [], `skipped: actionlint is not installed (${lint.error.code})`)
+  else step('workflows', lint.status === 0 ? [] : [`actionlint:\n${`${lint.stdout}${lint.stderr}`.trim()}`], 'actionlint')
+
+  // 4. The release scripts load and render the notes since the last release.
+  const notes = spawnSync(process.execPath, [join(SCRIPTS, 'notes.mjs')], { encoding: 'utf8' })
+  step('notes', notes.status === 0 ? [] : [`notes failed:\n${(notes.stderr || notes.stdout).trim()}`], 'notes since the last release render')
+
+  let failed = false
+  for (const { name, problems, detail } of results) {
+    if (problems.length) {
+      failed = true
+      for (const problem of problems) console.error(`release-kit verify: ${name}: ${problem}`)
+    } else console.log(`release-kit verify: ${name} ok${detail ? ` (${detail})` : ''}`)
+  }
+  process.exit(failed ? 1 : 0)
+}
+
 if (command === 'check') check()
+else if (command === 'verify') verify()
 else if (SCRIPT_COMMANDS.has(command)) run(join(SCRIPTS, `${command}.mjs`), rest)
 else if (command === 'apply') run(join(KIT, 'apply.mjs'), rest)
 else if (command && !command.startsWith('-')) run(join(KIT, 'apply.mjs'), [command, ...rest])
 else {
-  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | train | protect | check | apply <repo>`)
+  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | train | protect | check | verify | lanes | apply <repo>`)
   process.exit(command ? 1 : 0)
 }

@@ -9,7 +9,7 @@ import { KIT, makeRepo, run, tmp } from './helpers.mjs'
 import { TYPES } from '../template/scripts/release-kit/conventional.mjs'
 
 const read = (path) => readFileSync(join(KIT, path), 'utf8')
-const DOCS = ['README.md', 'STANDARD.md', 'RELEASING.md', 'template/RELEASING.md', 'AGENTS.md', 'template/AGENTS.release.md', ...readdirSync(join(KIT, 'docs')).map((f) => `docs/${f}`)]
+const DOCS = ['README.md', 'STANDARD.md', 'RELEASING.md', 'template/RELEASING.md', 'AGENTS.md', 'template/AGENTS.release.md', ...readdirSync(join(KIT, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)]
 const MODES = ['package', 'reusable', 'vendored']
 /** The text of the README section under `heading`, up to the next heading of the same level or higher. */
 const section = (doc, heading) => {

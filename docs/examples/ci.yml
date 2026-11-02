@@ -1,0 +1,96 @@
+# An example ci.yml with CI lanes (see docs/CI_LANES.md). Copy it, keep the
+# changes and result jobs, and replace the checks and e2e jobs with your own.
+# Require only "CI result" in branch protection.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch: # the release train runs it on its release commit
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: What changed
+    uses: n8watkins/release-kit/.github/workflows/changes.yml@vX.Y.Z # the installed kit version
+
+  # A kit-only update (Dependabot, or a re-run of apply): about a minute.
+  kit:
+    name: Kit update
+    needs: changes
+    if: needs.changes.outputs.kit == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx --no-install release-kit verify
+
+  # Install, lint, types, unit tests and build: everything but docs and kit-only changes.
+  checks:
+    name: Checks
+    needs: changes
+    if: needs.changes.outputs.checks == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # The expensive part: only when something that ships changed.
+  e2e:
+    name: End to end
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:e2e
+
+  # The only required check. It always runs, and passes when every job above
+  # passed or was skipped on purpose by its lane.
+  result:
+    name: CI result
+    if: always()
+    needs: [changes, kit, checks, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed, or was skipped by its lane
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::A job ended with '$result'."; exit 1 ;;
+            esac
+          done
