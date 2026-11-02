@@ -18,6 +18,10 @@
 //                        the scripts are copied into scripts/release-kit/
 //   --vendored           workflows carry the steps; the scripts are copied
 //   --kit-ref <ref>      the release-kit tag or commit to pin (default vX.Y.Z of this kit)
+//   --repository <owner/repo>
+//                        the upstream repo, the only one whose Release and
+//                        train workflows run (default: .release.json
+//                        "repository", else the upstream or origin remote)
 //   --force              replace workflows with the same name the kit didn't write
 //
 // The choices are saved in .release.json, so re-running with no options keeps
@@ -43,6 +47,9 @@ const SCHEDULE_LINE = /- cron: "[^"\n]*" # release-kit: schedule/
 // The push trigger of commits.yml: main and master, plus the branches releases
 // are cut from (.release.json "branches"), so release commits get checked too.
 const BRANCHES_LINE = /^( {4}branches: )\[main, master\]$/m
+// The fork guard on the Release and train jobs: only the upstream repo publishes.
+const FORK_GUARD_LINE = /^( {4})if: .* # release-kit: fork guard$/m
+const SLUG = /^[\w.-]+\/[\w.-]+$/
 const NPMRC_NOTE = '# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.'
 
 const argv = process.argv.slice(2)
@@ -56,11 +63,11 @@ function valueOf(name) {
 }
 function usage(problem) {
   if (problem) console.error(`apply: ${problem}`)
-  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--force]')
+  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--repository <owner/repo>] [--force]')
   process.exit(1)
 }
 
-const valued = new Set(['--schedule', '--kit-ref', '--train-checks'])
+const valued = new Set(['--schedule', '--kit-ref', '--train-checks', '--repository'])
 const repo = argv.find((a, i) => !a.startsWith('--') && !valued.has(argv[i - 1]))
 if (!repo || !existsSync(join(repo, 'package.json'))) usage('the repo needs a package.json')
 const force = has('force')
@@ -75,6 +82,8 @@ if (schedule !== undefined && has('no-train')) usage('--schedule turns the train
 if (schedule !== undefined && !/^[\d*/,A-Za-z-]+( [\d*/,A-Za-z-]+){4}$/.test(schedule)) usage(`"${schedule}" is not a five-field cron schedule`)
 const kitRef = valueOf('kit-ref') ?? `v${KIT_VERSION}`
 if (!/^[\w./-]+$/.test(kitRef)) usage(`"${kitRef}" is not a tag, branch or commit`)
+const repositoryFlag = valueOf('repository')
+if (repositoryFlag !== undefined && !SLUG.test(repositoryFlag)) usage(`--repository takes owner/repo, not "${repositoryFlag}"`)
 
 const done = []
 const skipped = []
@@ -95,6 +104,17 @@ else if (has('train') || schedule !== undefined || trainChecks) {
   config.train = { ...config.train, schedule: schedule ?? config.train?.schedule ?? DEFAULT_SCHEDULE }
   if (trainChecks) config.train.checks = trainChecks
 }
+// The upstream repo: the only one whose Release and train jobs run, so a fork
+// that pushes a tag or runs the train publishes nothing. Saved, so a rerun in
+// a fork's clone still names the upstream.
+if (repositoryFlag) config.repository = repositoryFlag
+else if (typeof config.repository !== 'string' || !SLUG.test(config.repository)) {
+  delete config.repository
+  const found = upstreamRepository()
+  if (found) config.repository = found
+  else skipped.push('could not tell which GitHub repo this is (no upstream or origin remote on github.com): the Release workflow skips forks instead; rerun with --repository owner/repo to name it')
+}
+const forkGuard = config.repository ? `github.repository == '${config.repository}'` : '${{ !github.event.repository.fork }}'
 const packaged = config.workflows === 'package'
 // Package mode calls the kit's workflows at the pinned tag, like reusable mode.
 const reusable = config.workflows !== 'vendored'
@@ -193,6 +213,7 @@ for (const source of walk(TEMPLATE)) {
         .replaceAll('@KIT_REF', /^[0-9a-f]{40}$/.test(kitRef) ? `@${kitRef} # release-kit ${KIT_VERSION}` : `@${kitRef}`)
       : readFileSync(source, 'utf8')
     if (train) content = content.replace(SCHEDULE_LINE, `- cron: "${train.schedule}" # release-kit: schedule`)
+    content = content.replace(FORK_GUARD_LINE, `$1if: ${forkGuard} # release-kit: fork guard`)
     if (name === 'commits.yml') content = content.replace(BRANCHES_LINE, `$1[${pushBranches.map(branchFilter).join(', ')}]`)
     writeWorkflow(path, content)
     continue
@@ -373,6 +394,22 @@ function writeNpmrc() {
     write(path, current ? `${current.replace(/\n*$/, '\n')}${line}` : line)
     done.push(`${path}: allow-git=root (npm 12 installs git dependencies, like the kit, only when allowed)`)
   }
+}
+
+/**
+ * owner/repo on GitHub: the "upstream" remote when there is one (a fork's
+ * clone), else "origin", else package.json "repository"; or undefined.
+ */
+function upstreamRepository() {
+  const slug = (url) => /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url ?? '')?.[1]
+  for (const remote of ['upstream', 'origin']) {
+    try {
+      const found = slug(execFileSync('git', ['-C', repo, 'remote', 'get-url', remote], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim())
+      if (found) return found
+    } catch {}
+  }
+  const field = JSON.parse(read('package.json')).repository
+  return slug(typeof field === 'string' ? field.replace(/^github:/, 'https://github.com/') : field?.url)
 }
 
 /** What already manages this repo's git hooks (other than the kit or husky), or null. */

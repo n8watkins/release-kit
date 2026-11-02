@@ -20,6 +20,8 @@ permissions:
 
 jobs:
   release:
+    # Only the upstream repo publishes: a fork's tags and runs release nothing.
+    if: github.repository == 'UPSTREAM_REPO' # release-kit: fork guard
     permissions:
       contents: write # only the kit's publish job uses it
     uses: KIT_REPO/.github/workflows/release.yml@KIT_REF

@@ -390,15 +390,67 @@ test('package mode groups a kit release into one Dependabot PR, and upgrades the
   assert.doesNotMatch(readFileSync(path, 'utf8'), /multi-ecosystem/)
 })
 
-test('check warns about a dependabot.yml an older apply wrote without the cooldown exemption', async () => {
+test('the Release and train jobs run only in the upstream repo, named from .release.json or the remotes, on every rerun', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('fork-guard'))
+  const workflow = (name) => readFileSync(join(repo, '.github/workflows', name), 'utf8')
+  const config = () => JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8'))
+  const guard = (slug) => new RegExp(`^ {4}if: github\\.repository == '${slug}' # release-kit: fork guard$`, 'm')
+
+  // No GitHub remote: the jobs skip any fork instead, and apply says how to name the repo.
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo, '--train']), /could not tell which GitHub repo this is/)
+  assert.match(workflow('release.yml'), /^ {4}if: \$\{\{ !github\.event\.repository\.fork \}\} # release-kit: fork guard$/m)
+  assert.equal(config().repository, undefined)
+
+  // A fork's clone: "upstream" wins over "origin", and the name is saved.
+  run(repo, 'git', ['remote', 'add', 'origin', 'git@github.com:forker/app.git'])
+  run(repo, 'git', ['remote', 'add', 'upstream', 'https://github.com/acme/app.git'])
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  for (const name of ['release.yml', 'release-train.yml']) assert.match(workflow(name), guard('acme/app'), name)
+  assert.equal(config().repository, 'acme/app')
+  // Rerunning apply (which rewrites the workflows) keeps the guard, even with the remotes gone.
+  run(repo, 'git', ['remote', 'remove', 'upstream'])
+  run(repo, 'git', ['remote', 'remove', 'origin'])
+  writeFileSync(join(repo, '.github/workflows/release.yml'), 'name: Release # release-kit\n')
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.match(workflow('release.yml'), guard('acme/app'))
+
+  // The vendored copies carry it on the first job, which every other job needs.
+  quiet(KIT, 'node', ['apply.mjs', repo, '--vendored'])
+  assert.match(workflow('release.yml'), new RegExp(`  verify:\\n    name: Verify and build\\n(?:    #.*\\n)*${guard('acme/app').source.slice(1, -1)}`))
+  assert.match(workflow('release-train.yml'), new RegExp(`  plan:\\n    name: Anything to release\\?\\n(?:    #.*\\n)*${guard('acme/app').source.slice(1, -1)}`))
+  assert.match(workflow('release.yml'), /  publish:\n[\s\S]*needs: verify/)
+
+  // --repository renames it; a malformed name is refused.
+  quiet(KIT, 'node', ['apply.mjs', repo, '--repository', 'acme/renamed'])
+  assert.match(workflow('release.yml'), guard('acme/renamed'))
+  assert.equal(config().repository, 'acme/renamed')
+  assert.notEqual(attempt(KIT, 'node', ['apply.mjs', repo, '--repository', "a/b' || true"]).status, 0)
+})
+
+test("the kit's own workflows skip forks without naming a repo, so callers anywhere still run them", () => {
+  for (const [file, job] of [['template/.github/workflows/release.yml', 'verify'], ['template/.github/workflows/release-train.yml', 'plan']]) {
+    const text = readFileSync(join(KIT, file), 'utf8')
+    assert.match(text, new RegExp(`^  ${job}:\\n(?: {4}.*\\n)*? {4}if: \\$\\{\\{ !github\\.event\\.repository\\.fork \\}\\} # release-kit: fork guard$`, 'm'), file)
+  }
+  for (const file of ['reusable/release.yml', 'reusable/release-train.yml']) {
+    assert.match(readFileSync(join(KIT, file), 'utf8'), /^ {4}if: github\.repository == 'UPSTREAM_REPO' # release-kit: fork guard$/m, file)
+  }
+})
+
+test('check warns about files an older apply wrote without the fork guard or the Dependabot cooldown exemption', async () => {
   const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
   const repo = makeRepo(tmp('apply-stale'))
   const check = () => spawnSync('node', [join(KIT, 'bin/release-kit.mjs'), 'check'], { cwd: repo, encoding: 'utf8', env: { ...process.env, RELEASE_KIT_OFFLINE: '1' } }).stderr
-  quiet(KIT, 'node', ['apply.mjs', repo])
-  assert.doesNotMatch(check(), /cooldown/)
+  quiet(KIT, 'node', ['apply.mjs', repo, '--train'])
+  assert.doesNotMatch(check(), /fork guard|cooldown/)
   // What kit 2.2.0 wrote.
+  writeFileSync(join(repo, '.github/workflows/release.yml'), 'name: Release # release-kit\njobs:\n  release:\n    uses: n8watkins/release-kit/.github/workflows/release.yml@v2.2.0\n')
   writeFileSync(join(repo, '.github/dependabot.yml'), '# release-kit: a new kit release arrives as one update PR.\nversion: 2\n')
-  assert.match(check(), /dependabot\.yml lets Dependabot's cooldown propose older kit versions/)
+  const stale = check()
+  assert.match(stale, /release\.yml has no fork guard, so a fork that pushes a tag publishes a release: rerun npx release-kit apply \./)
+  assert.match(stale, /dependabot\.yml lets Dependabot's cooldown propose older kit versions/)
+  assert.doesNotMatch(stale, /release-train\.yml has no fork guard/)
   quiet(KIT, 'node', ['apply.mjs', repo])
-  assert.doesNotMatch(check(), /cooldown/)
+  assert.doesNotMatch(check(), /fork guard|cooldown/)
 })

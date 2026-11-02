@@ -26,6 +26,8 @@ permissions:
 
 jobs:
   train:
+    # Only the upstream repo publishes: a fork's tags and runs release nothing.
+    if: github.repository == 'UPSTREAM_REPO' # release-kit: fork guard
     permissions:
       contents: write # push the release commit, the tag and the temporary check branch
       actions: write # start train.checks and the Release workflow
