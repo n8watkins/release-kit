@@ -40,6 +40,9 @@ const REUSABLE = join(KIT, 'reusable')
 const MARKER = 'release-kit'
 const DEFAULT_SCHEDULE = '0 16 * * 1'
 const SCHEDULE_LINE = /- cron: "[^"\n]*" # release-kit: schedule/
+// The push trigger of commits.yml: main and master, plus the branches releases
+// are cut from (.release.json "branches"), so release commits get checked too.
+const BRANCHES_LINE = /^( {4}branches: )\[main, master\]$/m
 const NPMRC_NOTE = '# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.'
 
 const argv = process.argv.slice(2)
@@ -96,6 +99,10 @@ const packaged = config.workflows === 'package'
 // Package mode calls the kit's workflows at the pinned tag, like reusable mode.
 const reusable = config.workflows !== 'vendored'
 const train = config.train ? { schedule: config.train.schedule ?? DEFAULT_SCHEDULE, checks: config.train.checks ?? [] } : null
+const pushBranches = [...new Set(['main', 'master', ...(Array.isArray(config.branches) ? config.branches : []).filter((b) => typeof b === 'string' && b)])]
+// A branch name as a YAML flow item and a GitHub branch filter: plain when it
+// can be, else single-quoted with the filter's pattern characters escaped.
+const branchFilter = (b) => /^[\w./-]+$/.test(b) ? b : `'${b.replace(/[*?+[\]!\\]/g, '\\$&').replaceAll("'", "''")}'`
 
 // Files that also carry the version, detected on the first run.
 if (!hadConfig) {
@@ -186,6 +193,7 @@ for (const source of walk(TEMPLATE)) {
         .replaceAll('@KIT_REF', /^[0-9a-f]{40}$/.test(kitRef) ? `@${kitRef} # release-kit ${KIT_VERSION}` : `@${kitRef}`)
       : readFileSync(source, 'utf8')
     if (train) content = content.replace(SCHEDULE_LINE, `- cron: "${train.schedule}" # release-kit: schedule`)
+    if (name === 'commits.yml') content = content.replace(BRANCHES_LINE, `$1[${pushBranches.map(branchFilter).join(', ')}]`)
     writeWorkflow(path, content)
     continue
   }

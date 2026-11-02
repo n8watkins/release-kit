@@ -58,6 +58,7 @@ function check() {
     }
   }
   warnings.push(...pinMismatches(installed))
+  warnings.push(...branchGaps())
   for (const w of warnings) console.warn(`release-kit: ${w}`)
   if (!warnings.length) console.log(`release-kit ${installed}: up to date`)
 }
@@ -73,6 +74,18 @@ function pinMismatches(installed) {
     if (found && found !== `v${installed}`) out.push(`${dir}/${file} calls release-kit ${found}, but ${installed} is installed: rerun npx release-kit apply . to line them up`)
   }
   return out
+}
+
+/** Branches releases are cut from (.release.json "branches") whose pushes commits.yml doesn't check. */
+function branchGaps() {
+  const commits = '.github/workflows/commits.yml'
+  const branches = existsSync('.release.json') ? JSON.parse(readFileSync('.release.json', 'utf8')).branches : undefined
+  if (!Array.isArray(branches) || !existsSync(commits)) return []
+  const line = /^ {4}branches: \[(.*)\]$/m.exec(readFileSync(commits, 'utf8'))?.[1]
+  if (line === undefined) return []
+  const pushed = line.split(',').map((b) => b.trim().replace(/^'(.*)'$/, '$1').replaceAll("''", "'").replace(/\\(.)/g, '$1'))
+  const missing = branches.filter((b) => typeof b === 'string' && !pushed.includes(b))
+  return missing.length ? [`${commits} doesn't check pushes to ${missing.join(', ')}, a branch releases are cut from: rerun npx release-kit apply . to add it`] : []
 }
 
 /**
