@@ -6,7 +6,7 @@ The kit's reusable `auto-merge.yml` merges them on their own, within a strict po
 ## The policy
 
 - **What may merge on its own:** release-kit updates, and Dependabot patch and minor updates, including Dependabot security updates.
-- **What never does:** a major update of anything, an update whose kind can't be read, a draft, and any pull request that isn't from an update bot.
+- **What never does:** a major update of anything, a downgrade, an update whose kind can't be read, a draft, and any pull request that isn't from an update bot.
 - **Who counts as an update bot:** `dependabot[bot]`, plus any author listed in the `bots` input (for example the rollout bot's `release-kit-bot[bot]`), whose pull requests must also come from a `release-kit/` branch.
 - **How the kind is read:** the release-kit pin in `package.json` on both sides of the pull request, and Dependabot's own `updated-dependencies` metadata in its commit messages.
   A grouped pull request takes the biggest change in it, so a group with one major update waits for a person.
@@ -30,6 +30,14 @@ For such repos the same workflow runs on `workflow_run`: each time one of the re
 It reacts to finished workflows instead of polling, so it costs one short job per finished workflow, not a job that waits.
 List every workflow that runs on pull requests under `workflow_run`, so a check that finishes last still triggers a look.
 Turn it off with `fallback: false`.
+
+### Dependabot proposes an older kit
+
+Dependabot waits 3 days before proposing a new release (its default cooldown).
+For a git dependency like the kit it then proposes the newest tag outside that window, even when that tag is older than the one installed: a repo on v2.2.0 got "bump release-kit from v2.2.0 to v2.0.1" a day after v2.1.0 and v2.2.0 came out.
+The `dependabot.yml` apply writes since v2.3.0 excludes the kit from the cooldown, so the newest tag is always the candidate and no downgrade is proposed.
+The policy also refuses to merge a downgrade, as a second line of defense: close such a pull request (Dependabot then ignores that version) and rerun `npx release-kit apply .` to get the current `dependabot.yml`.
+A pull request's own `pull_request` run uses the kit version it moves to, so for a downgrade to a kit older than v2.3.0 only the `workflow_run` fallback, which runs from the default branch, applies the check.
 
 ## Setting it up
 

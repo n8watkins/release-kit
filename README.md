@@ -106,7 +106,8 @@ Each repo installs the kit as a dev dependency pinned to a release tag, `"releas
 - **Version bumps arrive by Dependabot, as one pull request.** apply writes `.github/dependabot.yml` with a Dependabot [multi-ecosystem group](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configuring-multi-ecosystem-updates) named `release-kit`, so a new kit release opens a single PR that moves the dev dependency (npm) and every workflow pin (github-actions) together, and the repo's CI tests it before it is merged.
   Its commits read `build(deps): ...` in every repo.
   A `dependabot.yml` the kit wrote before is upgraded by re-running apply; a repo's own `dependabot.yml` is left alone, and apply says how to add the group.
-  Limits: Dependabot documents no `cooldown` for multi-ecosystem groups, so the kit sets none, and a release still reaches each repo's PR queue within a day.
+  The kit is excluded from Dependabot's default 3-day cooldown: with the cooldown, Dependabot skips the newest tags of a git dependency and proposes the newest older one, even below the installed version (repos on v2.2.0 got "bump release-kit from v2.2.0 to v2.0.1").
+  So a release reaches each repo's PR queue within a day, and the auto-merge policy refuses any downgrade as a second line of defense.
 - **`npm run release:check` warns** when the installed kit is behind the newest release, or when the workflows pin a different version than the one installed.
 - **New files need a re-run of apply.** Dependabot can change a version, not add a file, so when a kit release adds or changes a file apply writes (for example `security.yml` in v2.1.0), run this in each repo after the update lands:
 

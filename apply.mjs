@@ -297,6 +297,9 @@ function writeDependabot() {
   const ours = `# release-kit: a new kit release arrives as one update PR (the dev dependency and the workflow pins).
 # One multi-ecosystem group, so the npm and github-actions updates land together:
 # separate PRs would leave package.json and the workflows on different kit versions.
+# No cooldown for the kit: Dependabot's default 3-day cooldown skips the newest
+# tags, and for a git dependency it then proposes the newest older tag, even
+# one below the installed version (a downgrade).
 version: 2
 multi-ecosystem-groups:
   release-kit:
@@ -309,6 +312,8 @@ updates:
     allow:
       - dependency-name: release-kit
     multi-ecosystem-group: release-kit
+    cooldown:
+      exclude: ["release-kit"]
     commit-message:
       prefix: build
       include: scope
@@ -318,6 +323,8 @@ updates:
     allow:
       - dependency-name: ${KIT_REPO}*
     multi-ecosystem-group: release-kit
+    cooldown:
+      exclude: ["${KIT_REPO}*"]
     commit-message:
       prefix: build
       include: scope
@@ -339,6 +346,7 @@ updates:
     const missing = ['npm', 'github-actions'].filter((e) => !atRoot(e))
     if (missing.length) skipped.push(`${path} has no ${missing.join(' or ')} entry for directory "/": add one so kit releases arrive as update PRs`)
     else if (/release-kit/.test(current)) skipped.push(`${path} mentions release-kit: make sure it doesn't ignore it`)
+    if (!/cooldown:[\s\S]*exclude:[^\n]*release-kit/.test(current)) skipped.push(`${path} is the repo's own and doesn't exclude release-kit from Dependabot's default 3-day cooldown, which can propose a downgrade to an older kit tag: add cooldown: exclude: ["release-kit"] to the npm entry and ["${KIT_REPO}*"] to the github-actions entry`)
     if (!/multi-ecosystem-group:\s*["']?release-kit/.test(current)) skipped.push(`${path} is the repo's own, so kit releases arrive as separate npm and github-actions PRs: group them with a "release-kit" multi-ecosystem group (see README, "How upgrades reach your repos")`)
     return
   }

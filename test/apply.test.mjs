@@ -376,11 +376,29 @@ test('package mode groups a kit release into one Dependabot PR, and upgrades the
   assert.equal(grouped.match(/^ {4}multi-ecosystem-group: release-kit$/gm).length, 2)
   assert.match(grouped, /package-ecosystem: npm\n {4}directory: \/\n {4}patterns: \["release-kit"\]/)
   assert.match(grouped, /package-ecosystem: github-actions\n {4}directory: \/\n {4}patterns: \["n8watkins\/release-kit\*"\]/)
+  // Dependabot's default cooldown made it propose older kit tags (v2.2.0 -> v2.0.1): the kit is exempt.
+  assert.match(grouped, /patterns: \["release-kit"\][\s\S]*?\n {4}cooldown:\n {6}exclude: \["release-kit"\]\n {4}commit-message:/)
+  assert.match(grouped, /patterns: \["n8watkins\/release-kit\*"\][\s\S]*?\n {4}cooldown:\n {6}exclude: \["n8watkins\/release-kit\*"\]\n {4}commit-message:/)
   const again = quiet(KIT, 'node', ['apply.mjs', repo])
   assert.doesNotMatch(again, /\.github\/dependabot\.yml/, 're-applying changes nothing')
 
   // The repo's own dependabot.yml is left alone, with a note on grouping.
   writeFileSync(path, 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n  - package-ecosystem: github-actions\n    directory: /\n')
-  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /is the repo's own, so kit releases arrive as separate npm and github-actions PRs/)
+  const own = quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.match(own, /is the repo's own, so kit releases arrive as separate npm and github-actions PRs/)
+  assert.match(own, /doesn't exclude release-kit from Dependabot's default 3-day cooldown/)
   assert.doesNotMatch(readFileSync(path, 'utf8'), /multi-ecosystem/)
+})
+
+test('check warns about a dependabot.yml an older apply wrote without the cooldown exemption', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-stale'))
+  const check = () => spawnSync('node', [join(KIT, 'bin/release-kit.mjs'), 'check'], { cwd: repo, encoding: 'utf8', env: { ...process.env, RELEASE_KIT_OFFLINE: '1' } }).stderr
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.doesNotMatch(check(), /cooldown/)
+  // What kit 2.2.0 wrote.
+  writeFileSync(join(repo, '.github/dependabot.yml'), '# release-kit: a new kit release arrives as one update PR.\nversion: 2\n')
+  assert.match(check(), /dependabot\.yml lets Dependabot's cooldown propose older kit versions/)
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.doesNotMatch(check(), /cooldown/)
 })

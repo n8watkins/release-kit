@@ -59,6 +59,7 @@ function check() {
   }
   warnings.push(...pinMismatches(installed))
   warnings.push(...branchGaps())
+  warnings.push(...staleFiles())
   for (const w of warnings) console.warn(`release-kit: ${w}`)
   if (!warnings.length) console.log(`release-kit ${installed}: up to date`)
 }
@@ -72,6 +73,17 @@ function pinMismatches(installed) {
   for (const file of readdirSync(dir).sort()) {
     const found = pin.exec(readFileSync(join(dir, file), 'utf8'))?.[1]
     if (found && found !== `v${installed}`) out.push(`${dir}/${file} calls release-kit ${found}, but ${installed} is installed: rerun npx release-kit apply . to line them up`)
+  }
+  return out
+}
+
+/** Files an older apply wrote that miss a fix a rerun of apply brings. */
+function staleFiles() {
+  const out = []
+  const dependabot = '.github/dependabot.yml'
+  if (existsSync(dependabot)) {
+    const text = readFileSync(dependabot, 'utf8')
+    if (text.startsWith('# release-kit:') && !/cooldown:\s*\n\s*exclude:[^\n]*release-kit/.test(text)) out.push(`${dependabot} lets Dependabot's cooldown propose older kit versions (a downgrade): rerun npx release-kit apply .`)
   }
   return out
 }

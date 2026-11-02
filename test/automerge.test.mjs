@@ -39,6 +39,10 @@ test('Dependabot metadata, version changes and kit pins are read the way Dependa
   assert.equal(semverChange('v2.1.0', '2.2.0'), 'minor')
   assert.equal(semverChange('2.9.9', '3.0.0'), 'major')
   assert.equal(semverChange('2.1.0', 'main'), null)
+  // Dependabot's cooldown once proposed v2.2.0 -> v2.0.1 for a git dependency.
+  assert.equal(semverChange('v2.2.0', 'v2.0.1'), 'downgrade')
+  assert.equal(semverChange('2.0.0', '1.2.0'), 'downgrade')
+  assert.equal(semverChange('2.2.0', '2.2.0'), null)
   assert.equal(kitVersion('github:n8watkins/release-kit#v2.1.0'), '2.1.0')
   assert.equal(kitVersion('github:n8watkins/release-kit#' + 'a'.repeat(40)), null)
 })
@@ -53,6 +57,8 @@ test('decide: auto-merge for patch and minor updates where checks are required, 
   assert.equal(decide({ pr: pr(), update: { type: 'patch', what: 'next' }, repo: protectedRepo, event: 'pull_request' }).action, 'enable')
   assert.match(decide({ pr: pr(), update: { type: 'major', what: 'release-kit' }, repo: protectedRepo, event: 'pull_request' }).reason, /major update: a person reviews/)
   assert.match(decide({ pr: pr(), update: { type: null, what: 'release-kit' }, repo: protectedRepo, event: 'pull_request' }).reason, /could not tell/)
+  assert.match(decide({ pr: pr(), update: { type: 'downgrade', what: 'release-kit' }, repo: protectedRepo, event: 'pull_request' }).reason, /older version/)
+  assert.equal(decide({ pr: pr(), update: { type: 'downgrade', what: 'release-kit' }, repo: freePrivate, event: 'workflow_run', checks: 'green' }).action, 'skip')
   // The rollout bot's pull requests count only from its release-kit/ branch.
   const bots = ['dependabot[bot]', 'release-kit-bot[bot]']
   assert.equal(decide({ pr: pr({ author: 'release-kit-bot[bot]', headRef: 'release-kit/update' }), update: minor, repo: protectedRepo, event: 'pull_request', bots }).action, 'enable')

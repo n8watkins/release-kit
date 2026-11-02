@@ -38,11 +38,16 @@ export function dependabotUpdates(message) {
   return updates
 }
 
-/** patch, minor or major between two x.y.z versions (with or without a "v"), or null. */
+/**
+ * patch, minor or major between two x.y.z versions (with or without a "v"),
+ * "downgrade" when `to` is lower, or null.
+ */
 export function semverChange(from, to) {
   const parse = (v) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(v ?? '')?.slice(1).map(Number)
   const [a, b] = [parse(from), parse(to)]
   if (!a || !b) return null
+  const lower = b.findIndex((n, i) => n !== a[i])
+  if (lower !== -1 && b[lower] < a[lower]) return 'downgrade'
   if (a[0] !== b[0]) return 'major'
   if (a[1] !== b[1]) return 'minor'
   if (a[2] !== b[2]) return 'patch'
@@ -68,6 +73,7 @@ export function decide({ pr, update, repo, event, fallback = true, bots = ['depe
   if (!bots.includes(pr.author)) return skip(`${pr.author} is not one of the update bots (${bots.join(', ')})`)
   if (!dependabot && !pr.headRef.startsWith(KIT_BRANCH)) return skip(`${pr.author}'s pull request is not a release-kit update (branch ${KIT_BRANCH}...)`)
   if (!update.type) return skip(`could not tell what kind of update this is (${update.what || 'no version change found'})`)
+  if (update.type === 'downgrade') return skip(`${update.what} would move to an older version: close it (see "Dependabot proposes an older kit" in docs/AUTO_MERGE.md)`)
   if (update.type === 'major') return skip(`${update.what} is a major update: a person reviews and merges it`)
   if (event === 'pull_request') {
     if (!repo.requiredChecks) {
@@ -159,7 +165,8 @@ function main() {
     for (const commit of api(`repos/${repoName}/pulls/${number}/commits?per_page=100`)) parts.push(...dependabotUpdates(commit.commit.message))
   }
   const unknown = parts.find((p) => !p.type)
-  const type = !parts.length || unknown ? null : UPDATE_TYPES[Math.max(...parts.map((p) => UPDATE_TYPES.indexOf(p.type)))]
+  const type = parts.some((p) => p.type === 'downgrade') ? 'downgrade'
+    : !parts.length || unknown ? null : UPDATE_TYPES[Math.max(...parts.map((p) => UPDATE_TYPES.indexOf(p.type)))]
   const what = [...new Set(parts.map((p) => p.name))].join(', ')
 
   // The repo: does the base branch require checks, and is auto-merge allowed?
