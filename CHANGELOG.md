@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.1 - 2026-11-02
+
+### Fixed
+
+- Release-kit protect never requires a check that only runs on some pull requests ([#28](https://github.com/n8watkins/release-kit/pull/28))
+
 ## 2.3.0 - 2026-11-02
 
 Branch and tag protection that fits the release flow, fork-proof release workflows, and no more Dependabot downgrades.
