@@ -164,3 +164,14 @@ test('Release can be run again for an existing tag, from "Run workflow" or a reu
   assert.doesNotMatch(release, /gh release create/, 'publish.mjs creates it, so a rerun finishes it')
   assert.match(read('reusable/release.yml'), /with:\n {6}tag: \$\{\{ inputs\.tag \|\| '' \}\}/)
 })
+
+test('pull request titles are checked, on edit too, and bot pull requests are exempt', () => {
+  const commits = read('template/.github/workflows/commits.yml')
+  for (const file of ['template/.github/workflows/commits.yml', 'reusable/commits.yml']) {
+    assert.match(read(file), /^ {2}pull_request:\n(?: {4}#.*\n)? {4}types: \[opened, synchronize, reopened, edited\]$/m, file)
+  }
+  assert.match(commits, /- name: Check the pull request title\n {8}if: github\.event_name == 'pull_request' && github\.event\.pull_request\.user\.type != 'Bot'\n/)
+  assert.match(stepScript('template/.github/workflows/commits.yml', 'Check the pull request title'), /commit-msg\.mjs" --title /)
+  // The commits are still checked when the title fails, so both problems show at once.
+  assert.match(commits, /- name: Check the new commits\n {8}if: \$\{\{ !cancelled\(\) \}\}/)
+})

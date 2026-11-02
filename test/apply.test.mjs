@@ -234,6 +234,7 @@ test('package mode (the default): the kit is a dev dependency, run from node_mod
 
   const out = quiet(KIT, 'node', ['apply.mjs', repo])
   assert.match(out, /package mode/)
+  assert.match(out, /gh api -X PATCH repos\/\{owner\}\/\{repo\} -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY/)
   const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'))
   assert.equal(pkg.devDependencies['release-kit'], `github:n8watkins/release-kit#v${KIT_VERSION}`)
   assert.equal(pkg.scripts.release, 'release-kit release')

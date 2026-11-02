@@ -20,6 +20,18 @@ type(scope): subject
 
 The `commit-msg` hook checks this locally, and the Commit messages workflow checks every pushed commit.
 
+### Pull requests
+
+A squash merge turns the pull request into one commit whose message is the pull request's title, so the Commit messages workflow checks the title too, and checks it again when it is edited.
+Write the title like a commit subject: `feat: add dark mode`.
+Put any `Release-note:` or `BREAKING CHANGE:` line in the description, and set the repo to use the title and description for squash commits (Settings, General, "Default commit message": "Pull request title and description"), or with the gh CLI:
+
+```sh
+gh api -X PATCH repos/{owner}/{repo} -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY
+```
+
+GitHub's own default uses the commit message instead of the title when a pull request has one commit, and the commit list as the description, where a stray `Release-note:` line from one commit could reword the whole change.
+
 ## Writing for the release notes
 
 `feat`, `fix`, `perf` and `security` subjects become the release notes, the changelog and the public build log.
