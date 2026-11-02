@@ -214,7 +214,7 @@ It needs a release tag to start from, so baseline a new repo first.
 | `release-kit: branches` | The default branch, and the other branches in `.release.json` `branches` | No deletion, no force push, changes only through a pull request (0 approvals), the repo's CI checks must pass |
 | `release-kit: release tags` | `refs/tags/v*` | No deletion, no update: a release tag is created once and never moved |
 
-- **Required checks** are `--checks "CI result,check / check"`, or `.release.json` `protect.checks`, or the ones the ruleset already requires, or else the GitHub Actions checks that passed on each of the last five merged pull requests (only `CI result` from a workflow that has one).
+- **Required checks** are `--checks "CI result,check / check"`, or `.release.json` `protect.checks`, or the ones the ruleset already requires, or else the GitHub Actions checks that passed on the latest merged pull request (only `CI result` from a workflow that has one, and none from a workflow with a `paths` filter, which doesn't run on every pull request).
 - **Nobody bypasses the branch rules by default, admins included**, so an agent using the owner's sign-in can't push to `main` either.
 - **`npm run release -- --push` still works:** when the push of the release commit is rejected, it opens a `release/vX.Y.Z` pull request, merges it once its checks pass, and tags the merged commit; if a check fails it closes the pull request and tags nothing.
 - **The release train** pushes with its deploy key, the one bypass (only in a repo with a train).
