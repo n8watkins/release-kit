@@ -2,32 +2,104 @@
 
 [![CI](https://github.com/n8watkins/release-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/n8watkins/release-kit/actions/workflows/ci.yml)
 
-The n8 release standard as a kit: Conventional Commits, SemVer tags, and GitHub Releases published by a workflow, with notes written from the commits.
-No dependencies of its own: plain Node scripts and GitHub Actions workflows.
-Each repo installs it as a dev dependency pinned to a release tag, so a new kit release reaches every repo as a Dependabot update PR.
-An optional release train cuts releases on a schedule, only when there is user-facing work to ship.
+Releases that explain themselves, from commits that are checked as they are written.
 
-The rules and the reasoning are in [STANDARD.md](STANDARD.md).
+release-kit sets up a whole release process in a GitHub repo with one command:
 
-## Adopt it in a repo (about five minutes)
+- **Commit messages are checked**, by a `commit-msg` hook and by a CI check on every pushed commit, so the history follows [Conventional Commits](https://www.conventionalcommits.org) before release time, not after.
+- **Versions follow SemVer**, picked from the commits: a breaking change is major, a feature is minor, anything else is a patch.
+- **Release notes are written for users**, under the headings New, Fixed, Faster and Safer, from `feat`, `fix`, `perf` and `security` commits; chores, docs and bot commits stay out.
+- **A tag publishes a GitHub Release** through a workflow that checks the tag against every version file, runs the repo's checks again, and checksums any files it ships.
+- **An optional release train** releases on a schedule, but only when something a user would notice has landed.
+- **A weekly security scan** checks every lock file against [OSV.dev](https://osv.dev) and fails on malicious packages and high or critical vulnerabilities.
+- **Agents get the rules too**: apply writes a short section into `AGENTS.md` (and `CLAUDE.md` when the repo has one), so coding agents write commits the check accepts.
+
+It has no runtime dependencies: plain Node scripts and GitHub Actions workflows, with every third-party action pinned to a commit SHA.
+The rules and the reasoning behind them are in [STANDARD.md](STANDARD.md).
+
+## Who it is for
+
+- Solo developers and small teams with several apps or sites on GitHub who want every repo to release the same way.
+- Repos where coding agents write many of the commits, and a rule only holds if a hook and CI enforce it.
+- Projects whose release notes are read by users (a changelog page, a build log, an app's "what's new"), not only by developers.
+
+It is a poor fit today for monorepos with several independently versioned packages, for projects that need to publish to npm or another registry as part of the release, and for repos without a `package.json` (see [Limits](#limits)).
+
+## How it compares
+
+| | release-kit | semantic-release | release-please | changesets |
+|---|---|---|---|---|
+| Version comes from | Conventional Commits | Conventional Commits | Conventional Commits | Changeset files written per change |
+| Checks commit messages | Yes, hook and CI | No (add commitlint) | No | Not applicable |
+| When it releases | `npm run release`, or a scheduled train when there is user-facing work | Every push to a release branch | When the release PR is merged | When the version PR is merged |
+| Notes | Plain headings for users, `Release-note:` rewording | Developer changelog | Developer changelog | Written by hand |
+| Monorepos | No | Community add-on | Yes | Yes |
+| Publishes to npm | No | Yes | No | Yes |
+| Agent instructions and a dependency scan | Yes | No | No | No |
+
+A longer, sourced comparison (including release-it, git-cliff, auto and the deprecated standard-version) is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#3-competitor-comparison).
+
+## Quick start
+
+In the repo you want to release (it needs a `package.json` and a `package-lock.json`):
 
 ```bash
-cd path/to/your-repo
 npx --allow-git=root github:n8watkins/release-kit .   # npm 12 needs --allow-git; or: node path/to/release-kit/apply.mjs .
-npm install                                # installs the pinned kit
-git diff                                   # review what it added
+npm install                                          # installs the pinned kit (see the npm 12 note below)
+git diff                                             # review what it added
 git add -A && git commit -m "chore: adopt release-kit"
-npm run release -- --baseline              # tag the version it's already at
-git push && git push origin vX.Y.Z         # the tag is verified, not published
+npm run release -- --baseline                        # tag the version the repo is already at
+git push && git push origin vX.Y.Z                   # the baseline tag is verified, not published
+```
+
+**npm 12:** npm 12 refuses git dependencies by default, so `npm install` stops with `EALLOWGIT`.
+Add this line to the repo's `.npmrc` until the kit handles it itself:
+
+```ini
+allow-git=root
 ```
 
 From then on:
 
 ```bash
-npm run release -- --dry-run               # preview the next version and notes
-npm run release -- --push                  # release it
-npm run release -- --plan                  # what the release train would do now
+npm run release -- --dry-run      # preview the next version and the notes
+npm run release -- --push         # check, bump, changelog, commit, tag and push; the workflow publishes
+npm run release -- --plan         # what the release train would do now
 ```
+
+## How upgrades reach your repos
+
+Each repo installs the kit as a dev dependency pinned to a release tag, `"release-kit": "github:n8watkins/release-kit#vX.Y.Z"`, and its workflows call the kit's workflows at the same tag.
+
+- **Version bumps arrive by Dependabot.** apply writes `.github/dependabot.yml` so a new kit release opens update PRs for the dev dependency (npm) and for the workflow pins (github-actions), and the repo's CI tests them before they are merged.
+  Today that is one PR for the dev dependency plus one per kit workflow; merge them together.
+- **`npm run release:check` warns** when the installed kit is behind the newest release, or when the workflows pin a different version than the one installed.
+- **New files need a re-run of apply.** Dependabot can change a version, not add a file, so when a kit release adds or changes a file apply writes (for example `security.yml` in v2.1.0), run this in each repo after the update lands:
+
+  ```bash
+  npx release-kit apply .
+  ```
+
+Planned, not built yet:
+
+- A rollout workflow in release-kit that runs apply against every adopting repo on each release and opens one PR per repo through a GitHub App.
+- CI "lanes" shipped by the kit, so a PR that only updates the kit runs a one-minute check instead of the repo's full CI.
+- One grouped Dependabot PR per kit release instead of several.
+
+The design for these is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#6-roadmap).
+
+## What apply adds
+
+- In package mode (the default), the `release-kit` dev dependency and `.github/dependabot.yml`; in the other modes, `scripts/release-kit/` with the release, notes and commit-check scripts.
+- `.github/workflows/release.yml`, `commits.yml` and `security.yml`, plus `release-train.yml` with `--train`.
+- `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script.
+  A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
+- `.release.json`: other files that carry the version (it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode and the train's schedule.
+  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`) and `notes` (see below).
+- `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
+- `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
+
+If the repo ships files, add a `release:artifacts` script that writes them into `release-artifacts/` (for a WXT extension: `wxt zip && cp .output/*.zip release-artifacts/`); the Release workflow checksums and attaches them.
 
 ### Options
 
@@ -37,91 +109,35 @@ npm run release -- --plan                  # what the release train would do now
 | `--schedule "<cron>"` | When the train runs, in UTC (default `"0 16 * * 1"`, Mondays 16:00). Implies `--train`. |
 | `--train-checks <a.yml,b.yml>` | Workflows the train runs on its release commit before moving `main` to it: the ones whose checks branch protection requires. |
 | `--no-train` | Removes the train. |
-| `--package` | The default: the kit is a dev dependency, see below. |
+| `--package` | The default: the kit is a dev dependency, run from `node_modules`. |
 | `--reusable` | The workflows call the kit's, but the scripts are copied into `scripts/release-kit/`. |
 | `--vendored` | Full copies of the workflows and the scripts. |
 | `--kit-ref <ref>` | Pin a commit SHA (or another tag) instead of this kit's version tag. |
 | `--force` | Replace a workflow with the same name that the kit didn't write. |
 
-The choices are saved in `.release.json`, so re-running `apply.mjs` to upgrade keeps them.
+The choices are saved in `.release.json`, so re-running apply to upgrade keeps them.
 
-### Package mode (the default)
+### Package, reusable and vendored modes
 
-The kit is installed like any other tool, and nothing of it is copied into the repo:
+In package mode nothing of the kit is copied into the repo: `npm run release` runs `release-kit release`, and the commit-msg hook runs `release-kit commit-msg` from `node_modules` (before `npm install` it lets commits through with a note; CI checks every commit anyway).
+The `release-kit` command also runs `notes`, `train`, `protect`, `check` and `apply`.
 
-- `package.json` gets `"release-kit": "github:n8watkins/release-kit#vX.Y.Z"` in `devDependencies`.
-- `npm run release` runs `release-kit release`, and the commit-msg hook runs `release-kit commit-msg` from `node_modules` (before `npm install` it lets commits through with a note; CI checks every commit anyway).
-- The workflows are short callers of the kit's own workflows at the same tag (below).
-- `.github/dependabot.yml` watches the dev dependency (npm) and the workflow pins (github-actions), so each kit release arrives as update PRs, and the repo's CI tests it before it is merged. A repo with its own `dependabot.yml` keeps it; apply checks it lists both ecosystems.
-- `npm run release:check` starts with `release-kit check`, which warns (never fails) when the installed kit is behind its newest release or the workflows pin a different version.
-
-The `release-kit` command also runs `notes`, `train`, `protect` and `apply`; `npx release-kit protect` sets up the release train's deploy key.
-
-### Vendored or reusable workflows
-
-Vendored copies the full workflows and scripts into the repo: everything that runs is in the repo, and an upgrade is a re-run of `apply.mjs`.
-Reusable (and package mode) writes short callers instead, for example:
+Package and reusable mode write short callers of the kit's workflows, for example:
 
 ```yaml
 jobs:
   release:
     permissions:
       contents: write
-    uses: n8watkins/release-kit/.github/workflows/release.yml@v1.1.0
+    uses: n8watkins/release-kit/.github/workflows/release.yml@v2.1.0
 ```
 
-The called workflow fetches the kit's scripts at the same ref, so the pin decides everything that runs in CI, and upgrading CI is a one-line change per workflow (Dependabot's `github-actions` updates do it).
-In reusable mode the scripts are still copied into `scripts/release-kit/` for the local hook and `npm run release`; re-run `apply.mjs` to upgrade those. Package mode runs them from `node_modules` instead.
-The repo's own workflows call the kit's, so they need only `contents: read` by default; the release and train callers grant `contents: write` (and `actions: write` for the train) to that one job.
+The called workflow fetches the kit's scripts at the same ref, so the pin decides everything that runs in CI.
+The repo's workflows need only `contents: read` by default; the release and train callers grant `contents: write` (and `actions: write` for the train) to that one job.
+In reusable mode the scripts are also copied into `scripts/release-kit/` for the local hook and `npm run release`; re-run apply to upgrade those.
+Vendored mode copies the full workflows and scripts: everything that runs is in the repo, and an upgrade is a re-run of apply (`scripts/release-kit/VERSION` shows which kit version it runs).
 
-### The release train
-
-With `--train`, a scheduled workflow cuts releases so nobody has to remember:
-
-1. It finds the commits on `main` since the last `vX.Y.Z` tag. With no feature, fix, security or performance change, revert or breaking change among them, it stops: nothing to release.
-2. It runs `npm run release:check` on that exact commit.
-3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version>`: version bump, `CHANGELOG.md`, `chore(release): vX.Y.Z`, tag.
-4. With `train.checks` in `.release.json` (`--train-checks ci.yml,commits.yml`), it pushes that commit to a temporary `release-train/vX.Y.Z` branch, starts each listed workflow there and waits for it to pass.
-5. It pushes `main` and the tag in one atomic push, then makes sure the Release workflow runs on the tag, which publishes the GitHub Release as usual.
-
-Why steps 4 and 5 start workflows explicitly: GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITHUB_TOKEN`, so the pushes alone would check and publish nothing.
-`workflow_dispatch` is the exception, and the train uses it; each workflow in `train.checks` needs `workflow_dispatch:` in its `on:`.
-The same rule means the train can't loop; the commit check also skips bot commits.
-
-On a `main` protected by required status checks, list the workflows that produce those checks in `train.checks`, so the release commit passes them before `main` moves to it.
-GitHub doesn't count checks from `workflow_dispatch` runs toward protection, though, so the push itself needs a deploy key the protection lets through.
-`npx release-kit protect` (`node scripts/release-kit/protect.mjs` in a vendored repo) sets that up once: a ruleset with the required checks that the key (and admins) may bypass, the deploy key, and the `RELEASE_TRAIN_KEY` secret the train's checkout pushes with (see RELEASING.md).
-A tag pushed with the key starts the Release workflow by itself; without the key, the train starts it.
-
-"Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
-It needs a release tag to start from, so baseline a new repo first.
-
-What `apply.mjs` adds or changes:
-
-- In package mode, the `release-kit` dev dependency and `.github/dependabot.yml`; otherwise `scripts/release-kit/`, the release, notes and commit-check scripts.
-- `.github/workflows/release.yml`, `commits.yml` and `security.yml`, plus `release-train.yml` with `--train`.
-- `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script. A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
-- `.release.json`: other files that carry the version (it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`; Cargo files and npm locks are edited in place), the workflow mode and the train's schedule. Optional: `node`, the Node version for the workflows (else `.nvmrc` or `.node-version`, else 22), and `timeZone` for changelog dates (for example `"America/Los_Angeles"`).
-  Also optional: `branches`, the branches `npm run release` cuts releases from (default `["main", "master"]`), for a repo whose shipped build lives on another long-lived branch.
-  The release train still runs on main or master only.
-- `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
-- `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
-
-The workflows install with `npm ci`, so a pnpm, yarn or bun repo needs a `package-lock.json` too (apply warns).
-
-If the repo ships files, add a `release:artifacts` script that writes them into `release-artifacts/` (for a WXT extension: `wxt zip && cp .output/*.zip release-artifacts/`).
-
-## Security scan
-
-`security.yml` scans every lockfile in the repo (npm, pnpm, yarn, bun, Cargo, uv, poetry, pip, Go) against [OSV.dev](https://osv.dev) every Monday and on any pull request that changes a lockfile.
-OSV also lists malicious packages, which Dependabot alerts don't cover, so the two complement each other: Dependabot opens fix PRs for known vulnerabilities, the scan catches a hijacked package.
-
-- **It fails** on a malicious package (an OSV `MAL-` entry) or a high or critical vulnerability (CVSS 7.0 or more, or rated HIGH or CRITICAL by its advisory).
-- **It warns** on everything else, as annotations on the run, so moderate advisories in dev-only tooling don't keep the check red.
-- **To accept a finding on purpose**, add an `[[IgnoredVulns]]` entry (`id`, `ignoreUntil`, `reason`) to `osv-scanner.toml` next to the lockfile.
-- OSV-Scanner is a pinned release, checked against its published SHA-256 before it runs; the gate is `scripts/release-kit/osv-gate.mjs`.
-
-## Notes people want to read
+## Release notes people want to read
 
 The notes come from `feat`, `fix`, `perf` and `security` subjects, so write those for users: what they can now do, or what works better.
 
@@ -131,6 +147,38 @@ The notes come from `feat`, `fix`, `perf` and `security` subjects, so write thos
 - The GitHub Release shows exactly the section written to `CHANGELOG.md`, and `(#12)` links to its pull request.
 
 See [template/RELEASING.md](template/RELEASING.md) for examples.
+
+## The release train
+
+With `--train`, a scheduled workflow cuts releases so nobody has to remember:
+
+1. It finds the commits on `main` since the last `vX.Y.Z` tag.
+   With no feature, fix, security or performance change, `revert:` commit or breaking change among them, it stops: nothing to release.
+2. It runs `npm run release:check` on that exact commit.
+3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version>`.
+4. With `train.checks` in `.release.json` (`--train-checks ci.yml,commits.yml`), it pushes that commit to a temporary `release-train/vX.Y.Z` branch, starts each listed workflow there and waits for it to pass.
+5. It pushes `main` and the tag in one atomic push, then makes sure the Release workflow runs on the tag.
+
+GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITHUB_TOKEN`, so the train starts the checks and the Release workflow itself with `workflow_dispatch`; each workflow in `train.checks` needs `workflow_dispatch:` in its `on:`.
+The same rule means the train can't loop.
+
+GitHub doesn't count checks from `workflow_dispatch` runs toward branch protection, so on a protected `main` the push needs a deploy key the protection lets through.
+`npx release-kit protect` (`node scripts/release-kit/protect.mjs` in a vendored repo) sets that up once: a ruleset with the required checks that deploy keys (and admins) may bypass, the deploy key, and the `RELEASE_TRAIN_KEY` secret (see [RELEASING.md](RELEASING.md)).
+Note that a ruleset's deploy-key bypass applies to every write deploy key on the repo, not only the train's.
+
+"Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
+It needs a release tag to start from, so baseline a new repo first.
+
+## Security scan
+
+`security.yml` scans every lock file in the repo (npm, pnpm, yarn, bun, Cargo, uv, poetry, pip, Go) against OSV.dev every Monday and on any pull request that changes a lock file.
+OSV also lists malicious packages, which Dependabot alerts don't cover, so the two complement each other.
+
+- **It fails** on a malicious package (an OSV `MAL-` entry) or a high or critical vulnerability (CVSS 7.0 or more, or rated HIGH or CRITICAL by its advisory).
+- **It warns** on everything else, as annotations on the run.
+- **To accept a finding on purpose**, add an `[[IgnoredVulns]]` entry (`id`, `ignoreUntil`, `reason`) to `osv-scanner.toml` next to the lock file.
+- OSV-Scanner is a pinned release, checked against its published SHA-256 before it runs.
+- Don't make "Security scan" a required status check: it only runs on pull requests that change a lock file, and GitHub leaves a required check from a skipped workflow waiting forever.
 
 ## When a Release run fails
 
@@ -146,11 +194,19 @@ npm run release -- --baseline <commit> --publish
 git push origin vX.Y.Z
 ```
 
+## Limits
+
+- One version per repo: no monorepo or per-package releases.
+- npm only: apply needs a `package.json`, and the workflows install with `npm ci`, so a pnpm, yarn or bun repo needs a `package-lock.json` too (apply warns).
+- It publishes GitHub Releases, not packages: publishing to npm or another registry is up to the repo.
+- Release files get SHA-256 checksums, but no signatures or provenance attestations yet.
+- The kit is installed from GitHub, not from the npm registry (see the npm 12 note in the quick start).
+
 ## This repo follows it too
 
 The kit uses its own standard: commits are checked by the same hook and workflow, and releases are cut with `npm run release`.
 `scripts/release-kit` and `.githooks` are links into `template/`.
-`.github/workflows/` holds the shipped workflows, because that is where reusable-mode repos call them; a test fails if they drift from the template.
+`.github/workflows/` holds the shipped workflows, because that is where other repos call them; a test fails if they drift from the template.
 The kit's copy of the train has no schedule: the kit is released by hand.
 
 ## Developing the kit
@@ -160,8 +216,7 @@ npm test        # unit tests, end-to-end runs against throwaway repos, workflow 
 ```
 
 Release kit changes with `npm run release` like any other repo.
-Package-mode repos get the new version as Dependabot PRs; a vendored or reusable repo upgrades by re-running `apply.mjs` (its `scripts/release-kit/VERSION` shows which kit version it runs).
-When a release changes what `apply.mjs` writes (a workflow input, the hook), re-run `npx release-kit apply .` in each repo after the update lands.
+When a release changes what apply writes (a new workflow, a workflow input, the hook), re-run `npx release-kit apply .` in each repo after the update lands.
 
 ## License
 
