@@ -384,3 +384,25 @@ test('commits.yml checks pushes to the branches releases are cut from, and check
   quiet(KIT, 'node', ['apply.mjs', repo, '--vendored'])
   assert.match(workflow(), /^ {4}branches: \[main, master, review\/app-v0\.3\.81, 'hot\\\*fix''s'\]$/m, 'the vendored copy too')
 })
+
+test('package mode groups a kit release into one Dependabot PR, and upgrades the dependabot.yml an older kit wrote', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('dependabot'))
+  const path = join(repo, '.github/dependabot.yml')
+  run(repo, 'mkdir', ['-p', '.github'])
+  // What kit 2.1.0 wrote: two ecosystems, two PRs per release.
+  writeFileSync(path, '# release-kit: a new kit release arrives as update PRs (the dev dependency and the workflow pins).\nversion: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n')
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml \(one grouped PR per kit release\)/)
+  const grouped = readFileSync(path, 'utf8')
+  assert.match(grouped, /^multi-ecosystem-groups:\n {2}release-kit:\n {4}schedule:\n {6}interval: daily$/m)
+  assert.equal(grouped.match(/^ {4}multi-ecosystem-group: release-kit$/gm).length, 2)
+  assert.match(grouped, /package-ecosystem: npm\n {4}directory: \/\n {4}patterns: \["release-kit"\]/)
+  assert.match(grouped, /package-ecosystem: github-actions\n {4}directory: \/\n {4}patterns: \["n8watkins\/release-kit\*"\]/)
+  const again = quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.doesNotMatch(again, /\.github\/dependabot\.yml/, 're-applying changes nothing')
+
+  // The repo's own dependabot.yml is left alone, with a note on grouping.
+  writeFileSync(path, 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n  - package-ecosystem: github-actions\n    directory: /\n')
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /is the repo's own, so kit releases arrive as separate npm and github-actions PRs/)
+  assert.doesNotMatch(readFileSync(path, 'utf8'), /multi-ecosystem/)
+})
