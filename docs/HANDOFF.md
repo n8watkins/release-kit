@@ -15,7 +15,7 @@ Latest release: v2.0.1.
 
 ### Open problems
 
-1. **`npm ci` fails on npm 12 in adopting repos.**
+1. **`npm ci` fails on npm 12 in adopting repos.** Fixed after v2.1.0: apply writes `allow-git=root` to `.npmrc` in package mode; each adopter needs one re-run of apply.
    npm 12 blocks git dependencies by default, so `npm ci` stops with `EALLOWGIT` (and empties `node_modules`) in any repo that depends on `github:n8watkins/release-kit`.
    Seen in tl-dw on 2026-10-27; CI is fine today only because it runs an older npm.
    The README covers `--allow-git` for running `apply` with npx, but not for adopters' own installs.

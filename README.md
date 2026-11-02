@@ -45,19 +45,23 @@ In the repo you want to release (it needs a `package.json` and a `package-lock.j
 
 ```bash
 npx --allow-git=root github:n8watkins/release-kit .   # npm 12 needs --allow-git; or: node path/to/release-kit/apply.mjs .
-npm install                                          # installs the pinned kit (see the npm 12 note below)
+npm install                                          # installs the pinned kit (apply allowed it in .npmrc)
 git diff                                             # review what it added
 git add -A && git commit -m "chore: adopt release-kit"
 npm run release -- --baseline                        # tag the version the repo is already at
 git push && git push origin vX.Y.Z                   # the baseline tag is verified, not published
 ```
 
-**npm 12:** npm 12 refuses git dependencies by default, so `npm install` stops with `EALLOWGIT`.
-Add this line to the repo's `.npmrc` until the kit handles it itself:
+**npm 12:** npm 12 refuses git dependencies by default, so `npm install` and `npm ci` stop with `EALLOWGIT`, and the kit is a git dependency.
+In package mode apply adds this line to the repo's `.npmrc` (and leaves an `allow-git=all` the repo already has alone):
 
 ```ini
 allow-git=root
 ```
+
+`root` is the narrowest setting that works: it allows git dependencies listed in the repo's own `package.json`, and none pulled in by other packages.
+npm 10 and 11 accept the line too, so it is safe on every runner.
+A repo that adopted the kit before apply did this gets it by re-running `npx release-kit apply .`.
 
 From then on:
 
@@ -96,6 +100,7 @@ The design for these is in [docs/REVIEW_2026-11.md](docs/REVIEW_2026-11.md#6-roa
   A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
 - `.release.json`: other files that carry the version (it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode and the train's schedule.
   Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`) and `notes` (see below).
+- In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
 
@@ -200,7 +205,7 @@ git push origin vX.Y.Z
 - npm only: apply needs a `package.json`, and the workflows install with `npm ci`, so a pnpm, yarn or bun repo needs a `package-lock.json` too (apply warns).
 - It publishes GitHub Releases, not packages: publishing to npm or another registry is up to the repo.
 - Release files get SHA-256 checksums, but no signatures or provenance attestations yet.
-- The kit is installed from GitHub, not from the npm registry (see the npm 12 note in the quick start).
+- The kit is installed from GitHub, not from the npm registry, so npm 12 needs the `allow-git=root` line apply writes (see the quick start).
 
 ## This repo follows it too
 
@@ -212,8 +217,11 @@ The kit's copy of the train has no schedule: the kit is released by hand.
 ## Developing the kit
 
 ```bash
+npm run hooks   # once after cloning: turns on the commit-msg hook
 npm test        # unit tests, end-to-end runs against throwaway repos, workflow checks (actionlint too, if installed)
 ```
+
+The kit has no `prepare` script on purpose: npm runs a git dependency's `prepare` in every adopting repo, and npm 12 holds install scripts back with a warning.
 
 Release kit changes with `npm run release` like any other repo.
 When a release changes what apply writes (a new workflow, a workflow input, the hook), re-run `npx release-kit apply .` in each repo after the update lands.

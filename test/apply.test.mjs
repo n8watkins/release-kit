@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -295,4 +295,69 @@ test("package mode: the kit's own .githooks isn't mistaken for another hook mana
   assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /has no npm entry for directory "\/"/)
   writeFileSync(join(repo, '.github/dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n  - package-ecosystem: "github-actions"\n    directory: "/"\n')
   assert.doesNotMatch(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml has no/)
+})
+
+test('package mode allows the kit as a git dependency in .npmrc (npm 12), and keeps what the repo set', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const npmrc = (repo) => readFileSync(join(repo, '.npmrc'), 'utf8')
+  const note = '# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.\nallow-git=root\n'
+
+  const fresh = makeRepo(tmp('npmrc'))
+  assert.match(quiet(KIT, 'node', ['apply.mjs', fresh]), /\.npmrc: allow-git=root/)
+  assert.equal(npmrc(fresh), note)
+  quiet(KIT, 'node', ['apply.mjs', fresh])
+  assert.equal(npmrc(fresh), note, 're-applying adds nothing')
+  // Copied scripts need no git dependency, so switching modes takes the line back out.
+  quiet(KIT, 'node', ['apply.mjs', fresh, '--vendored'])
+  assert.ok(!existsSync(join(fresh, '.npmrc')))
+
+  const own = makeRepo(tmp('npmrc-own'))
+  writeFileSync(join(own, '.npmrc'), 'engine-strict=true')
+  quiet(KIT, 'node', ['apply.mjs', own])
+  assert.equal(npmrc(own), `engine-strict=true\n${note}`)
+  quiet(KIT, 'node', ['apply.mjs', own, '--reusable'])
+  assert.equal(npmrc(own), 'engine-strict=true\n')
+
+  const none = makeRepo(tmp('npmrc-none'))
+  writeFileSync(join(none, '.npmrc'), 'allow-git=none\nsave-exact=true\n')
+  assert.match(quiet(KIT, 'node', ['apply.mjs', none]), /allow-git=none -> root/)
+  assert.equal(npmrc(none), 'allow-git=root\nsave-exact=true\n')
+
+  const all = makeRepo(tmp('npmrc-all'))
+  writeFileSync(join(all, '.npmrc'), 'allow-git = all\n')
+  assert.doesNotMatch(quiet(KIT, 'node', ['apply.mjs', all]), /\.npmrc/)
+  assert.equal(npmrc(all), 'allow-git = all\n')
+})
+
+// The real install, with whatever npm is on the PATH (CI runs it with npm 12
+// too): the kit as a git dependency, from a local clone so no network is needed.
+test('an applied repo installs the kit as a git dependency, which npm 12 refuses without .npmrc', async () => {
+  const { makeRepo, tmp, run: quiet, attempt: tryIt } = await import('./helpers.mjs')
+  const npmMajor = Number(quiet(KIT, 'npm', ['--version']).split('.')[0])
+  const root = tmp('install')
+  // The kit as it is in this working tree, committed in a repo of its own.
+  const kit = join(root, 'kit')
+  cpSync(KIT, kit, { recursive: true, filter: (path) => !/\/(\.git|node_modules)$/.test(path) })
+  quiet(kit, 'git', ['init', '-q'])
+  quiet(kit, 'git', ['add', '-A'])
+  quiet(kit, 'git', ['commit', '-q', '--no-verify', '-m', 'chore: the kit'])
+  const repo = makeRepo(join(root, 'repo'))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'))
+  pkg.devDependencies['release-kit'] = `git+file://${kit}`
+  writeFileSync(join(repo, 'package.json'), JSON.stringify(pkg, null, 2))
+  const install = () => tryIt(repo, 'npm', ['install', '--no-audit', '--no-fund'], { npm_config_cache: join(root, 'cache') })
+
+  const installed = install()
+  assert.equal(installed.status, 0, installed.stderr)
+  assert.match(quiet(repo, 'node', ['node_modules/.bin/release-kit', 'check'], { RELEASE_KIT_OFFLINE: '1' }), /release-kit \d+\.\d+\.\d+/)
+  // The kit itself runs no install script, which npm 12 would hold back and warn about.
+  assert.doesNotMatch(installed.stderr, /install-scripts/)
+
+  if (npmMajor >= 12) {
+    run(repo, 'rm', ['-rf', '.npmrc', 'node_modules', 'package-lock.json'])
+    const refused = install()
+    assert.notEqual(refused.status, 0)
+    assert.match(refused.stderr, /EALLOWGIT/)
+  }
 })

@@ -8,7 +8,7 @@
     "test": "node --test test/*.test.mjs",
     "release": "node scripts/release-kit/release.mjs",
     "release:check": "npm test",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "hooks": "git config core.hooksPath .githooks"
   },
   "license": "MIT",
   "author": "Nathan Watkins",
