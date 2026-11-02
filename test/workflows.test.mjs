@@ -13,7 +13,7 @@ const dirs = ['template/.github/workflows', '.github/workflows', 'reusable']
 const files = dirs.flatMap((dir) => readdirSync(join(KIT, dir)).map((name) => join(dir, name)))
 
 test("the kit's own workflows are the ones it ships, so repos can call them", () => {
-  for (const name of ['release.yml', 'commits.yml']) {
+  for (const name of ['release.yml', 'commits.yml', 'security.yml']) {
     assert.equal(read(`.github/workflows/${name}`), read(`template/.github/workflows/${name}`), `.github/workflows/${name} drifted from the template`)
   }
   // The train is the same file without a schedule: the kit doesn't release itself on one.
