@@ -185,6 +185,13 @@ Pushes to main, manual runs and anything the classifier doesn't recognise run ev
 Never use workflow-level `paths` filters for this: a required check from a skipped workflow is never reported, and the pull request waits forever.
 [docs/CI_LANES.md](docs/CI_LANES.md) explains the lanes, the settings and the pitfall, and [docs/examples/ci.yml](docs/examples/ci.yml) is a ready-to-copy `ci.yml`.
 
+## Auto-merge for updates
+
+The kit's reusable `auto-merge.yml` merges release-kit updates and Dependabot patch and minor updates (security ones included) on their own once CI passes; a major update always waits for a person.
+It turns on GitHub's auto-merge only when the base branch requires status checks, because without one GitHub would merge before CI finishes.
+A repo that can't require checks (a private repo on GitHub Free) gets a "merge when green" fallback that merges once every check on the pull request has passed.
+[docs/AUTO_MERGE.md](docs/AUTO_MERGE.md) has the policy and the setup, and [docs/examples/auto-merge.yml](docs/examples/auto-merge.yml) is the workflow to copy.
+
 ## Security scan
 
 `security.yml` scans every lock file in the repo (npm, pnpm, yarn, bun, Cargo, uv, poetry, pip, Go) against OSV.dev every Monday and on any pull request that changes a lock file.
