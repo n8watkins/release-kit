@@ -97,7 +97,7 @@ What a kit-only update can break, checked without the repo's own build and tests
 4. **Notes**: the release scripts load and render the notes since the last release.
 
 It exits 1 on any problem, so a kit update that would break releases fails its pull request.
-A Dependabot update of the dev dependency alone, with the workflow pins left behind, fails the pins step on purpose: group the updates into one pull request, or merge them together.
+A Dependabot update of the dev dependency alone, with the workflow pins left behind, fails the pins step on purpose: the `release-kit` multi-ecosystem group apply writes into `dependabot.yml` keeps them in one pull request.
 
 ## Costs
 

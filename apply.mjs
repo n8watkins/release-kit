@@ -294,8 +294,44 @@ done.push('package.json scripts: release, release:check')
  */
 function writeDependabot() {
   const path = '.github/dependabot.yml'
+  const ours = `# release-kit: a new kit release arrives as one update PR (the dev dependency and the workflow pins).
+# One multi-ecosystem group, so the npm and github-actions updates land together:
+# separate PRs would leave package.json and the workflows on different kit versions.
+version: 2
+multi-ecosystem-groups:
+  release-kit:
+    schedule:
+      interval: daily
+updates:
+  - package-ecosystem: npm
+    directory: /
+    patterns: ["release-kit"]
+    allow:
+      - dependency-name: release-kit
+    multi-ecosystem-group: release-kit
+    commit-message:
+      prefix: build
+      include: scope
+  - package-ecosystem: github-actions
+    directory: /
+    patterns: ["${KIT_REPO}*"]
+    allow:
+      - dependency-name: ${KIT_REPO}*
+    multi-ecosystem-group: release-kit
+    commit-message:
+      prefix: build
+      include: scope
+`
   if (existsSync(join(repo, path))) {
     const current = read(path)
+    // The kit's own file (any version of it) is the kit's to upgrade.
+    if (current.startsWith('# release-kit:')) {
+      if (current !== ours) {
+        write(path, ours)
+        done.push(`${path} (one grouped PR per kit release)`)
+      }
+      return
+    }
     // An entry per ecosystem for the repo root, where the dev dependency and the workflows are.
     const entries = current.split(/\n(?=\s*-\s*package-ecosystem:)/)
     const atRoot = (ecosystem) =>
@@ -303,24 +339,10 @@ function writeDependabot() {
     const missing = ['npm', 'github-actions'].filter((e) => !atRoot(e))
     if (missing.length) skipped.push(`${path} has no ${missing.join(' or ')} entry for directory "/": add one so kit releases arrive as update PRs`)
     else if (/release-kit/.test(current)) skipped.push(`${path} mentions release-kit: make sure it doesn't ignore it`)
+    if (!/multi-ecosystem-group:\s*["']?release-kit/.test(current)) skipped.push(`${path} is the repo's own, so kit releases arrive as separate npm and github-actions PRs: group them with a "release-kit" multi-ecosystem group (see README, "How upgrades reach your repos")`)
     return
   }
-  write(path, `# release-kit: a new kit release arrives as update PRs (the dev dependency and the workflow pins).
-version: 2
-updates:
-  - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: daily
-    allow:
-      - dependency-name: release-kit
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: daily
-    allow:
-      - dependency-name: ${KIT_REPO}*
-`)
+  write(path, ours)
   done.push(path)
 }
 

@@ -99,7 +99,7 @@ Every repo installs the kit as a dev dependency pinned to a release tag (package
 ## Changing the standard
 
 Edit this kit, run its tests (`npm test`) and release it with `npm run release`.
-Dependabot then opens update PRs in every repo (the dev dependency and the workflow pins), and each repo's CI tests the new kit before it is merged.
+Dependabot then opens one grouped update PR in every repo (the dev dependency and the workflow pins together), and each repo's CI tests the new kit before it is merged.
 `npm run release:check` warns in any repo still behind the newest kit.
 When a release changes what `apply.mjs` writes, re-run `npx release-kit apply .` in each repo once the update lands.
 The kit's own `.github/workflows/` are the shipped workflows (the train without a schedule), because reusable-mode repos call them there; a test fails if they drift.
