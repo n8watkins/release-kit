@@ -6,8 +6,8 @@
 
 The owner's release tooling: Conventional Commits drive the version, the tag, `CHANGELOG.md` and the GitHub Release notes (plain "New / Fixed / Faster / Safer" style by default).
 Repos use it as a dev dependency, `github:n8watkins/release-kit#vX.Y.Z`, kept current by Dependabot, plus reusable workflows (the required check is named "check / check").
-Latest release: v2.1.0.
-The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md).
+Latest release: v2.2.0.
+The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the planned work and the owner's steps are in [ROADMAP.md](ROADMAP.md).
 
 ### Who uses it
 
@@ -17,7 +17,7 @@ The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md).
 ### Open problems
 
 1. **npm 12 refuses git dependencies (`EALLOWGIT`).**
-   Fixed on main after v2.1.0: apply writes `allow-git=root` to `.npmrc` in package mode.
+   Fixed in v2.2.0: apply writes `allow-git=root` to `.npmrc` in package mode.
    Each adopter needs one `npx release-kit apply .` after the next kit release.
 2. **A stale `core.hooksPath` silently skips the commit-msg hook.**
    `apply` keeps a repo's own hook manager when `core.hooksPath` is set; in tl-dw it pointed at a folder that no longer existed, so `apply` treated it as another manager and installed no hook (and no `prepare` script).
