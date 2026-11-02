@@ -1,0 +1,83 @@
+# release-kit: the auto-merge policy. release-kit updates and Dependabot patch
+# and minor updates (security ones included) merge on their own once CI
+# passes; a major update always waits for a person (see docs/AUTO_MERGE.md).
+#
+# Called from a repo's auto-merge.yml:
+#   on:
+#     pull_request:
+#     workflow_run:
+#       workflows: [CI]
+#       types: [completed]
+#   jobs:
+#     auto-merge:
+#       permissions:
+#         contents: write
+#         pull-requests: write
+#       uses: n8watkins/release-kit/.github/workflows/auto-merge.yml@vX.Y.Z
+#
+# On pull_request it turns on GitHub's auto-merge, but only when the base
+# branch requires status checks (otherwise GitHub would merge before CI
+# finishes) and the repo allows auto-merge. On workflow_run it is the "merge
+# when green" fallback for repos that can't require checks, such as a private
+# repo on GitHub Free: it merges once every check on the pull request passed.
+name: Auto-merge
+
+on:
+  workflow_call:
+    inputs:
+      fallback:
+        description: "Merge when green (on workflow_run) where the base branch requires no checks"
+        type: boolean
+        default: true
+      merge-method:
+        description: "squash, merge or rebase"
+        type: string
+        default: squash
+      bots:
+        description: "Comma-separated authors whose update pull requests may merge on their own"
+        type: string
+        default: "dependabot[bot]"
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    name: Auto-merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # merge the pull request
+      pull-requests: write # turn on auto-merge
+    steps:
+      # The scripts from the same commit as this workflow file: the kit's at the
+      # pinned ref when called from another repo, else the repo's own copy.
+      - name: Check out the release-kit scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || github.repository }}
+          ref: ${{ job.workflow_sha || github.sha }}
+          path: .release-kit-source
+          sparse-checkout: |
+            template/scripts/release-kit
+            scripts/release-kit
+          persist-credentials: false
+
+      - name: Locate the release-kit scripts
+        run: |
+          if [ -d .release-kit-source/template/scripts/release-kit ]; then
+            mv .release-kit-source/template/scripts/release-kit "$RUNNER_TEMP/release-kit"
+          else
+            mv .release-kit-source/scripts/release-kit "$RUNNER_TEMP/release-kit"
+          fi
+          rm -rf .release-kit-source
+          echo "RELEASE_KIT=$RUNNER_TEMP/release-kit" >> "$GITHUB_ENV"
+
+      # Reads only metadata through the API; no pull request code runs.
+      - name: Apply the policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FALLBACK: ${{ inputs.fallback }}
+          METHOD: ${{ inputs.merge-method }}
+          BOTS: ${{ inputs.bots }}
+        run: node "$RELEASE_KIT/automerge.mjs" --fallback "$FALLBACK" --method "$METHOD" --bots "$BOTS"

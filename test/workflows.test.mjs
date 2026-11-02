@@ -43,10 +43,12 @@ test('workflows read by default and grant write only to the jobs that need it', 
     const text = read(file)
     assert.match(text, /^permissions:\n {2}contents: read\n\n/m, file)
     for (const [, block] of text.matchAll(/^ {4}permissions:\n((?: {6}.*\n)+)/gm)) {
-      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(contents|actions): write(?: #.*)?$/, `${file}: ${line}`)
+      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(contents|actions|pull-requests): write(?: #.*)?$/, `${file}: ${line}`)
     }
   }
   assert.doesNotMatch(read('template/.github/workflows/commits.yml'), /: write/)
+  // Only the auto-merge policy touches pull requests.
+  for (const file of files) if (!/auto-merge\.yml$/.test(file)) assert.doesNotMatch(read(file), /pull-requests: write/, file)
 })
 
 test('every job that runs on a runner has a timeout, so a hung step never runs for GitHub\'s default 6 hours', () => {
@@ -192,4 +194,11 @@ test('the example ci.yml has one required check, which fails on a failed or canc
   // The classifier's outputs are the ones the docs and the example use.
   const changes = read('.github/workflows/changes.yml')
   for (const output of ['lane', 'docs', 'kit', 'checks', 'full', 'ci']) assert.match(changes, new RegExp(`^ {6}${output}:\\n {8}description:`, 'm'), output)
+})
+
+test('the publish and auto-merge jobs check out the kit scripts the same way', () => {
+  const step = /- name: Check out the release-kit scripts\n[\s\S]*?echo "RELEASE_KIT=\$RUNNER_TEMP\/release-kit" >> "\$GITHUB_ENV"\n/g
+  const copies = ['template/.github/workflows/release.yml', '.github/workflows/auto-merge.yml'].flatMap((file) => read(file).match(step))
+  assert.equal(copies.length, 2)
+  assert.equal(copies[0], copies[1])
 })

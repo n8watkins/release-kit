@@ -1,0 +1,25 @@
+# An example auto-merge.yml (see docs/AUTO_MERGE.md). List every workflow
+# that runs on pull requests under workflow_run, so the merge-when-green
+# fallback looks again whenever one of them finishes.
+name: Auto-merge
+
+on:
+  pull_request:
+  workflow_run:
+    workflows: [CI, Commit messages]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    # Only update pull requests, so other pull requests cost no runner time.
+    if: >-
+      (github.event_name == 'pull_request' && (github.event.pull_request.user.login == 'dependabot[bot]' || startsWith(github.head_ref, 'release-kit/')))
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+          && (github.event.workflow_run.actor.login == 'dependabot[bot]' || startsWith(github.event.workflow_run.head_branch, 'release-kit/')))
+    permissions:
+      contents: write # merge the pull request
+      pull-requests: write # turn on auto-merge
+    uses: n8watkins/release-kit/.github/workflows/auto-merge.yml@vX.Y.Z # the installed kit version
