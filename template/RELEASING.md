@@ -81,6 +81,7 @@ npm run release -- --push      # check, bump, changelog, commit, tag, push
 - It bumps `package.json`, `package-lock.json` and any file listed in `.release.json` `versionFiles`, adds a section to `CHANGELOG.md`, commits `chore(release): vX.Y.Z` and tags it.
 - With `--push` it first makes sure `main` isn't behind `origin/main` and runs `npm run release:check` (skip that with `--no-check`), so a tag is only pushed for a commit that passes. If the push is rejected, the release commit and tag are undone.
 - Releases are cut from `main` or `master`; a repo that ships from another long-lived branch lists it in `.release.json` `branches` (for example `["master", "release/1.x"]`).
+  The Commit messages workflow checks pushes to those branches as well as `main` and `master`: rerun apply after changing the list (`npx release-kit apply .` in a package-mode repo, where `npm run release:check` warns until you do).
   The release train still runs on `main` or `master` only.
 - The changelog date is today in `.release.json` `timeZone` (for example `"America/Los_Angeles"`), or in the machine's time zone; set it when the release train cuts releases, because CI runs in UTC.
 - Edit the new `CHANGELOG.md` section before pushing if a line needs rewording (`git commit --amend`, then move the tag with `git tag -f -a --cleanup=verbatim vX.Y.Z` and paste the new section as its message).

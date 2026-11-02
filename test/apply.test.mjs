@@ -362,3 +362,25 @@ test('an applied repo installs the kit as a git dependency, which npm 12 refuses
     assert.match(refused.stderr, /EALLOWGIT/)
   }
 })
+
+test('commits.yml checks pushes to the branches releases are cut from, and check warns when it does not', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-branches'))
+  const workflow = () => readFileSync(join(repo, '.github/workflows/commits.yml'), 'utf8')
+  const check = () => spawnSync('node', [join(KIT, 'bin/release-kit.mjs'), 'check'], { cwd: repo, encoding: 'utf8', env: { ...process.env, RELEASE_KIT_OFFLINE: '1' } })
+
+  quiet(KIT, 'node', ['apply.mjs', repo, '--reusable'])
+  assert.match(workflow(), /^ {4}branches: \[main, master\]$/m, 'without branches, main and master as before')
+
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: [], workflows: 'reusable', branches: ['master', 'review/app-v0.3.81', "hot*fix's"] }))
+  const stale = check()
+  assert.equal(stale.status, 0)
+  assert.match(stale.stderr, /commits\.yml doesn't check pushes to review\/app-v0\.3\.81, hot\*fix's, a branch releases are cut from/)
+
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.match(workflow(), /^ {4}branches: \[main, master, review\/app-v0\.3\.81, 'hot\\\*fix''s'\]$/m)
+  assert.doesNotMatch(check().stderr, /doesn't check pushes/)
+
+  quiet(KIT, 'node', ['apply.mjs', repo, '--vendored'])
+  assert.match(workflow(), /^ {4}branches: \[main, master, review\/app-v0\.3\.81, 'hot\\\*fix''s'\]$/m, 'the vendored copy too')
+})
