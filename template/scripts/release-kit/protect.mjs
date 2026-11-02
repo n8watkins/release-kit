@@ -136,6 +136,18 @@ export function requiredChecksFrom(pulls) {
   return [...sets[0]].filter((name) => sets.every((s) => s.has(name))).sort().map((context) => ({ context, integration_id: GITHUB_ACTIONS_APP }))
 }
 
+/**
+ * Whether a workflow runs on only some pull requests: its pull_request
+ * trigger has a paths or paths-ignore filter, or it is an auto-merge
+ * workflow (its job is skipped on people's pull requests). A branches filter
+ * doesn't count: the pull requests into the protected branch all match it.
+ */
+export function onlySometimes(workflow) {
+  if (/^name:\s*["']?auto-merge/im.test(workflow)) return true
+  const trigger = /^ {2}pull_request(?:_target)?:[^\n]*\n((?: {4,}.*\n|\s*\n)*)/m.exec(`${workflow}\n`)?.[1] ?? ''
+  return /^ {4}(paths|paths-ignore):/m.test(trigger)
+}
+
 /** The parts of a ruleset protect.mjs sets, in a form two rulesets can be compared in. */
 function shape(set) {
   const params = (rule, keys) => Object.fromEntries(keys.map((k) => [k, rule.parameters?.[k]]))
@@ -246,7 +258,23 @@ export function plan({ api, maybe }, repo, { checks: checksFlag, adminBypass = f
       const runs = api(`repos/${repo}/commits/${pull.head.sha}/check-runs?per_page=100`)?.check_runs ?? []
       if (runs.some((r) => r.app?.id === GITHUB_ACTIONS_APP)) sampled.push({ number: pull.number, runs })
     }
-    checks = requiredChecksFrom(sampled.map((s) => s.runs))
+    // A workflow that runs only on some pull requests can't be required:
+    // where it doesn't run, its check never reports and the pull request
+    // waits forever (the security scan runs only when a lock file changes).
+    const workflowOf = new Map()
+    const conditional = new Map()
+    const isConditional = (suite) => {
+      if (!suite) return false
+      if (!workflowOf.has(suite)) workflowOf.set(suite, api(`repos/${repo}/actions/runs?check_suite_id=${suite}&per_page=1`)?.workflow_runs?.[0]?.path ?? null)
+      const path = workflowOf.get(suite)
+      if (!path) return false
+      if (!conditional.has(path)) {
+        const content = maybe(`repos/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`)?.content
+        conditional.set(path, onlySometimes(content ? Buffer.from(content, 'base64').toString('utf8') : ''))
+      }
+      return conditional.get(path)
+    }
+    checks = requiredChecksFrom(sampled.map((s) => s.runs.filter((r) => r.app?.id === GITHUB_ACTIONS_APP && !isConditional(r.check_suite?.id))))
     checksFrom = sampled.length ? `the checks that passed on each of the last ${sampled.length} merged pull requests (${sampled.map((s) => `#${s.number}`).join(', ')})` : 'no merged pull request with GitHub Actions checks'
     if (!checks.length && classic?.required_status_checks?.checks?.length) {
       checks = classic.required_status_checks.checks.map(({ context, app_id }) => ({ context, integration_id: app_id ?? undefined }))
