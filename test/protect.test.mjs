@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { KIT, attempt, tmp } from './helpers.mjs'
-import { BRANCH_RULESET, TAG_RULESET, branchRuleset, drift, protectionWarnings, requiredChecksFrom, tagRuleset } from '../template/scripts/release-kit/protect.mjs'
+import { BRANCH_RULESET, TAG_RULESET, branchRuleset, drift, onlySometimes, protectionWarnings, requiredChecksFrom, tagRuleset } from '../template/scripts/release-kit/protect.mjs'
 
 const ACTIONS = { id: 15368 }
 const run = (name, conclusion = 'success', app = ACTIONS) => ({ name, conclusion, status: 'completed', app })
@@ -48,6 +48,8 @@ else if (args[0] === 'api') {
   else if (path.startsWith('repos/o/r/branches/')) (state.branches ?? []).includes(decodeURIComponent(path.split('/').pop())) ? say({}) : missing()
   else if (path.startsWith('repos/o/r/pulls?')) say(state.pulls ?? [])
   else if (/^repos\\/o\\/r\\/commits\\/\\w+\\/check-runs/.test(path)) say({ check_runs: (state.runs ?? {})[path.split('/')[4]] ?? [] })
+  else if (path.startsWith('repos/o/r/actions/runs?check_suite_id=')) say({ workflow_runs: [{ path: (state.suites ?? {})[path.split('=')[1].split('&')[0]] }].filter((r) => r.path) })
+  else if (path.startsWith('repos/o/r/contents/')) { const file = decodeURIComponent(path.slice('repos/o/r/contents/'.length).split('?')[0]); (state.workflows ?? {})[file] ? say({ content: Buffer.from(state.workflows[file]).toString('base64') }) : missing() }
   else if (path === 'repos/o/r/keys') say(state.keys ?? [])
   else if (path === 'repos/o/r/actions/secrets/RELEASE_TRAIN_KEY') state.secret ? say({ name: 'RELEASE_TRAIN_KEY' }) : missing()
   else missing()
@@ -192,6 +194,22 @@ test('a rerun keeps the checks the ruleset already requires instead of reading t
   assert.match(result.stdout, /required checks from the "release-kit: branches" ruleset as it is \(--checks changes them\)/)
   assert.match(result.stdout, /"release-kit: branches": unchanged/)
   assert.ok(!result.calls.some(({ args }) => args.some((a) => a.startsWith('repos/o/r/pulls'))))
+})
+
+test('a workflow that runs on only some pull requests is never required, even when it ran on every sampled one', () => {
+  const SECURITY = 'name: Security scan\non:\n  schedule:\n    - cron: "0 15 * * 1"\n  pull_request:\n    paths:\n      - "**/package-lock.json"\n'
+  assert.equal(onlySometimes(SECURITY), true)
+  assert.equal(onlySometimes('name: CI\non:\n  pull_request:\n    paths-ignore: ["docs/**"]\n  push:\n'), true)
+  assert.equal(onlySometimes('name: Auto-merge\non:\n  pull_request:\n'), true)
+  // A branches filter matches every pull request into the protected branch.
+  assert.equal(onlySometimes('name: CI\non:\n  pull_request:\n    branches: [main]\n  push:\n    paths: ["src/**"]\n'), false)
+  assert.equal(onlySometimes('name: CI\non: [push, pull_request]\n'), false)
+  // The adopt pull request changed the lock file, so the scan ran there.
+  const suite = (name, id) => ({ ...run(name), check_suite: { id } })
+  const runs = { c3: [suite('Lint, types and build', 1), suite('check / check', 2), suite('osv / osv', 3)] }
+  const result = protect(['--dry-run'], { pulls: [PULLS[0]], runs, suites: { 1: '.github/workflows/ci.yml', 2: '.github/workflows/commits.yml', 3: '.github/workflows/security.yml' }, workflows: { '.github/workflows/security.yml': SECURITY, '.github/workflows/ci.yml': 'name: CI\non:\n  pull_request:\n' } })
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /required checks: Lint, types and build \(app 15368\), check \/ check \(app 15368\)\n/)
 })
 
 test('--checks, .release.json protect.checks and --admin-bypass are honored', () => {
