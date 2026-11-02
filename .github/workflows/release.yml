@@ -42,6 +42,9 @@ env:
 jobs:
   verify:
     name: Verify and build
+    # Forks build nothing here: only the upstream repo publishes. apply.mjs
+    # names the repo in a vendored copy; a called copy skips any fork.
+    if: ${{ !github.event.repository.fork }} # release-kit: fork guard
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:

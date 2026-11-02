@@ -125,10 +125,11 @@ Its design, with the owner's setup steps, is in [docs/ROADMAP.md](docs/ROADMAP.m
 
 - In package mode (the default), the `release-kit` dev dependency and `.github/dependabot.yml`; in the other modes, `scripts/release-kit/` with the release, notes and commit-check scripts.
 - `.github/workflows/release.yml`, `commits.yml` and `security.yml`, plus `release-train.yml` with `--train`.
+  The Release and train jobs carry a fork guard, `if: github.repository == 'owner/repo'`, so a fork that pushes a tag or runs the train publishes nothing; apply names the repo from `.release.json` `repository`, else the `upstream` or `origin` remote (`--repository owner/repo` sets it), and keeps the guard on every rerun.
 - `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script.
   A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
 - `.release.json`: other files that carry the version (`versionFiles`; it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode (`workflows`: `package`, `reusable` or `vendored`) and the train's schedule (`train`).
-  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below) and `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)).
+  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)) and `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in).
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
@@ -147,6 +148,7 @@ If the repo ships files, add a `release:artifacts` script that writes them into 
 | `--reusable` | The workflows call the kit's, but the scripts are copied into `scripts/release-kit/`. |
 | `--vendored` | Full copies of the workflows and the scripts. |
 | `--kit-ref <ref>` | Pin a commit SHA (or another tag) instead of this kit's version tag. |
+| `--repository <owner/repo>` | The upstream repo, the only one whose Release and train jobs run (default: `.release.json` `repository`, else the `upstream` or `origin` remote). |
 | `--force` | Replace a workflow with the same name that the kit didn't write. |
 
 The choices are saved in `.release.json`, so re-running apply to upgrade keeps them.

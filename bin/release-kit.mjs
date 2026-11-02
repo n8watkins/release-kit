@@ -80,6 +80,12 @@ function pinMismatches(installed) {
 /** Files an older apply wrote that miss a fix a rerun of apply brings. */
 function staleFiles() {
   const out = []
+  for (const name of ['release.yml', 'release-train.yml']) {
+    const path = `.github/workflows/${name}`
+    if (!existsSync(path)) continue
+    const text = readFileSync(path, 'utf8')
+    if (text.includes('release-kit') && !text.includes('# release-kit: fork guard')) out.push(`${path} has no fork guard, so a fork that pushes a tag publishes a release: rerun npx release-kit apply .`)
+  }
   const dependabot = '.github/dependabot.yml'
   if (existsSync(dependabot)) {
     const text = readFileSync(dependabot, 'utf8')
