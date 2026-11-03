@@ -18,7 +18,8 @@ jobs:
     name: What changed
     uses: n8watkins/release-kit/.github/workflows/changes.yml@vX.Y.Z # the installed kit version
 
-  # A kit-only update (Dependabot, or a re-run of apply): about a minute.
+  # A kit-only update (Dependabot, or a re-run of apply): about a minute. verify
+  # also warns, without failing, when the files differ from what apply writes.
   kit:
     name: Kit update
     needs: changes

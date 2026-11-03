@@ -15,17 +15,20 @@
 //                                 that doesn't use the kit
 //   release-kit alarm [...]       the Direct push alarm (CI)
 //   release-kit check             warn when this kit is behind the newest release,
-//                                 or the repo's rulesets drifted from protect's
+//                                 the files differ from what apply writes, or the
+//                                 repo's rulesets drifted from protect's
 //   release-kit verify            the fast check a kit-only update runs: the kit
 //                                 installs, every pin agrees, the workflows lint,
-//                                 and the notes render (fails on any problem)
+//                                 and the notes render (fails on any problem); it
+//                                 also warns when the files differ from what apply
+//                                 writes (never fails on that)
 //   release-kit lanes [...]       which CI lane a change needs (lanes.mjs)
 //   release-kit apply <repo> [...] apply or upgrade the kit in a repo
 //   release-kit <repo> [...]      the same as apply
 //
 // Each runs in the current directory, which should be the repo's root.
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { protectionWarnings } from '../template/scripts/release-kit/protect.mjs'
@@ -70,6 +73,7 @@ function check() {
   warnings.push(...pinMismatches(installed))
   warnings.push(...branchGaps())
   warnings.push(...staleFiles())
+  warnings.push(...applyDrift())
   const config = existsSync('.release.json') ? JSON.parse(readFileSync('.release.json', 'utf8')) : {}
   warnings.push(...visibilityGaps(config))
   // The rulesets, or in a private repo on GitHub Free the free safeguards, when
@@ -124,6 +128,26 @@ function staleFiles() {
     if (text.startsWith('# release-kit:') && /^ {4}commit-message:/m.test(text.split(/^updates:$/m)[1] ?? '')) out.push(`${dependabot} is rejected by Dependabot (commit-message belongs on the multi-ecosystem group), so no kit updates arrive: rerun npx release-kit apply .`)
   }
   return out
+}
+
+/**
+ * The files `apply --check` says this kit version would add, change or remove:
+ * one warning, or none when the repo has what apply writes. Files apply leaves
+ * alone (a repo's own workflow, dependabot.yml or hooks) never count, since
+ * apply doesn't write them.
+ */
+function applyDrift() {
+  if (!existsSync('package.json')) return []
+  const out = spawnSync(process.execPath, [join(KIT, 'apply.mjs'), '.', '--check', '--json'], { encoding: 'utf8', timeout: 60000 })
+  let report
+  try {
+    report = JSON.parse(out.stdout)
+  } catch {
+    return [`could not compare the files with what apply writes: ${(out.stderr || out.stdout || String(out.error ?? '')).trim().split('\n')[0]}`]
+  }
+  const files = Object.entries(report.files).flatMap(([kind, paths]) => paths.map((p) => `${kind} ${p}`))
+  if (!files.length) return []
+  return [`release-kit v${report.version} adds or changes ${files.length} file${files.length === 1 ? '' : 's'}; run npx release-kit apply . (${files.join(', ')})`]
 }
 
 /** Branches releases are cut from (.release.json "branches") whose pushes commits.yml doesn't check. */
@@ -181,6 +205,18 @@ function verify() {
       failed = true
       for (const problem of problems) console.error(`release-kit verify: ${name}: ${problem}`)
     } else console.log(`release-kit verify: ${name} ok${detail ? ` (${detail})` : ''}`)
+  }
+
+  // 5. The files match what apply writes at this version. A warning, never a
+  // failure: a Dependabot kit update moves only the version, and must still
+  // merge (the merge-when-green fallback waits for every check to pass). The
+  // rollout bot's pull request, or a rerun of apply, brings the files.
+  const drift = applyDrift()
+  if (!drift.length) console.log('release-kit verify: files ok (every file apply writes is up to date)')
+  for (const warning of drift) {
+    console.warn(`release-kit verify: files: warning: ${warning}`)
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(`::warning title=release-kit files are behind::${warning.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`)
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### release-kit files are behind\n\n${warning}\n\nThis check passes anyway; the rollout bot's pull request, or running \`npx release-kit apply .\` and committing the result, clears it.\n`)
   }
   process.exit(failed ? 1 : 0)
 }

@@ -361,7 +361,11 @@ test('an applied repo installs the kit as a git dependency, which npm 12 refuses
 
   const installed = install()
   assert.equal(installed.status, 0, installed.stderr)
-  assert.match(quiet(repo, 'node', ['node_modules/.bin/release-kit', 'check'], { RELEASE_KIT_OFFLINE: '1' }), /release-kit \d+\.\d+\.\d+/)
+  // It runs from node_modules. The test's own git+file spec in package.json
+  // differs from what apply writes, so check says so rather than "up to date".
+  const checked = tryIt(repo, 'node', ['node_modules/.bin/release-kit', 'check'])
+  assert.equal(checked.status, 0, checked.stderr)
+  assert.match(checked.stderr, /release-kit v\d+\.\d+\.\d+ adds or changes 1 file; run npx release-kit apply \. \(changed package\.json\)/)
   // The kit itself runs no install script, which npm 12 would hold back and warn about.
   assert.doesNotMatch(installed.stderr, /install-scripts/)
 

@@ -116,7 +116,7 @@ Each repo installs the kit as a dev dependency pinned to a release tag, `"releas
   A `dependabot.yml` the kit wrote before is upgraded by re-running apply; a repo's own `dependabot.yml` is left alone, and apply says how to add the group.
   The kit is excluded from Dependabot's default 3-day cooldown: with the cooldown, Dependabot skips the newest tags of a git dependency and proposes the newest older one, even below the installed version (repos on v2.2.0 got "bump release-kit from v2.2.0 to v2.0.1").
   So a release reaches each repo's PR queue within a day, and the auto-merge policy refuses any downgrade as a second line of defense.
-- **`npm run release:check` warns** when the installed kit is behind the newest release, or when the workflows pin a different version than the one installed.
+- **`npm run release:check` warns** when the installed kit is behind the newest release, when the workflows pin a different version than the one installed, or when the files differ from what apply writes at the installed version ("release-kit vX.Y.Z adds or changes N files; run npx release-kit apply ."); `npx release-kit apply --check .` is the same comparison as a command that exits 1, and a kit-only pull request's `release-kit verify` shows it as a warning ([docs/UPGRADES.md](docs/UPGRADES.md#without-the-app)).
 - **New files arrive from the rollout bot.** Dependabot can change a version, not add a file, so when a kit release adds or changes a file apply writes (for example `security.yml` in v2.1.0), apply has to run in each repo.
   The rollout bot does that: see [The rollout bot](#the-rollout-bot).
   In a repo the bot doesn't cover, run this after the update lands:
@@ -177,6 +177,7 @@ If the repo ships files, add a `release:artifacts` script that writes them into 
 | `--visibility <public\|private>` | Whether the repo is public or private, when gh can't tell (default: what `gh repo view` says, else `.release.json` `visibility`). A private repo gets the private defaults. |
 | `--force` | Replace a workflow with the same name that the kit didn't write. |
 | `--json` | Print the report as JSON: the files added, changed and removed, what was done, and the notes (the rollout bot reads it). |
+| `--check` | A dry run that writes nothing: print each file apply would add, change or remove, and exit 1 when any differs, 0 when the repo is current. Files apply leaves alone (a workflow, `dependabot.yml` or hooks of the repo's own) don't count. |
 
 The choices are saved in `.release.json`, so re-running apply to upgrade keeps them.
 

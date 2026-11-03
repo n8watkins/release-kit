@@ -29,15 +29,19 @@
 //   --force              replace workflows with the same name the kit didn't write
 //   --json               print the report as JSON (the files added, changed and
 //                        removed, what was done, and the notes), for the rollout bot
+//   --check              a dry run that writes nothing: print each file apply would
+//                        add, change or remove, and exit 1 when any differs (0 when
+//                        the repo has what this kit version writes); with --json,
+//                        the same report as JSON
 //
 // The choices are saved in .release.json, so re-running with no options keeps
 // them (a repo applied before package mode existed moves to it). Kit-owned
 // files (scripts/release-kit/, the workflows, the hook, RELEASING.md) are
 // overwritten on every run, so re-running upgrades a repo.
 // package.json scripts and agent instructions are merged, never replaced.
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { entryIn, entryLabel, entryProblem, readVersion, versionFilesProblems } from './template/scripts/release-kit/versions.mjs'
 import { VISIBILITIES, detectVisibility } from './template/scripts/release-kit/settings.mjs'
@@ -78,7 +82,7 @@ function valueOf(name) {
 }
 function usage(problem) {
   if (problem) console.error(`apply: ${problem}`)
-  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--repository <owner/repo>] [--visibility public|private] [--force] [--json]')
+  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--repository <owner/repo>] [--visibility public|private] [--force] [--json] [--check]')
   process.exit(1)
 }
 
@@ -104,6 +108,12 @@ if (visibilityFlag !== undefined && !VISIBILITIES.includes(visibilityFlag)) usag
 
 const done = []
 const skipped = []
+// --check: a dry run. Every write goes to `pending` instead of the disk, and
+// every read of the repo sees it, so the run decides exactly what a real one
+// would, and the result is compared with the disk at the end.
+const dryRun = has('check')
+// Path -> { content, mode } (mode: the permissions apply sets, if any), or null when removed.
+const pending = new Map()
 // What each file held before apply first touched it (null: it didn't exist),
 // so --json can say exactly which files were added, changed and removed.
 const before = new Map()
@@ -112,19 +122,36 @@ function record(p) {
   const target = join(repo, p)
   before.set(p, existsSync(target) ? readFileSync(target) : null)
 }
-const read = (p) => readFileSync(join(repo, p), 'utf8')
-const write = (p, content) => {
+const exists = (p) => (pending.has(p) ? pending.get(p) !== null : existsSync(join(repo, p)))
+const read = (p) => (pending.get(p)?.content.toString('utf8') ?? readFileSync(join(repo, p), 'utf8'))
+/** Writes a repo file (with `mode`, its permissions, when given), or in a dry run records it. */
+function write(p, content, mode) {
+  if (dryRun) {
+    pending.set(p, { content: Buffer.from(content), mode })
+    return
+  }
   record(p)
   mkdirSync(dirname(join(repo, p)), { recursive: true })
   writeFileSync(join(repo, p), content)
+  if (mode !== undefined) chmodSync(join(repo, p), mode)
 }
-const remove = (p) => {
+function remove(p) {
+  if (dryRun) {
+    pending.set(p, null)
+    return
+  }
   record(p)
   rmSync(join(repo, p))
 }
+/** The file names in a repo folder, as apply has left it so far. */
+function list(dir) {
+  const names = new Set(existsSync(join(repo, dir)) ? readdirSync(join(repo, dir)) : [])
+  for (const [p, file] of pending) if (dirname(p) === dir) file === null ? names.delete(basename(p)) : names.add(basename(p))
+  return [...names].sort()
+}
 
 // 0. The repo's choices, saved in .release.json.
-const hadConfig = existsSync(join(repo, '.release.json'))
+const hadConfig = exists('.release.json')
 const config = hadConfig ? JSON.parse(read('.release.json')) : {}
 for (const mode of ['package', 'reusable', 'vendored']) if (has(mode)) config.workflows = mode
 // Repos applied before package mode existed had no setting (vendored): they move to it.
@@ -219,9 +246,9 @@ function* walk(dir) {
 // Every workflow the kit has ever written starts with a "# release-kit" comment.
 // A repo's own workflow that only mentions the kit (one that runs npx
 // release-kit in a build, say) is the repo's, and stays.
-const ownedByKit = (path) => existsSync(join(repo, path)) && read(path).startsWith(`# ${MARKER}`)
+const ownedByKit = (path) => exists(path) && read(path).startsWith(`# ${MARKER}`)
 function writeWorkflow(path, content) {
-  if (existsSync(join(repo, path)) && !ownedByKit(path) && !force) {
+  if (exists(path) && !ownedByKit(path) && !force) {
     skipped.push(`${path} exists and isn't from the kit (rerun with --force to replace it)`)
     return
   }
@@ -267,7 +294,7 @@ const HOOK_LINES = {
   'pre-push': packaged ? 'npx --no-install release-kit pre-push "$@"' : 'node scripts/release-kit/guard.mjs "$@"',
 }
 // A hook file the kit may write: missing, or one it wrote before.
-const kitHook = (path) => !existsSync(join(repo, path)) || /^(#!.*\n)?# release-kit/.test(read(path))
+const kitHook = (path) => !exists(path) || /^(#!.*\n)?# release-kit/.test(read(path))
 const usesHusky = existsSync(join(repo, '.husky'))
 const pkg = JSON.parse(read('package.json'))
 const hookManager = usesHusky ? null : otherHooks()
@@ -309,24 +336,22 @@ for (const source of walk(TEMPLATE)) {
   }
   // Package mode runs the scripts from node_modules instead of copies.
   if (packaged && path.startsWith('scripts/release-kit/')) continue
-  const target = join(repo, path)
-  mkdirSync(dirname(target), { recursive: true })
-  if (path.startsWith('.githooks/') && !kitHook(path)) {
+  const hook = path.startsWith('.githooks/')
+  if (hook && !kitHook(path)) {
     skipped.push(`${path} is the repo's own, so the kit's ${path.slice(10)} hook is not installed: add  ${HOOK_LINES[path.slice(10)]}  to it`)
     continue
   }
-  record(path)
-  if (packaged && path.startsWith('.githooks/')) writeFileSync(target, `#!/bin/sh\n${HOOKS[path.slice(10)]}`)
+  if (packaged && hook) write(path, `#!/bin/sh\n${HOOKS[path.slice(10)]}`, 0o755)
   // RELEASING.md names the kit's commands as package mode runs them.
-  else if (!packaged && path === 'RELEASING.md') writeFileSync(target, readFileSync(source, 'utf8').replaceAll('npx release-kit protect', 'node scripts/release-kit/protect.mjs'))
-  else copyFileSync(source, target)
-  if (path.startsWith('.githooks/')) chmodSync(target, 0o755)
+  else if (!packaged && path === 'RELEASING.md') write(path, readFileSync(source, 'utf8').replaceAll('npx release-kit protect', 'node scripts/release-kit/protect.mjs'))
+  // A copy, with the template's permissions (a hook is always executable).
+  else write(path, readFileSync(source), hook ? 0o755 : statSync(source).mode & 0o777)
   done.push(path)
 }
 if (packaged) {
   if (existsSync(join(repo, 'scripts/release-kit'))) {
-    for (const file of walk(join(repo, 'scripts/release-kit'))) record(relative(repo, file))
-    rmSync(join(repo, 'scripts/release-kit'), { recursive: true, force: true })
+    for (const file of walk(join(repo, 'scripts/release-kit'))) remove(relative(repo, file))
+    if (!dryRun) rmSync(join(repo, 'scripts/release-kit'), { recursive: true, force: true })
     done.push('scripts/release-kit/ removed (the kit now runs from node_modules)')
   }
 } else {
@@ -340,8 +365,8 @@ if (reusable) done.push(`workflows call ${KIT_REPO}@${kitRef}`)
 if (config.autoMerge !== false) writeAutoMerge()
 
 // The workflows use npm ci and npm caching, which need npm's lock file.
-const otherLock = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'].find((p) => existsSync(join(repo, p)))
-if (!existsSync(join(repo, 'package-lock.json'))) {
+const otherLock = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'].find(exists)
+if (!exists('package-lock.json')) {
   skipped.push(otherLock
     ? `${otherLock} but no package-lock.json: the workflows install with npm ci, so the Release workflow fails at setup in a ${otherLock.split(/[-.]/)[0]} repo`
     : 'no package-lock.json: run npm install and commit it, or the Release workflow fails at setup')
@@ -381,7 +406,7 @@ if (packaged) {
   done.push('devDependencies: release-kit removed (copied scripts instead)')
 }
 // Copied scripts need no git dependency: drop the line package mode added.
-if (!packaged && existsSync(join(repo, '.npmrc')) && read('.npmrc').includes(`${NPMRC_NOTE}\nallow-git=root\n`)) {
+if (!packaged && exists('.npmrc') && read('.npmrc').includes(`${NPMRC_NOTE}\nallow-git=root\n`)) {
   const rest = read('.npmrc').replace(`${NPMRC_NOTE}\nallow-git=root\n`, '')
   if (rest.trim()) write('.npmrc', rest)
   else remove('.npmrc')
@@ -396,8 +421,7 @@ if (usesHusky) {
       skipped.push(`${path} is the repo's own, so the kit's pre-push guard is not installed: add  ${HOOK_LINES[name]}  as its first line`)
       continue
     }
-    write(path, packaged ? HOOKS[name] : vendoredHooks[name])
-    chmodSync(join(repo, path), 0o755)
+    write(path, packaged ? HOOKS[name] : vendoredHooks[name], 0o755)
     done.push(`${path} (the repo uses husky)`)
   }
 } else if (hookManager) {
@@ -407,10 +431,13 @@ if (usesHusky) {
   const hook = 'git config core.hooksPath .githooks || true'
   if (!scripts.prepare) scripts.prepare = hook
   else if (!scripts.prepare.includes('core.hooksPath')) scripts.prepare = `${scripts.prepare} && (${hook})`
-  try {
-    execFileSync('git', ['-C', repo, 'config', 'core.hooksPath', '.githooks'])
-  } catch {
-    skipped.push('could not set core.hooksPath now; it is set on the next npm install')
+  // A dry run changes nothing, git config included.
+  if (!dryRun) {
+    try {
+      execFileSync('git', ['-C', repo, 'config', 'core.hooksPath', '.githooks'])
+    } catch {
+      skipped.push('could not set core.hooksPath now; it is set on the next npm install')
+    }
   }
   done.push('package.json scripts: prepare (turns on .githooks)')
 }
@@ -464,11 +491,10 @@ jobs:
 }
 
 function writeAutoMerge() {
-  const dir = join(repo, '.github/workflows')
   const names = []
-  for (const file of existsSync(dir) ? readdirSync(dir).sort() : []) {
+  for (const file of list('.github/workflows')) {
     if (!/\.ya?ml$/.test(file) || file === 'auto-merge.yml') continue
-    const text = readFileSync(join(dir, file), 'utf8')
+    const text = read(`.github/workflows/${file}`)
     const name = /^name:\s*["']?(.+?)["']?\s*$/m.exec(text)?.[1]
     // A pull_request trigger, in the on: block or an inline on: list.
     if (name && (/^ {2}pull_request(_target)?:/m.test(text) || /^on:.*\bpull_request\b/m.test(text))) names.push(name)
@@ -516,7 +542,7 @@ updates:
     cooldown:
       exclude: ["${KIT_REPO}*"]
 `
-  if (existsSync(join(repo, path))) {
+  if (exists(path)) {
     const current = read(path)
     // The kit's own file (any version of it) is the kit's to upgrade.
     if (current.startsWith('# release-kit:')) {
@@ -549,7 +575,7 @@ updates:
  */
 function writeNpmrc() {
   const path = '.npmrc'
-  const current = existsSync(join(repo, path)) ? read(path) : ''
+  const current = exists(path) ? read(path) : ''
   const setting = /^[ \t]*allow-git[ \t]*=[ \t]*(\S*)[ \t]*$/m.exec(current)
   if (setting && ['root', 'all'].includes(setting[1])) return
   const line = `${NPMRC_NOTE}\nallow-git=root\n`
@@ -605,9 +631,9 @@ function otherHooks() {
 
 // 3. Agent instructions.
 const snippet = readFileSync(join(TEMPLATE, 'AGENTS.release.md'), 'utf8')
-const agentFiles = ['AGENTS.md', 'CLAUDE.md'].filter((p) => existsSync(join(repo, p)))
+const agentFiles = ['AGENTS.md', 'CLAUDE.md'].filter(exists)
 for (const p of agentFiles.length ? agentFiles : ['AGENTS.md']) {
-  const current = existsSync(join(repo, p)) ? read(p) : '# Agent instructions\n'
+  const current = exists(p) ? read(p) : '# Agent instructions\n'
   const start = current.indexOf(`<!-- ${MARKER} -->`)
   const end = current.indexOf(`<!-- /${MARKER} -->`)
   const next = start !== -1 && end !== -1
@@ -617,17 +643,36 @@ for (const p of agentFiles.length ? agentFiles : ['AGENTS.md']) {
   done.push(`${p}: commit and release rules`)
 }
 
-if (has('json')) {
+/**
+ * The files added, changed and removed: by this run, or in a dry run, the ones
+ * a real run would touch. A dry run also counts a file whose content is right
+ * but whose executable bit isn't, since a real run would change it.
+ */
+function fileChanges() {
   const files = { added: [], changed: [], removed: [] }
-  for (const [p, old] of [...before].sort(([a], [b]) => a.localeCompare(b))) {
-    const target = join(repo, p)
-    const now = existsSync(target) ? readFileSync(target) : null
+  const onDisk = (p) => (existsSync(join(repo, p)) ? readFileSync(join(repo, p)) : null)
+  const executable = (mode) => (mode & 0o111) !== 0
+  for (const p of [...(dryRun ? pending : before).keys()].sort()) {
+    const [old, now] = dryRun ? [onDisk(p), pending.get(p)?.content ?? null] : [before.get(p), onDisk(p)]
+    const mode = dryRun ? pending.get(p)?.mode : undefined
     if (old === null && now !== null) files.added.push(p)
     else if (old !== null && now === null) files.removed.push(p)
-    else if (old !== null && !old.equals(now)) files.changed.push(p)
+    else if (old !== null && (!old.equals(now) || (mode !== undefined && executable(mode) !== executable(statSync(join(repo, p)).mode)))) files.changed.push(p)
   }
-  console.log(JSON.stringify({ version: KIT_VERSION, kitRef, repo, repository: config.repository ?? null, mode: config.workflows, train: train?.schedule ?? null, files, done, notes: skipped }, null, 2))
-  process.exit(0)
+  return files
+}
+
+if (has('json') || dryRun) {
+  const files = fileChanges()
+  const differs = Object.values(files).some((paths) => paths.length)
+  if (has('json')) console.log(JSON.stringify({ version: KIT_VERSION, kitRef, repo, repository: config.repository ?? null, mode: config.workflows, train: train?.schedule ?? null, check: dryRun, files, done, notes: skipped }, null, 2))
+  else if (!differs) console.log(`release-kit v${KIT_VERSION}: ${repo} has every file apply writes, up to date`)
+  else {
+    const count = files.added.length + files.changed.length + files.removed.length
+    console.log(`release-kit v${KIT_VERSION} adds or changes ${count} file${count === 1 ? '' : 's'}; run npx release-kit apply .`)
+    for (const [kind, paths] of Object.entries(files)) for (const p of paths) console.log(`  ${kind.padEnd(8)}${p}`)
+  }
+  process.exit(dryRun && differs ? 1 : 0)
 }
 console.log(`release-kit ${KIT_VERSION} applied to ${repo} (${config.workflows} mode${train ? `, release train "${train.schedule}"` : ''})\n`)
 for (const line of done) console.log(`  + ${line}`)
