@@ -1,0 +1,80 @@
+[//]: # (dependabot-start)
+⚠️  **Dependabot is rebasing this PR** ⚠️ 
+
+Rebasing might not happen immediately, so don't worry if this takes some time.
+
+Note: if you make any changes to this PR yourself, they will take precedence over the rebase.
+
+---
+
+[//]: # (dependabot-end)
+
+[//]: # (dependabot-start)
+⚠️  **Dependabot is rebasing this PR** ⚠️ 
+
+Rebasing might not happen immediately, so don't worry if this takes some time.
+
+Note: if you make any changes to this PR yourself, they will take precedence over the rebase.
+
+---
+
+[//]: # (dependabot-end)
+
+Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.10 to 4.1.11.
+<details>
+<summary>Release notes</summary>
+<p><em>Sourced from <a href="https://github.com/vitest-dev/vitest/releases">vitest's releases</a>.</em></p>
+<blockquote>
+<h2>v4.1.11</h2>
+<h3>   🐞 Bug Fixes</h3>
+<ul>
+<li>Revive global concurrency limit for test lifecycle [backport to v4]  -  by <a href="https://github.com/sheremet-va"><code>@​sheremet-va</code></a> and <a href="https://github.com/hi-ogawa"><code>@​hi-ogawa</code></a> in <a href="https://redirect.github.com/vitest-dev/vitest/issues/10992">vitest-dev/vitest#10992</a> <a href="https://github.com/vitest-dev/vitest/commit/5146df80b"><!-- raw HTML omitted -->(5146d)<!-- raw HTML omitted --></a></li>
+<li><strong>browser</strong>:
+<ul>
+<li>Encode iframeId in tester iframe URL [backport to v4]  -  by <a href="https://github.com/sheremet-va"><code>@​sheremet-va</code></a>, <strong>Pduhard</strong> and <strong>Claude Opus 4.8</strong> in <a href="https://redirect.github.com/vitest-dev/vitest/issues/10955">vitest-dev/vitest#10955</a> <a href="https://github.com/vitest-dev/vitest/commit/10b2cd201"><!-- raw HTML omitted -->(10b2c)<!-- raw HTML omitted --></a></li>
+<li>Trigger playwright/chromium gc on lower disk availability [backport to v4]  -  by <a href="https://github.com/hi-ogawa"><code>@​hi-ogawa</code></a>, <strong>Hiroshi Ogawa</strong> and <strong>OpenCode</strong> in <a href="https://redirect.github.com/vitest-dev/vitest/issues/10951">vitest-dev/vitest#10951</a> <a href="https://github.com/vitest-dev/vitest/commit/9851dbc41"><!-- raw HTML omitted -->(9851d)<!-- raw HTML omitted --></a></li>
+</ul>
+</li>
+<li><strong>mocker</strong>:
+<ul>
+<li>Restrict redirect mocks to the fs allowlist [backport to v4]  -  by <a href="https://github.com/sheremet-va"><code>@​sheremet-va</code></a> in <a href="https://redirect.github.com/vitest-dev/vitest/issues/10974">vitest-dev/vitest#10974</a> <a href="https://github.com/vitest-dev/vitest/commit/fe5a11d3c"><!-- raw HTML omitted -->(fe5a1)<!-- raw HTML omitted --></a></li>
+</ul>
+</li>
+</ul>
+<h5>    <a href="https://github.com/vitest-dev/vitest/compare/v4.1.10...v4.1.11">View changes on GitHub</a></h5>
+</blockquote>
+</details>
+<details>
+<summary>Commits</summary>
+<ul>
+<li><a href="https://github.com/vitest-dev/vitest/commit/9bd8d464e6328c567c2dbcd8fdd977d57a9425c2"><code>9bd8d46</code></a> chore: release v4.1.11 (<a href="https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest/issues/10995">#10995</a>)</li>
+<li><a href="https://github.com/vitest-dev/vitest/commit/9851dbc41c286a30abfb6b29cce65f3e5b7b40a1"><code>9851dbc</code></a> fix(browser): trigger playwright/chromium gc on lower disk availability [back...</li>
+<li>See full diff in <a href="https://github.com/vitest-dev/vitest/commits/v4.1.11/packages/vitest">compare view</a></li>
+</ul>
+</details>
+<br />
+
+
+[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=vitest&package-manager=npm_and_yarn&previous-version=4.1.10&new-version=4.1.11)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)
+
+Dependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+<details>
+<summary>Dependabot commands and options</summary>
+<br />
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it
+- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency
+- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)
+- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)
+- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)
+You can disable automated security fix PRs for this repo from the [Security Alerts page](https://github.com/n8watkins/pivot/network/alerts).
+
+</details>
