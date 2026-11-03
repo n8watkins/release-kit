@@ -235,7 +235,7 @@ It needs a release tag to start from, so baseline a new repo first.
 
 - **Required checks** are `--checks "CI result,check / check"`, or `.release.json` `protect.checks`, or the ones the ruleset already requires, or else the GitHub Actions checks that passed on the latest merged pull request (only `CI result` from a workflow that has one, and none from a workflow with a `paths` filter, which doesn't run on every pull request).
 - **Nobody bypasses the branch rules by default, admins included**, so an agent using the owner's sign-in can't push to `main` either.
-- **`npm run release -- --push` still works:** when the push of the release commit is rejected, it opens a `release/vX.Y.Z` pull request, merges it once its checks pass, and tags the merged commit; if a check fails it closes the pull request and tags nothing.
+- **`npm run release -- --push` still works:** when the push of the release commit is rejected, it opens a `release/vX.Y.Z` pull request, merges it once the checks that gate the merge pass (the required ones, or every GitHub Actions check when none are required; a failing Vercel deploy or another app's status is reported and ignored), and tags the merged commit; if a gating check fails it closes the pull request and tags nothing.
 - **The release train** pushes with its deploy key, the one bypass (only in a repo with a train).
 - **The trade-off:** a release takes as long as the pull request's checks, instead of one push.
   `--admin-bypass` lets admins push straight to the branch instead, at the cost of letting anything signed in as an admin do the same.
