@@ -25,8 +25,7 @@
 //   --visibility <public|private>
 //                        whether the repo is public or private (default: what gh
 //                        says, else .release.json "visibility"); a private repo
-//                        skips work that costs runner minutes and gets the
-//                        merge-when-green auto-merge workflow
+//                        skips work that costs runner minutes
 //   --force              replace workflows with the same name the kit didn't write
 //
 // The choices are saved in .release.json, so re-running with no options keeps
@@ -39,7 +38,7 @@ import { execFileSync } from 'node:child_process'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readVersion } from './template/scripts/release-kit/versions.mjs'
-import { VISIBILITIES, detectVisibility, settings } from './template/scripts/release-kit/settings.mjs'
+import { VISIBILITIES, detectVisibility } from './template/scripts/release-kit/settings.mjs'
 
 const KIT = dirname(fileURLToPath(import.meta.url))
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
@@ -139,8 +138,6 @@ else {
     skipped.push(`could not tell whether ${config.repository ?? 'the repo'} is public or private (gh isn't installed or signed in, or no GitHub repo): rerun with --visibility private or --visibility public; until then it gets the public defaults`)
   }
 }
-const repoSettings = settings(config)
-const isPrivate = repoSettings.visibility === 'private'
 const forkGuard = config.repository ? `github.repository == '${config.repository}'` : '${{ !github.event.repository.fork }}'
 const packaged = config.workflows === 'package'
 // Package mode calls the kit's workflows at the pinned tag, like reusable mode.
@@ -309,9 +306,10 @@ if (packaged) {
 }
 if (reusable) done.push(`workflows call ${KIT_REPO}@${kitRef}`)
 
-// A private repo on GitHub Free can't require checks, so update pull requests
-// merge through the auto-merge workflow's merge-when-green fallback (docs/AUTO_MERGE.md).
-if (isPrivate && config.autoMerge !== false) writeAutoMerge()
+// Update pull requests merge on their own once CI passes (docs/AUTO_MERGE.md):
+// through GitHub's auto-merge where the branch requires checks, else (a private
+// repo on GitHub Free) through the merge-when-green fallback.
+if (config.autoMerge !== false) writeAutoMerge()
 
 // The workflows use npm ci and npm caching, which need npm's lock file.
 const otherLock = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'].find((p) => existsSync(join(repo, p)))
@@ -392,18 +390,21 @@ write('package.json', `${JSON.stringify(pkg, null, 2)}\n`)
 done.push('package.json scripts: release, release:check')
 
 /**
- * The auto-merge workflow, for a private repo: it calls the kit's policy on
- * pull_request and, as the merge-when-green fallback, whenever one of the
- * repo's pull request workflows finishes (listed by name under workflow_run).
+ * The auto-merge workflow: it calls the kit's policy on pull_request (GitHub
+ * auto-merge, where the branch requires checks) and, as the merge-when-green
+ * fallback, whenever one of the repo's pull request workflows finishes (listed
+ * by name under workflow_run).
  */
 function autoMergeWorkflow(workflowNames, ref) {
   return `# release-kit: merge update pull requests once CI passes (docs/AUTO_MERGE.md in
-# release-kit). apply writes it in a private repo, which on GitHub Free can't
-# require checks: the merge-when-green fallback merges a release-kit update or a
-# Dependabot patch or minor update once every check on it has passed, and a
-# major update waits for a person. workflow_run lists every workflow that runs
-# on pull requests, so the one that finishes last still triggers a look; rerun
-# npx release-kit apply . after adding one.
+# release-kit). A release-kit update or a Dependabot patch or minor update
+# merges on its own, and a major update waits for a person. Where the branch
+# requires checks, GitHub's auto-merge merges it once they pass (allow auto-merge
+# on the repo: npx release-kit protect does); where it can't (a private repo on
+# GitHub Free), the merge-when-green fallback merges it once every check on it
+# has passed. workflow_run lists every workflow that runs on pull requests, so
+# the one that finishes last still triggers a look; rerun npx release-kit
+# apply . after adding one. "autoMerge": false in .release.json turns it off.
 name: Auto-merge
 
 on:

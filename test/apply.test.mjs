@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -496,7 +496,7 @@ test('apply installs the pre-push guard beside the commit-msg hook, and keeps a 
   assert.ok(existsSync(join(own, '.githooks/commit-msg')))
 })
 
-test('visibility: a private repo scans weekly only, gets merge-when-green, and the settings can be overridden', async () => {
+test('visibility: a private repo scans weekly only, every repo gets auto-merge, and the settings can be overridden', async () => {
   const { makeRepo, tmp, run: quiet, attempt: tryIt } = await import('./helpers.mjs')
   const repo = makeRepo(tmp('apply-private'))
   const config = () => JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8'))
@@ -505,7 +505,8 @@ test('visibility: a private repo scans weekly only, gets merge-when-green, and t
   const unknown = quiet(KIT, 'node', ['apply.mjs', repo, '--repository', 'o/r'], { RELEASE_KIT_OFFLINE: '1' })
   assert.match(unknown, /could not tell whether o\/r is public or private .*rerun with --visibility private/)
   assert.equal(config().visibility, undefined)
-  assert.ok(!existsSync(join(repo, '.github/workflows/auto-merge.yml')))
+  // Auto-merge in every repo: GitHub's where checks are required, else merge when green.
+  assert.ok(existsSync(join(repo, '.github/workflows/auto-merge.yml')))
 
   // gh says private.
   const bin = tmp('apply-gh')
@@ -534,4 +535,9 @@ test('visibility: a private repo scans weekly only, gets merge-when-green, and t
   assert.match(workflow('security.yml'), /\(inputs\.pull-requests \|\| 'true'\) == 'true'/)
   assert.match(workflow('direct-push.yml'), /format\(',main,master,review\/v1,\{0\},'/)
   assert.match(tryIt(KIT, 'node', ['apply.mjs', repo, '--visibility', 'secret']).stderr, /--visibility takes public or private, not "secret"/)
+  // "autoMerge": false: apply doesn't write it.
+  rmSync(join(repo, '.github/workflows/auto-merge.yml'))
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...config(), autoMerge: false }))
+  quiet(KIT, 'node', ['apply.mjs', repo], { RELEASE_KIT_OFFLINE: '1' })
+  assert.ok(!existsSync(join(repo, '.github/workflows/auto-merge.yml')))
 })

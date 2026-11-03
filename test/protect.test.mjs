@@ -41,7 +41,7 @@ else if (args[0] === 'api') {
   const path = args.find((a, i) => i > 0 && /^repos\\//.test(a))
   if (method !== 'GET') say({ id: 99 })
   else if (path.startsWith('repos/o/r/rulesets') && state.private) { console.error('gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'); process.exit(1) }
-  else if (path === 'repos/o/r') say({ default_branch: 'main', allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: false })
+  else if (path === 'repos/o/r') say({ default_branch: 'main', allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: false, allow_auto_merge: Boolean(state.allowAutoMerge) })
   else if (path.startsWith('repos/o/r/rulesets?')) say((state.rulesets ?? []).map(({ id, name, target, enforcement }) => ({ id, name, target, enforcement })))
   else if (path.startsWith('repos/o/r/rulesets/')) say(state.rulesets.find((r) => String(r.id) === path.split('/').pop()))
   else if (path === 'repos/o/r/branches/main/protection') state.classic ? say(state.classic) : (console.error('gh: Branch not protected (HTTP 404)'), process.exit(1))
@@ -142,11 +142,13 @@ test('--dry-run reads the plan, checks and all, and changes nothing', () => {
   assert.match(result.stdout, /npm run release -- --push opens a release pull request/)
 })
 
-test('a repo without a train gets both rulesets and nothing else', () => {
+test('a repo without a train gets both rulesets, and auto-merge once checks are required', () => {
   const done = protect([], { branches: ['review/v1'] }, { branches: ['review/v1'] })
   assert.equal(done.status, 0, done.stderr)
   const w = writes(done.calls)
-  assert.deepEqual(w.map(describe), ['POST repos/o/r/rulesets', 'POST repos/o/r/rulesets'])
+  assert.deepEqual(w.map(describe), ['POST repos/o/r/rulesets', 'POST repos/o/r/rulesets', 'PATCH repos/o/r'])
+  assert.deepEqual(JSON.parse(w[2].input), { allow_auto_merge: true })
+  assert.match(done.stdout, /allow auto-merge: on, so update pull requests merge once the required checks pass/)
   assert.deepEqual(JSON.parse(w[0].input), branchRuleset({ branches: ['review/v1'], checks: CHECKS, mergeMethods: ['squash'] }))
   assert.deepEqual(JSON.parse(w[1].input), tagRuleset())
   assert.match(done.stdout, /protect: done/)
@@ -164,6 +166,7 @@ test('with a train it adds the deploy key and its bypass, then moves off classic
     'POST repos/o/r/keys',
     'secret RELEASE_TRAIN_KEY',
     'DELETE repos/o/r/branches/main/protection',
+    'PATCH repos/o/r',
   ])
   assert.deepEqual(JSON.parse(done[0].input).bypass_actors, [{ actor_type: 'DeployKey', bypass_mode: 'always' }])
   // A write key whose private half went only to the secret, and nothing left on disk.
@@ -179,7 +182,7 @@ test('with a train it adds the deploy key and its bypass, then moves off classic
 test('a rerun changes only what drifted: the legacy ruleset is renamed in place, a working key is kept', () => {
   const legacy = { ...branchRuleset({ checks: CHECKS, mergeMethods: ['squash'], deployKey: true, adminBypass: true }), id: 42, name: 'release-kit: protect main' }
   const tags = { id: 43, ...tagRuleset() }
-  const state = { rulesets: [legacy, tags, { id: 50, name: 'Mine', target: 'branch', enforcement: 'active' }], keys: [{ id: 7, title: 'release-kit train', read_only: false }], secret: true }
+  const state = { rulesets: [legacy, tags, { id: 50, name: 'Mine', target: 'branch', enforcement: 'active' }], keys: [{ id: 7, title: 'release-kit train', read_only: false }], secret: true, allowAutoMerge: true }
   const result = protect([], state, { train: {} })
   assert.equal(result.status, 0, result.stderr)
   assert.deepEqual(writes(result.calls).map(describe), ['PUT repos/o/r/rulesets/42'])
@@ -189,6 +192,14 @@ test('a rerun changes only what drifted: the legacy ruleset is renamed in place,
   assert.match(result.stdout, /"release-kit: release tags": unchanged/)
   assert.match(result.stdout, /kept \(--rotate-key replaces them\)/)
   assert.match(result.stdout, /another ruleset, left alone: "Mine"/)
+  assert.doesNotMatch(result.stdout, /allow auto-merge/)
+})
+
+test('without required checks, auto-merge stays off: GitHub would merge before CI finishes', () => {
+  const result = protect([], { pulls: [] })
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(writes(result.calls).map(describe), ['POST repos/o/r/rulesets', 'POST repos/o/r/rulesets'])
+  assert.doesNotMatch(result.stdout, /allow auto-merge/)
 })
 
 test('a rerun keeps the checks the ruleset already requires instead of reading them again', () => {
