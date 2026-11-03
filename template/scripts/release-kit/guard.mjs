@@ -52,7 +52,7 @@ const RELEASE_FILES = ['package.json', 'package-lock.json', 'CHANGELOG.md']
  *   parents       how many parents it has
  *   files         the paths it changes
  *   version       package.json's version in it
- *   versionFiles  .release.json versionFiles in it
+ *   versionFiles  .release.json versionFiles in it (paths, or { path, pattern })
  * A commit that passes changes nothing but the version and the changelog,
  * so it is safe to land without a pull request whoever made it.
  */
@@ -61,7 +61,7 @@ export function releaseCommitProblem({ subject, parents, files, version, version
   if (!named) return `its subject "${subject}" is not chore(release): vX.Y.Z`
   if (parents !== 1) return `it has ${parents} parents, not 1`
   if (version !== named) return `package.json says ${version ?? 'nothing'}, not ${named}`
-  const allowed = new Set([...RELEASE_FILES, ...versionFiles.filter((f) => typeof f === 'string')])
+  const allowed = new Set([...RELEASE_FILES, ...versionFiles.map((f) => (typeof f === 'string' ? f : f?.path)).filter((f) => typeof f === 'string')])
   const other = files.filter((f) => !allowed.has(f))
   if (other.length) return `it changes ${other.join(', ')}, which a release commit doesn't`
   return null

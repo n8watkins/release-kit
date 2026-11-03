@@ -39,7 +39,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSy
 import { execFileSync } from 'node:child_process'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readVersion } from './template/scripts/release-kit/versions.mjs'
+import { entryIn, entryLabel, entryProblem, readVersion, versionFilesProblems } from './template/scripts/release-kit/versions.mjs'
 import { VISIBILITIES, detectVisibility } from './template/scripts/release-kit/settings.mjs'
 
 const KIT = dirname(fileURLToPath(import.meta.url))
@@ -174,7 +174,9 @@ if (!hadConfig) {
   // A browser extension's manifest.json, at the root or in the folder it is
   // loaded from; a website's web-app manifest (no manifest_version) isn't one.
   const manifests = ['manifest.json', 'src/manifest.json', 'public/manifest.json', 'extension/manifest.json']
-  const candidates = [...manifests, ...tauri, 'app/package.json', 'app/package-lock.json']
+  // A Python project's pyproject.toml ([project] version), and its uv.lock.
+  const python = ['pyproject.toml', 'uv.lock']
+  const candidates = [...manifests, ...tauri, 'app/package.json', 'app/package-lock.json', ...python]
   config.versionFiles = candidates.filter((p) => {
     // A subfolder's package files count only beside a Tauri app there.
     if (p.startsWith('app/package') && !existsSync(join(repo, 'app/src-tauri/tauri.conf.json'))) return false
@@ -188,17 +190,20 @@ if (!hadConfig) {
   done.push(`.release.json (versionFiles: ${config.versionFiles.join(', ') || 'none'})`)
 }
 config.versionFiles ??= []
-// Every version file must say what package.json says, or the first tag check fails.
+// Every entry must be well formed, and every version file must say what
+// package.json says, or the first release or tag check fails.
+for (const problem of versionFilesProblems(config.versionFiles, repo)) skipped.push(`.release.json versionFiles: ${problem}`)
 const pkgVersion = JSON.parse(read('package.json')).version
-for (const p of config.versionFiles) {
+for (const entry of Array.isArray(config.versionFiles) ? config.versionFiles : []) {
+  if (entryProblem(entry)) continue
   let found
   try {
-    found = readVersion(join(repo, p))
+    found = readVersion(entryIn(repo, entry))
   } catch (error) {
-    skipped.push(`${p}: ${error.message}`)
+    skipped.push(error.message.replaceAll(join(repo, '/'), ''))
     continue
   }
-  if (found !== pkgVersion) skipped.push(`${p} has version ${found} but package.json has ${pkgVersion}: make them match before the first release, or the tag check fails`)
+  if (found !== pkgVersion) skipped.push(`${entryLabel(entry)} has version ${found} but package.json has ${pkgVersion}: make them match before the first release, or the tag check fails`)
 }
 const { versionFiles, ...choices } = config
 write('.release.json', `${JSON.stringify({ versionFiles, ...choices }, null, 2)}\n`)

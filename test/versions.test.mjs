@@ -3,8 +3,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { KIT, commit, makeRepo, run, tmp } from './helpers.mjs'
-import { readVersion, setVersion } from '../template/scripts/release-kit/versions.mjs'
+import { KIT, attempt, commit, makeRepo, run, tmp } from './helpers.mjs'
+import { entryProblem, readVersion, setVersion, versionFilesProblems } from '../template/scripts/release-kit/versions.mjs'
+import { releaseCommitProblem } from '../template/scripts/release-kit/guard.mjs'
 
 const CARGO_TOML = `[package]
 name = "scribe-app"
@@ -112,4 +113,226 @@ test('a Tauri app in app/: apply finds every version file, and a release bumps t
   for (const file of files) assert.equal(readVersion(join(repo, file)), '0.9.0', file)
   assert.equal(run(repo, 'git', ['status', '--porcelain']), '')
   assert.match(readFileSync(join(repo, 'CHANGELOG.md'), 'utf8'), /## 0\.9\.0 - \d{4}-\d{2}-\d{2}\n\n### New\n\n- Dictate into any app\n/)
+})
+
+const PYPROJECT = `# devguard
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "DevGuard"
+version = "0.1.0"  # bumped by release-kit
+description = "Guards dev"
+dependencies = [
+    "click>=8",
+]
+
+[project.urls]
+Homepage = "https://example.com"
+
+[tool.poetry]
+name = "devguard"
+version = "9.9.9"
+
+[tool.bumpversion]
+version = "9.9.9"
+`
+
+const UV_LOCK = `version = 1
+revision = 2
+requires-python = ">=3.11"
+
+[[package]]
+name = "click"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://example.com/click.tar.gz", hash = "sha256:00" }
+
+[[package]]
+name = "devguard"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "devguard"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "click" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "click", specifier = ">=8" }]
+
+[[package]]
+name = "zzz"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+`
+
+const crlf = (text) => text.replace(/\n/g, '\r\n')
+const write = (dir, files) => {
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(join(dir, name, '..'), { recursive: true })
+    writeFileSync(join(dir, name), text)
+  }
+  return dir
+}
+
+test('pyproject.toml: only the [project] version changes, not [tool.poetry] or any other table', () => {
+  const dir = write(tmp('py'), { 'pyproject.toml': PYPROJECT })
+  const path = join(dir, 'pyproject.toml')
+  assert.equal(readVersion(path), '0.1.0')
+  setVersion(path, '0.2.0')
+  assert.equal(readFileSync(path, 'utf8'), PYPROJECT.replace('version = "0.1.0"', 'version = "0.2.0"'))
+})
+
+test('pyproject.toml: a single-quoted version keeps its quotes, and a CRLF file keeps its line endings', () => {
+  const single = PYPROJECT.replace('version = "0.1.0"', "version = '0.1.0'")
+  const dir = write(tmp('py-quotes'), { 'a/pyproject.toml': single, 'b/pyproject.toml': crlf(PYPROJECT) })
+  setVersion(join(dir, 'a/pyproject.toml'), '0.2.0')
+  assert.equal(readFileSync(join(dir, 'a/pyproject.toml'), 'utf8'), single.replace("'0.1.0'", "'0.2.0'"))
+  assert.equal(readVersion(join(dir, 'b/pyproject.toml')), '0.1.0')
+  setVersion(join(dir, 'b/pyproject.toml'), '0.2.0')
+  assert.equal(readFileSync(join(dir, 'b/pyproject.toml'), 'utf8'), crlf(PYPROJECT.replace('version = "0.1.0"', 'version = "0.2.0"')))
+})
+
+test('pyproject.toml: a version only in [tool.poetry], or a dynamic one, is an error naming the file', () => {
+  const dir = write(tmp('py-none'), { 'pyproject.toml': '[project]\nname = "x"\ndynamic = ["version"]\n\n[tool.poetry]\nversion = "1.0.0"\n' })
+  assert.throws(() => readVersion(join(dir, 'pyproject.toml')), /pyproject\.toml has no version in its \[project\] table/)
+})
+
+test("uv.lock: only the project's own entry changes, among several packages and a registry one of the same name", () => {
+  const dir = write(tmp('uv'), { 'pyproject.toml': PYPROJECT, 'uv.lock': UV_LOCK })
+  const path = join(dir, 'uv.lock')
+  assert.equal(readVersion(path), '0.1.0')
+  setVersion(path, '0.2.0')
+  const own = 'version = "0.1.0"\nsource = { editable = "." }'
+  assert.equal(readFileSync(path, 'utf8'), UV_LOCK.replace(own, own.replace('0.1.0', '0.2.0')))
+})
+
+test('uv.lock: a virtual project, in a CRLF file', () => {
+  const lock = crlf(UV_LOCK.replace('source = { editable = "." }', 'source = { virtual = "." }'))
+  const dir = write(tmp('uv-virtual'), { 'pyproject.toml': PYPROJECT, 'uv.lock': lock })
+  setVersion(join(dir, 'uv.lock'), '1.0.0')
+  const own = 'version = "0.1.0"\r\nsource = { virtual = "." }'
+  assert.equal(readFileSync(join(dir, 'uv.lock'), 'utf8'), lock.replace(own, own.replace('0.1.0', '1.0.0')))
+})
+
+test('uv.lock: no entry for the project itself is an error naming the file and the project', () => {
+  const dir = write(tmp('uv-none'), { 'pyproject.toml': PYPROJECT, 'uv.lock': UV_LOCK.replace('source = { editable = "." }', 'source = { registry = "x" }') })
+  assert.throws(() => readVersion(join(dir, 'uv.lock')), /uv\.lock has no entry for the project "DevGuard"/)
+})
+
+const INIT_PY = '"""devguard."""\n\n__version__ = "0.1.0"\n__all__ = ["main"]\n'
+const PASS_ENV = 'const NAME = "pass-env";\r\nconst VERSION = "0.1.0";\r\nconsole.log(NAME, VERSION);\r\n'
+
+test('a pattern entry: only the captured text changes, in LF and CRLF files', () => {
+  const dir = write(tmp('pattern'), { 'src/devguard/__init__.py': INIT_PY, 'pass-env.ts': PASS_ENV })
+  const py = { path: join(dir, 'src/devguard/__init__.py'), pattern: '__version__ = "(.*)"' }
+  const ts = { path: join(dir, 'pass-env.ts'), pattern: 'const VERSION = "(.*)";' }
+  assert.equal(readVersion(py), '0.1.0')
+  assert.equal(readVersion(ts), '0.1.0')
+  setVersion(py, '0.2.0')
+  setVersion(ts, '0.2.0')
+  assert.equal(readFileSync(py.path, 'utf8'), INIT_PY.replace('0.1.0', '0.2.0'))
+  assert.equal(readFileSync(ts.path, 'utf8'), PASS_ENV.replace('0.1.0', '0.2.0'))
+})
+
+test('a pattern entry that matches nowhere, or twice, is an error naming the file and the pattern', () => {
+  const dir = write(tmp('pattern-count'), { 'v.py': '__version__ = "1"\n__version__ = "2"\n' })
+  const path = join(dir, 'v.py')
+  assert.throws(() => readVersion({ path, pattern: 'VERSION = "(.*)"' }), (e) => e.message.includes(path) && e.message.includes('pattern VERSION = "(.*)" must match exactly once, but matches nowhere'))
+  assert.throws(() => setVersion({ path, pattern: '__version__ = "(.*)"' }, '3'), /v\.py: pattern __version__ = "\(\.\*\)" must match exactly once, but matches 2 times/)
+  assert.equal(readFileSync(path, 'utf8'), '__version__ = "1"\n__version__ = "2"\n')
+  // ^ and $ match at each line, so an anchor can pick one.
+  assert.equal(readVersion({ path, pattern: '^__version__ = "(1)"$' }), '1')
+})
+
+test('a pattern entry needs a valid regex with exactly one capture group, and only path and pattern', () => {
+  assert.equal(entryProblem('package.json'), null)
+  assert.equal(entryProblem({ path: 'a.py', pattern: '__version__ = "(.*)"' }), null)
+  assert.equal(entryProblem({ path: 'a.py', pattern: '(?<v>\\d+\\.\\d+\\.\\d+)' }), null)
+  assert.match(entryProblem({ path: 'a.py', pattern: '__version__ = ".*"' }), /^a\.py: pattern __version__ = "\.\*" must have exactly one capture group, the version, but has 0$/)
+  assert.match(entryProblem({ path: 'a.py', pattern: '(v)=(.*)' }), /but has 2$/)
+  assert.match(entryProblem({ path: 'a.py', pattern: '(?:v)=(.*)' }) ?? 'ok', /^ok$/)
+  assert.match(entryProblem({ path: 'a.py', pattern: 'version = "(.*"' }), /^a\.py: pattern version = "\(\.\*" is not a valid regular expression/)
+  assert.match(entryProblem({ path: 'a.py' }), /a\.py: no "pattern"/)
+  assert.match(entryProblem({ pattern: '(.*)' }), /has no "path"/)
+  assert.match(entryProblem({ path: 'a.py', pattern: '(.*)', flags: 'i' }), /unknown key flags/)
+  assert.match(entryProblem(3), /neither a path nor/)
+  const dir = write(tmp('pattern-bad'), { 'a.py': 'x\n' })
+  assert.throws(() => readVersion({ path: join(dir, 'a.py'), pattern: 'x' }), /must have exactly one capture group/)
+})
+
+test('versionFiles problems: a pyproject.toml whose uv.lock beside it is not listed', () => {
+  const dir = write(tmp('companion'), { 'pyproject.toml': PYPROJECT, 'uv.lock': UV_LOCK, 'py/pyproject.toml': PYPROJECT })
+  assert.deepEqual(versionFilesProblems(['pyproject.toml', 'uv.lock', 'py/pyproject.toml'], dir), [])
+  assert.deepEqual(versionFilesProblems(['pyproject.toml'], dir), ['pyproject.toml is listed but the uv.lock beside it isn\'t: add "uv.lock" so a release bumps both'])
+  assert.deepEqual(versionFilesProblems('pyproject.toml', dir), ['"versionFiles" must be a list'])
+})
+
+test('a release commit may change a pattern entry\'s file', () => {
+  const ok = { subject: 'chore(release): v1.0.0', parents: 1, version: '1.0.0', files: ['package.json', 'CHANGELOG.md', 'pass-env.ts'] }
+  assert.equal(releaseCommitProblem({ ...ok, versionFiles: [{ path: 'pass-env.ts', pattern: 'const VERSION = "(.*)";' }] }), null)
+  assert.match(releaseCommitProblem({ ...ok, versionFiles: [] }), /it changes pass-env\.ts/)
+})
+
+test('a Python project: apply finds pyproject.toml and uv.lock, and a release bumps them and pattern files', () => {
+  const repo = makeRepo(tmp('python'), { version: '0.1.0' })
+  write(repo, { 'pyproject.toml': PYPROJECT, 'uv.lock': UV_LOCK, 'src/devguard/__init__.py': INIT_PY, 'pass-env.ts': PASS_ENV })
+  run(repo, 'git', ['add', '-A'])
+  run(repo, 'git', ['commit', '-q', '-m', 'chore: the app'])
+  run(KIT, 'node', ['apply.mjs', repo, '--vendored'])
+  const configPath = join(repo, '.release.json')
+  const config = JSON.parse(readFileSync(configPath, 'utf8'))
+  assert.deepEqual(config.versionFiles, ['pyproject.toml', 'uv.lock'])
+  const patterns = [{ path: 'src/devguard/__init__.py', pattern: '__version__ = "(.*)"' }, { path: 'pass-env.ts', pattern: 'const VERSION = "(.*)";' }]
+  config.versionFiles.push(...patterns)
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
+  run(repo, 'git', ['add', '-A'])
+  run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
+  run(repo, 'node', ['scripts/release-kit/release.mjs', '--baseline'])
+  commit(repo, 'feat: guard every dev server')
+  run(repo, 'node', ['scripts/release-kit/release.mjs'])
+  const verified = run(repo, 'node', ['scripts/release-kit/release.mjs', '--verify-tag', 'v0.2.0'])
+  assert.match(verified, /v0\.2\.0 matches package\.json, pyproject\.toml, uv\.lock, src\/devguard\/__init__\.py \(pattern __version__ = "\(\.\*\)"\), pass-env\.ts/)
+  for (const entry of ['pyproject.toml', 'uv.lock', ...patterns]) assert.equal(readVersion(typeof entry === 'string' ? join(repo, entry) : { ...entry, path: join(repo, entry.path) }), '0.2.0')
+  assert.equal(readFileSync(join(repo, 'pyproject.toml'), 'utf8'), PYPROJECT.replace('version = "0.1.0"', 'version = "0.2.0"'))
+  assert.equal(run(repo, 'git', ['status', '--porcelain']), '')
+  assert.deepEqual(run(repo, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), ['CHANGELOG.md', 'package.json', 'pass-env.ts', 'pyproject.toml', 'src/devguard/__init__.py', 'uv.lock'])
+
+  // A file that has drifted fails the tag check, naming it.
+  writeFileSync(join(repo, 'pass-env.ts'), PASS_ENV)
+  const drifted = attempt(repo, 'node', ['scripts/release-kit/release.mjs', '--verify-tag', 'v0.2.0'])
+  assert.equal(drifted.status, 1)
+  assert.match(drifted.stderr, /tag v0\.2\.0 does not match: pass-env\.ts \(pattern const VERSION = "\(\.\*\)";\) has 0\.1\.0/)
+})
+
+test('a bad versionFiles entry stops a release before anything changes, and apply warns about it', () => {
+  const repo = makeRepo(tmp('python-bad'), { version: '0.1.0' })
+  write(repo, { 'pyproject.toml': PYPROJECT, 'uv.lock': UV_LOCK, 'v.py': '__version__ = "0.1.0"\n' })
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: ['pyproject.toml', { path: 'v.py', pattern: '__version__ = ".*"' }], workflows: 'vendored' }))
+  run(repo, 'git', ['add', '-A'])
+  run(repo, 'git', ['commit', '-q', '-m', 'chore: the app'])
+  const applied = run(KIT, 'node', ['apply.mjs', repo, '--vendored'])
+  assert.match(applied, /pyproject\.toml is listed but the uv\.lock beside it isn't/)
+  assert.match(applied, /v\.py: pattern __version__ = "\.\*" must have exactly one capture group/)
+  run(repo, 'git', ['add', '-A'])
+  run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
+  commit(repo, 'feat: more')
+  const released = attempt(repo, 'node', ['scripts/release-kit/release.mjs', 'minor'])
+  assert.equal(released.status, 1)
+  assert.match(released.stderr, /\.release\.json "versionFiles": v\.py: pattern __version__ = "\.\*" must have exactly one capture group, the version, but has 0; pyproject\.toml is listed but the uv\.lock beside it isn't/)
+  assert.equal(run(repo, 'git', ['status', '--porcelain']), '')
+
+  // A pattern that no longer matches stops it too, before the bump.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: ['pyproject.toml', 'uv.lock', { path: 'v.py', pattern: 'VERSION = "(.*)"' }], workflows: 'vendored' }))
+  run(repo, 'git', ['commit', '-qam', 'chore: fix config'])
+  const unmatched = attempt(repo, 'node', ['scripts/release-kit/release.mjs', 'minor'])
+  assert.equal(unmatched.status, 1)
+  assert.match(unmatched.stderr, /v\.py: pattern VERSION = "\(\.\*\)" must match exactly once, but matches nowhere/)
+  assert.equal(run(repo, 'git', ['status', '--porcelain']), '')
+  assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version, '0.1.0')
 })
