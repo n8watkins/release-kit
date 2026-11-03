@@ -27,6 +27,8 @@
 //                        says, else .release.json "visibility"); a private repo
 //                        skips work that costs runner minutes
 //   --force              replace workflows with the same name the kit didn't write
+//   --json               print the report as JSON (the files added, changed and
+//                        removed, what was done, and the notes), for the rollout bot
 //
 // The choices are saved in .release.json, so re-running with no options keeps
 // them (a repo applied before package mode existed moves to it). Kit-owned
@@ -44,6 +46,9 @@ const KIT = dirname(fileURLToPath(import.meta.url))
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
 const KIT_VERSION = kitPackage.version
 const KIT_REPO = /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(kitPackage.repository?.url ?? '')?.[1] ?? 'n8watkins/release-kit'
+// The rollout bot (adopters.json, .github/workflows/rollout.yml): the GitHub
+// App that opens a release-kit/update pull request in each repo on a release.
+const ROLLOUT_BOT = 'release-kit-bot-n8watkins[bot]'
 const TEMPLATE = join(KIT, 'template')
 const REUSABLE = join(KIT, 'reusable')
 const MARKER = 'release-kit'
@@ -73,7 +78,7 @@ function valueOf(name) {
 }
 function usage(problem) {
   if (problem) console.error(`apply: ${problem}`)
-  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--repository <owner/repo>] [--visibility public|private] [--force]')
+  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--repository <owner/repo>] [--visibility public|private] [--force] [--json]')
   process.exit(1)
 }
 
@@ -99,10 +104,23 @@ if (visibilityFlag !== undefined && !VISIBILITIES.includes(visibilityFlag)) usag
 
 const done = []
 const skipped = []
+// What each file held before apply first touched it (null: it didn't exist),
+// so --json can say exactly which files were added, changed and removed.
+const before = new Map()
+function record(p) {
+  if (before.has(p)) return
+  const target = join(repo, p)
+  before.set(p, existsSync(target) ? readFileSync(target) : null)
+}
 const read = (p) => readFileSync(join(repo, p), 'utf8')
 const write = (p, content) => {
+  record(p)
   mkdirSync(dirname(join(repo, p)), { recursive: true })
   writeFileSync(join(repo, p), content)
+}
+const remove = (p) => {
+  record(p)
+  rmSync(join(repo, p))
 }
 
 // 0. The repo's choices, saved in .release.json.
@@ -258,7 +276,7 @@ for (const source of walk(TEMPLATE)) {
     const name = path.slice('.github/workflows/'.length)
     if (name === 'release-train.yml' && !train) {
       if (ownedByKit(path)) {
-        rmSync(join(repo, path))
+        remove(path)
         done.push(`${path} removed (no release train)`)
       }
       continue
@@ -292,6 +310,7 @@ for (const source of walk(TEMPLATE)) {
     skipped.push(`${path} is the repo's own, so the kit's ${path.slice(10)} hook is not installed: add  ${HOOK_LINES[path.slice(10)]}  to it`)
     continue
   }
+  record(path)
   if (packaged && path.startsWith('.githooks/')) writeFileSync(target, `#!/bin/sh\n${HOOKS[path.slice(10)]}`)
   // RELEASING.md names the kit's commands as package mode runs them.
   else if (!packaged && path === 'RELEASING.md') writeFileSync(target, readFileSync(source, 'utf8').replaceAll('npx release-kit protect', 'node scripts/release-kit/protect.mjs'))
@@ -301,6 +320,7 @@ for (const source of walk(TEMPLATE)) {
 }
 if (packaged) {
   if (existsSync(join(repo, 'scripts/release-kit'))) {
+    for (const file of walk(join(repo, 'scripts/release-kit'))) record(relative(repo, file))
     rmSync(join(repo, 'scripts/release-kit'), { recursive: true, force: true })
     done.push('scripts/release-kit/ removed (the kit now runs from node_modules)')
   }
@@ -359,7 +379,7 @@ if (packaged) {
 if (!packaged && existsSync(join(repo, '.npmrc')) && read('.npmrc').includes(`${NPMRC_NOTE}\nallow-git=root\n`)) {
   const rest = read('.npmrc').replace(`${NPMRC_NOTE}\nallow-git=root\n`, '')
   if (rest.trim()) write('.npmrc', rest)
-  else rmSync(join(repo, '.npmrc'))
+  else remove('.npmrc')
   done.push('.npmrc: allow-git removed (no git dependency in this mode)')
 }
 if (usesHusky) {
@@ -432,6 +452,9 @@ jobs:
       checks: read # merge when green: read the checks on the pull request
       statuses: read
     uses: ${KIT_REPO}/.github/workflows/auto-merge.yml@${ref}
+    with:
+      # The rollout bot's release-kit/update pull requests merge like Dependabot's.
+      bots: "dependabot[bot],${ROLLOUT_BOT}"
 `
 }
 
@@ -589,6 +612,18 @@ for (const p of agentFiles.length ? agentFiles : ['AGENTS.md']) {
   done.push(`${p}: commit and release rules`)
 }
 
+if (has('json')) {
+  const files = { added: [], changed: [], removed: [] }
+  for (const [p, old] of [...before].sort(([a], [b]) => a.localeCompare(b))) {
+    const target = join(repo, p)
+    const now = existsSync(target) ? readFileSync(target) : null
+    if (old === null && now !== null) files.added.push(p)
+    else if (old !== null && now === null) files.removed.push(p)
+    else if (old !== null && !old.equals(now)) files.changed.push(p)
+  }
+  console.log(JSON.stringify({ version: KIT_VERSION, kitRef, repo, repository: config.repository ?? null, mode: config.workflows, train: train?.schedule ?? null, files, done, notes: skipped }, null, 2))
+  process.exit(0)
+}
 console.log(`release-kit ${KIT_VERSION} applied to ${repo} (${config.workflows} mode${train ? `, release train "${train.schedule}"` : ''})\n`)
 for (const line of done) console.log(`  + ${line}`)
 for (const line of skipped) console.log(`  ! ${line}`)

@@ -1,0 +1,97 @@
+# One wave of the rollout bot (rollout.yml): for each adopter in the wave, mint
+# a token for that one repo from the "release-kit bot" GitHub App, run the
+# kit's apply at the tag, update the lock file, and open or update the pull
+# request from release-kit/update (scripts/rollout.mjs). Runs in the protected
+# `rollout` environment, which holds the App's ID and private key.
+name: Rollout wave
+
+on:
+  workflow_call:
+    inputs:
+      adopters:
+        description: "The wave's adopters, as JSON (scripts/rollout.mjs plan)"
+        type: string
+        required: true
+      tag:
+        description: "The release-kit tag to roll out"
+        type: string
+        required: true
+      dry-run:
+        description: "Show each pull request instead of pushing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: ${{ matrix.adopter.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: rollout
+    permissions:
+      contents: read # the release notes
+    strategy:
+      fail-fast: false
+      matrix:
+        adopter: ${{ fromJSON(inputs.adopters) }}
+    steps:
+      # Scoped to this one repo, and read-only in a dry run.
+      - name: Mint a token for ${{ matrix.adopter.repo }}
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_KIT_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_KIT_BOT_KEY }}
+          owner: ${{ matrix.adopter.owner }}
+          repositories: ${{ matrix.adopter.name }}
+          permission-contents: ${{ inputs.dry-run && 'read' || 'write' }}
+          permission-pull-requests: ${{ inputs.dry-run && 'read' || 'write' }}
+          permission-workflows: ${{ !inputs.dry-run && 'write' || '' }}
+
+      # The rollout script and adopters.json, from the commit this run is for.
+      - name: Check out the rollout script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tools
+          persist-credentials: false
+
+      # apply, exactly as the tag ships it.
+      - name: Check out release-kit ${{ inputs.tag }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          path: kit
+          persist-credentials: false
+
+      - name: Check out ${{ matrix.adopter.repo }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ matrix.adopter.repo }}
+          ref: ${{ matrix.adopter.branch }}
+          token: ${{ steps.token.outputs.token }}
+          path: target
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Fetch the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json body --jq .body > release-notes.md || echo "::warning::$TAG has no release notes"
+
+      - name: Run apply and open the pull request
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ADOPTER: ${{ toJSON(matrix.adopter) }}
+          TAG: ${{ inputs.tag }}
+          BOT: ${{ steps.token.outputs.app-slug }}[bot]
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -- --adopter "$ADOPTER" --tag "$TAG" --kit kit --target target --notes release-notes.md --bot "$BOT"
+          if [ "$DRY_RUN" = "true" ]; then set -- "$@" --dry-run; fi
+          node tools/scripts/rollout.mjs update "$@"

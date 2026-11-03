@@ -1,7 +1,7 @@
 # Roadmap
 
 Designs for what comes next, with a difficulty for each item and the exact steps only the owner can take.
-Nothing here is built yet, except item 7, which shipped in v2.4.0 and stays here as a record of its design.
+Nothing here is built yet, except items 7 and 8, which stay here as a record of their design: item 7 shipped in v2.4.0, and item 8 is on main for the next release.
 What is built is in the [README](../README.md); the reasoning behind the order is in the [November 2026 review](REVIEW_2026-11.md#6-roadmap).
 
 Difficulty is for one developer working with an agent, including tests and docs: **S** is under a day, **M** one to three days, **L** a week or more.
@@ -15,7 +15,7 @@ Difficulty is for one developer working with an agent, including tests and docs:
 | [5. pnpm, yarn and bun](#5-pnpm-yarn-and-bun) | M | No |
 | [6. Monorepos](#6-monorepos) | L | No |
 | [7. Per-repo settings: public and private repos](#7-per-repo-settings-public-and-private-repos) | Done in v2.4.0 | No |
-| [8. The rollout bot](#8-the-rollout-bot) | M | Yes: GitHub App, environment |
+| [8. The rollout bot](#8-the-rollout-bot) | Done, next release | Done: GitHub App, environment |
 | [Owner steps for what is already built](#owner-steps-for-what-is-already-built) | - | Yes |
 
 ## 1. Publish release-kit to npm with provenance
@@ -145,6 +145,18 @@ A private repo should skip work that costs minutes without protecting anything.
 
 ## 8. The rollout bot
 
+**Done**, as designed below, for the next release: `adopters.json`, `.github/workflows/rollout.yml` (with `rollout-wave.yml` for each wave), `scripts/rollout.mjs` and `apply --json`; the README has [how it works](../README.md#the-rollout-bot).
+Where the build differs from the design:
+
+- apply runs from the kit checked out at the tag (`node kit/apply.mjs`), not through `npx release-kit@<tag>`: the same code, without npm fetching a git dependency, which npm 12 refuses without `--allow-git`.
+- Each wave is one job per repo in the `rollout` environment, so the owner approves each wave once (three clicks for a full rollout); that is also the pause to look at the canary's pull request.
+- A later wave waits for every repo in the earlier waves, not only the canary: a red public repo also holds back the private one.
+- `adopters.json` also lists each repo's visibility, a `note` for the pull request, and the repos the App isn't installed on, with `"enabled": false` and the reason.
+- apply writes the bot's login (`release-kit-bot-n8watkins[bot]`) into the `bots` input of the `auto-merge.yml` it writes, so the bot's update pull requests merge like Dependabot's.
+- apply no longer counts a repo's own workflow that mentions release-kit as the kit's (it replaced Scribe's `release.yml`); the bot depends on that, so roll out a release that has the fix, not v2.5.2 or older.
+- Not yet: apply still writes the Dependabot entries for the kit.
+  The design drops them "once the bot is live"; that waits until a real rollout has reached every adopter, and until the repos the App isn't installed on are covered, since Dependabot is their only source of kit updates.
+
 **Why.** Dependabot can bump a version but cannot add a file, so every kit release that adds or changes what apply writes needs a manual `npx release-kit apply .` in each of the 8 adopters.
 v2.1.0's `security.yml` reached none of them that way.
 
@@ -159,7 +171,9 @@ v2.1.0's `security.yml` reached none of them that way.
 - PRs opened with an App token run CI normally, unlike PRs opened with `GITHUB_TOKEN`, and the auto-merge policy already accepts the bot's `release-kit/` branch (pass its login in the `bots` input).
 - Once the bot is live, apply stops writing the npm and github-actions Dependabot entries for the kit, so there is one source of kit PRs, not two.
 
-**Owner steps.** Done 2026-11-02: the App (ID 5590953) is installed on the eight adopters, and the `rollout` environment holds its ID and key. Only the workflow itself remains.
+**Owner steps.** Done 2026-11-02: the App (ID 5590953) is installed on the eight adopters, and the `rollout` environment holds its ID and key.
+What stays with the owner: approving each rollout's waves, and installing the App on another adopter (App settings, Install App, the repo) before setting it to `"enabled": true` in `adopters.json`.
+The steps below stay as the record of the setup.
 
 1. Create the App at <https://github.com/settings/apps/new>:
    - GitHub App name: `release-kit bot (n8watkins)`; homepage URL: `https://github.com/n8watkins/release-kit`.

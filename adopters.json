@@ -1,0 +1,147 @@
+{
+  "bot": "release-kit-bot-n8watkins[bot]",
+  "adopters": [
+    {
+      "repo": "n8watkins/portfolio-rank",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "canary",
+      "merge": "auto-merge",
+      "enabled": true
+    },
+    {
+      "repo": "n8watkins/n8builds-web",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": true,
+      "note": "Its own dependabot.yml: apply leaves it alone and lists what to add."
+    },
+    {
+      "repo": "n8watkins/dev-portfolio",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": true
+    },
+    {
+      "repo": "n8watkins/open-ping",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "merge-when-green",
+      "enabled": true,
+      "note": "Requires no checks and doesn't allow auto-merge, so the merge-when-green fallback merges once auto-merge.yml is on main."
+    },
+    {
+      "repo": "n8watkins/scribe",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": true,
+      "note": "Its own dependabot.yml and its own release.yml (the Tauri build), which apply keeps."
+    },
+    {
+      "repo": "n8watkins/voicedock",
+      "branch": "master",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": true
+    },
+    {
+      "repo": "n8watkins/tl-dw",
+      "branch": "master",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": true
+    },
+    {
+      "repo": "n8watkins/n8builds-admin",
+      "branch": "main",
+      "visibility": "private",
+      "wave": "private",
+      "merge": "merge-when-green",
+      "enabled": true,
+      "note": "Private on GitHub Free: no rulesets, so merge when green merges once every check passes."
+    },
+    {
+      "repo": "n8watkins/tube-vault",
+      "branch": "review/tube-vault-v0.3.81",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed. Targets review/tube-vault-v0.3.81, never master, which is frozen at 0.3.80."
+    },
+    {
+      "repo": "n8watkins/deadlink",
+      "branch": "master",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed.",
+      "note": "Its own dependabot.yml: apply leaves it alone and lists what to add."
+    },
+    {
+      "repo": "n8watkins/strollz",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed."
+    },
+    {
+      "repo": "n8watkins/keysready",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed."
+    },
+    {
+      "repo": "n8watkins/vibelog",
+      "branch": "master",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed."
+    },
+    {
+      "repo": "n8watkins/pivot",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed.",
+      "note": "Its own dependabot.yml: apply leaves it alone and lists what to add."
+    },
+    {
+      "repo": "n8watkins/cutelyaskme",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed."
+    },
+    {
+      "repo": "n8watkins/pr-post-private",
+      "branch": "main",
+      "visibility": "private",
+      "wave": "private",
+      "merge": "person",
+      "enabled": false,
+      "reason": "Not a kit-bump adopter: no package.json, only the Direct push alarm caller."
+    }
+  ]
+}

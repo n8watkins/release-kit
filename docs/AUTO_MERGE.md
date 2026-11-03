@@ -7,7 +7,7 @@ The kit's reusable `auto-merge.yml` merges them on their own, within a strict po
 
 - **What may merge on its own:** release-kit updates, and Dependabot patch and minor updates, including Dependabot security updates.
 - **What never does:** a major update of anything, a downgrade, an update whose kind can't be read, a draft, and any pull request that isn't from an update bot.
-- **Who counts as an update bot:** `dependabot[bot]`, plus any author listed in the `bots` input (for example the rollout bot's `release-kit-bot[bot]`), whose pull requests must also come from a `release-kit/` branch.
+- **Who counts as an update bot:** `dependabot[bot]`, plus any author listed in the `bots` input, whose pull requests must also come from a `release-kit/` branch; the `auto-merge.yml` apply writes lists the rollout bot, `release-kit-bot-n8watkins[bot]`.
 - **How the kind is read:** the release-kit pin in `package.json` on both sides of the pull request, and Dependabot's own `updated-dependencies` metadata in its commit messages.
   A grouped pull request takes the biggest change in it, so a group with one major update waits for a person.
 - **Only metadata is read**, through the GitHub API; no pull request code runs in the job that holds the write token.

@@ -1,0 +1,112 @@
+# The rollout bot (docs/ROADMAP.md, item 8): after a kit release, run apply in
+# every adopter listed in adopters.json and open one pull request each, from
+# the release-kit/update branch, as the "release-kit bot" GitHub App.
+# Waves run in order (canary, public, private), and a wave starts only when the
+# one before it succeeded. Every wave runs in the protected `rollout`
+# environment, so each waits for the owner's approval; a dry run does too,
+# because it mints the App's tokens to read the repos.
+name: Rollout
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release-kit tag to roll out, like v2.6.0"
+        required: true
+        type: string
+      repos:
+        description: "Only these adopters, comma-separated (empty: every enabled one)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Dry run: run apply and show each pull request, but push nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rollout
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan the waves
+    # A pre-release is for testers, not for every adopter.
+    if: github.event_name != 'release' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      dry-run: ${{ steps.tag.outputs.dry-run }}
+      canary: ${{ steps.plan.outputs.canary }}
+      public: ${{ steps.plan.outputs.public }}
+      private: ${{ steps.plan.outputs.private }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Check the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::\"$TAG\" is not a release tag like v2.6.0"
+            exit 1
+          fi
+          if [ -z "$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$TAG")" ]; then
+            echo "::error::$TAG is not a tag in $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "$DRY_RUN" = "true" ]; then echo "dry-run=true" >> "$GITHUB_OUTPUT"; else echo "dry-run=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Plan
+        id: plan
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPOS: ${{ inputs.repos || '' }}
+        run: node scripts/rollout.mjs plan --tag "$TAG" --repos "$REPOS"
+
+  canary:
+    name: Canary
+    needs: plan
+    if: needs.plan.outputs.canary != '[]'
+    uses: ./.github/workflows/rollout-wave.yml
+    with:
+      adopters: ${{ needs.plan.outputs.canary }}
+      tag: ${{ needs.plan.outputs.tag }}
+      dry-run: ${{ needs.plan.outputs.dry-run == 'true' }}
+
+  public:
+    name: Public
+    needs: [plan, canary]
+    # A failed canary stops the rollout; a skipped one (none picked) doesn't.
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.public != '[]'
+      && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+    uses: ./.github/workflows/rollout-wave.yml
+    with:
+      adopters: ${{ needs.plan.outputs.public }}
+      tag: ${{ needs.plan.outputs.tag }}
+      dry-run: ${{ needs.plan.outputs.dry-run == 'true' }}
+
+  private:
+    name: Private
+    needs: [plan, canary, public]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.private != '[]'
+      && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      && (needs.public.result == 'success' || needs.public.result == 'skipped')
+    uses: ./.github/workflows/rollout-wave.yml
+    with:
+      adopters: ${{ needs.plan.outputs.private }}
+      tag: ${{ needs.plan.outputs.tag }}
+      dry-run: ${{ needs.plan.outputs.dry-run == 'true' }}
