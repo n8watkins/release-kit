@@ -172,23 +172,8 @@ v2.1.0's `security.yml` reached none of them that way.
 - Once the bot is live, apply stops writing the npm and github-actions Dependabot entries for the kit, so there is one source of kit PRs, not two.
 
 **Owner steps.** Done 2026-11-02: the App (ID 5590953) is installed on the eight adopters, and the `rollout` environment holds its ID and key.
-What stays with the owner: approving each rollout's waves, and installing the App on another adopter (App settings, Install App, the repo) before setting it to `"enabled": true` in `adopters.json`.
-The steps below stay as the record of the setup.
-
-1. Create the App at <https://github.com/settings/apps/new>:
-   - GitHub App name: `release-kit bot (n8watkins)`; homepage URL: `https://github.com/n8watkins/release-kit`.
-   - Webhook: uncheck "Active" (the bot is driven by the workflow, not by events).
-   - Repository permissions: **Contents: Read and write** (push the update branch), **Pull requests: Read and write** (open and update the PR), **Workflows: Read and write** (change files under `.github/workflows/`), **Metadata: Read-only** (required).
-     Nothing else, and no account or organization permissions.
-   - Where can this GitHub App be installed: "Only on this account".
-2. On the App's page, note the **App ID**, then "Generate a private key" and keep the downloaded `.pem` file until step 4.
-3. "Install App", choose "Only select repositories", and pick the adopters: n8builds-web, n8builds-admin, dev-portfolio, open-ping, scribe, voicedock, portfolio-rank, tl-dw.
-4. In release-kit, Settings, Environments, create `rollout`:
-   - Required reviewers: yourself, so every rollout waits for one click.
-   - Deployment branches and tags: `main` and the tag pattern `v*` only.
-   - Environment variable `RELEASE_KIT_BOT_APP_ID` = the App ID; environment secret `RELEASE_KIT_BOT_KEY` = the full contents of the `.pem` file.
-   Then delete the `.pem` file from the computer.
-5. Rotate the key yearly from the App's page (generate a new one, update the secret, delete the old one).
+What stays with the owner: approving each rollout's waves, and installing the App on another adopter before setting it to `"enabled": true` in `adopters.json`.
+The setup steps, and the steps for adding an adopter, are in [UPGRADES.md](UPGRADES.md#setting-up-the-app).
 
 ## Owner steps for what is already built
 

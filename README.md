@@ -26,6 +26,13 @@ The rules and the reasoning behind them are in [STANDARD.md](STANDARD.md).
 
 It is a poor fit today for monorepos with several independently versioned packages, for projects that need to publish to npm or another registry as part of the release, and for repos without a `package.json` (see [Limits](#limits)).
 
+## Do I need the GitHub App?
+
+No.
+The kit is a package each repo installs; the GitHub App only powers the optional [rollout bot](#the-rollout-bot), which serves the maintainer's own repos.
+Without it, Dependabot opens one pull request per kit release that moves the version, and when a release adds or changes files you run `npx release-kit apply .` in the repo.
+The full answer, with a side-by-side table, is in [docs/UPGRADES.md](docs/UPGRADES.md).
+
 ## How it compares
 
 | | release-kit | semantic-release | release-please | changesets |
@@ -132,7 +139,8 @@ On every published release, `.github/workflows/rollout.yml` in release-kit runs 
 - **Merging:** pull requests opened with an App token run CI like any other, and the `auto-merge.yml` apply writes lists the bot (`release-kit-bot-n8watkins[bot]`) next to Dependabot, so its update merges under the same policy.
 - **By hand:** Actions, Rollout, "Run workflow" takes a tag, an optional list of repos and a dry-run switch (on by default), which shows each pull request in the run summary and pushes nothing.
 
-Its design and the owner's setup steps are in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along with npm publishing, signed releases, pre-releases and the other planned work.
+Whether a repo needs it, and the App's setup steps, are in [docs/UPGRADES.md](docs/UPGRADES.md).
+Its design is in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along with npm publishing, signed releases, pre-releases and the other planned work.
 
 ## What apply adds
 
