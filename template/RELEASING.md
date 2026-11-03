@@ -157,7 +157,9 @@ Nobody bypasses the branch rules, admins included, so a coding agent signed in a
 Releases still work:
 
 - `npm run release -- --push` tries its usual push; when the rules reject it, it pushes the release commit to a `release/vX.Y.Z` branch, opens a pull request, merges it once its checks pass (up to `--pr-timeout`, default 30 minutes), and tags the merged commit.
-  If a check fails, it closes the pull request and undoes the release commit, so nothing is tagged.
+  It waits for and judges only what gates the merge: the branch's required checks (from its rulesets and branch protection), or, when it requires none, every GitHub Actions check.
+  Commit statuses and other apps' checks (a Vercel deploy, GitGuardian) that the rules don't require are printed and ignored, so a rate-limited preview deploy doesn't stop a release.
+  If a gating check fails, or a required check never reports before `--pr-timeout`, it closes the pull request and undoes the release commit, so nothing is tagged.
   `--via-pr` goes straight to the pull request, and `npm run release -- --dry-run --push` says which path it will take.
 - With a release train, the train's deploy key may bypass the branch rules (see [A protected main](#a-protected-main)); `--rotate-key` replaces the key.
 - `--admin-bypass` lets repository admins push straight to the branch again, for a repo that wants that trade-off.

@@ -11,7 +11,8 @@
 //       commit and tag are undone. When the branch's rules accept changes
 //       only through pull requests (npx release-kit protect), the release
 //       goes through one instead: release-pr.mjs opens it, merges it once
-//       its checks pass, and tags the merged commit. --via-pr does that
+//       the checks that gate the merge pass (the required ones, or the
+//       GitHub Actions ones when none are), and tags the merged commit. --via-pr does that
 //       without trying the push first; --pr-timeout <minutes> (default 30)
 //       is how long it waits for the checks.
 //   npm run release -- --plan [auto|patch|minor|major|x.y.z]
