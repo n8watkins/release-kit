@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.2 - 2026-11-02
+
+### Fixed
+
+- Merge when green works in private repos again: update pull requests merge once their checks pass
+
 ## 2.5.1 - 2026-11-02
 
 ### Fixed
