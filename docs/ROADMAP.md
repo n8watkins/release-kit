@@ -1,7 +1,7 @@
 # Roadmap
 
 Designs for what comes next, with a difficulty for each item and the exact steps only the owner can take.
-Nothing here is built yet.
+Nothing here is built yet, except item 7, which shipped in v2.4.0 and stays here as a record of its design.
 What is built is in the [README](../README.md); the reasoning behind the order is in the [November 2026 review](REVIEW_2026-11.md#6-roadmap).
 
 Difficulty is for one developer working with an agent, including tests and docs: **S** is under a day, **M** one to three days, **L** a week or more.
@@ -14,7 +14,7 @@ Difficulty is for one developer working with an agent, including tests and docs:
 | [4. A reviewable release PR mode](#4-a-reviewable-release-pr-mode) | M | No |
 | [5. pnpm, yarn and bun](#5-pnpm-yarn-and-bun) | M | No |
 | [6. Monorepos](#6-monorepos) | L | No |
-| [7. Per-repo settings: public and private repos](#7-per-repo-settings-public-and-private-repos) | S | No |
+| [7. Per-repo settings: public and private repos](#7-per-repo-settings-public-and-private-repos) | Done in v2.4.0 | No |
 | [8. The rollout bot](#8-the-rollout-bot) | M | Yes: GitHub App, environment |
 | [Owner steps for what is already built](#owner-steps-for-what-is-already-built) | - | Yes |
 
@@ -128,12 +128,15 @@ A build provenance attestation proves the file came from that repo's Release wor
 
 ## 7. Per-repo settings: public and private repos
 
+**Done in v2.4.0**, as designed below, together with the free safeguards for private repos on GitHub Free (the pre-push guard, the Direct push alarm, and `protect` setting them up): see [PRIVATE_REPOS.md](PRIVATE_REPOS.md).
+Where the build differs from the design: the security scan's job decides from the event's `github.event.repository.private` (free, before a runner starts) rather than from `.release.json`, which apply's caller overrides with the `pull-requests` input; the `attest` setting is read once attestations (item 2) exist; and the kit lane needs no new setting, since CI lanes already give every repo one, so `release-kit check` recommends them to a private repo that hasn't adopted them.
+
 **Why.** Standard runners are free in public repos and billed per minute, rounded up per job, in private ones.
 A private repo should skip work that costs minutes without protecting anything.
 
 **Design.**
 
-- `.release.json` `"visibility": "public" | "private"`, detected by apply from `gh repo view --json visibility` when gh is signed in, and otherwise asked for with a note.
+- `.release.json` `"visibility": "public" | "private"`, detected by apply from `gh repo view --json visibility` when gh is signed in, and otherwise asked for with a note (`--visibility`).
 - Private repos get, by default: the security scan weekly only (not on every lock-file PR, since Dependabot alerts cover those), no artifact attestations (they need Enterprise Cloud), and the CI lanes' `kit` lane for kit-only updates.
 - Each setting can be overridden: `"security": { "onPullRequest": true }`, `"attest": true`.
 - The workflows read the settings in the job that decides, so one workflow file serves both kinds of repo.

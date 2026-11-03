@@ -4,6 +4,11 @@
 # rest as warnings (see scripts/release-kit/osv-gate.mjs). Accept a finding on
 # purpose in osv-scanner.toml.
 #
+# A private repo pays for runner minutes, so there it scans weekly only, not
+# on lock-file pull requests (Dependabot alerts cover those); .release.json
+# "security": { "onPullRequest": true } turns them back on (apply passes it
+# as the pull-requests input). The job is skipped, at no cost, before a runner starts.
+#
 # Vendored into a repo by apply.mjs, or called from n8watkins/release-kit:
 #   uses: n8watkins/release-kit/.github/workflows/security.yml@vX.Y.Z
 name: Security scan
@@ -25,12 +30,21 @@ on:
       - "**/osv-scanner.toml"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      pull-requests:
+        description: "Scan pull requests that change a lock file: auto (public repos only), true or false"
+        type: string
+        default: auto
 
 permissions:
   contents: read
 
 jobs:
   osv:
+    if: >-
+      github.event_name != 'pull_request'
+      || (inputs.pull-requests || 'auto') == 'true'
+      || ((inputs.pull-requests || 'auto') == 'auto' && !github.event.repository.private)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

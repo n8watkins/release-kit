@@ -43,7 +43,8 @@ test('the README lists every workflow the kit ships, and STANDARD.md every workf
   for (const name of shipped) assert.match(adds, new RegExp(`\`(\\.github/workflows/)?${name.replace('.', '\\.')}\``), `README "What apply adds" doesn't list ${name}`)
   // And nothing it no longer ships.
   for (const [, name] of adds.matchAll(/`(?:\.github\/workflows\/)?([\w-]+\.yml)`/g)) {
-    if (name !== 'dependabot.yml') assert.ok(shipped.includes(name), `README lists ${name}, which the kit doesn't ship`)
+    // dependabot.yml and a private repo's auto-merge.yml are written by apply itself, not copied.
+    if (!['dependabot.yml', 'auto-merge.yml'].includes(name)) assert.ok(shipped.includes(name), `README lists ${name}, which the kit doesn't ship`)
   }
   for (const mode of MODES) assert.match(read('STANDARD.md'), new RegExp(`\\*\\*${mode[0].toUpperCase()}${mode.slice(1)}\\*\\*`), mode)
 })

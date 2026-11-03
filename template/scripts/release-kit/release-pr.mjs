@@ -13,8 +13,12 @@ import { git } from './git.mjs'
 const FAILED = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
 const MERGEABLE = new Set(['CLEAN', 'HAS_HOOKS', 'UNSTABLE'])
 
-/** A push rejected by a ruleset or branch protection, not by a network or auth problem. */
-export const RULE_REJECTION = /GH013|rule violations|must be made through a pull request|protected branch hook declined|Protected branch update failed/i
+/**
+ * A push rejected by a ruleset or branch protection, or by the kit's pre-push
+ * guard (guard.mjs: the release would carry unpushed commits along), not by a
+ * network or auth problem.
+ */
+export const RULE_REJECTION = /GH013|rule violations|must be made through a pull request|protected branch hook declined|Protected branch update failed|release-kit: push blocked/i
 
 /**
  * What a pull request's checks say: 'failed', 'pending' or 'passed'.

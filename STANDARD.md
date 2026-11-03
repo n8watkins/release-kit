@@ -84,6 +84,8 @@ Repos that ship continuously (a website deploying every merge) turn it on with `
   - **Reusable** (`apply.mjs --reusable`): the repo's workflows are short callers of `n8watkins/release-kit/.github/workflows/<file>.yml@vX.Y.Z`, and the scripts are copied into `scripts/release-kit/` for the local hook and `npm run release`. The steps and the scripts the workflows run come from the kit at that exact ref, so an upgrade is a one-line change per workflow. Pin a commit SHA instead of a tag with `--kit-ref <sha>`.
   - **Vendored** (`apply.mjs --vendored`): the full workflows and scripts are copied into the repo. Nothing outside the repo runs.
 - The workflows use the Node version in `.release.json` `node`, else `.nvmrc` or `.node-version`, else 22.
+- Protected branches (the default branch and the release branches) take changes only through pull requests, and release tags never move: rulesets enforce it where GitHub offers them, and everywhere a pre-push guard stops it locally and the Direct push alarm reports it afterwards (see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md)).
+- A private repo skips work that costs runner minutes without protecting anything (`.release.json` `visibility`).
 
 ### What each repo provides
 

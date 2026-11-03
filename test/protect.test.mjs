@@ -3,10 +3,10 @@
 // train's private key ends up only in the secret.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { KIT, attempt, tmp } from './helpers.mjs'
-import { BRANCH_RULESET, TAG_RULESET, branchRuleset, drift, onlySometimes, protectionWarnings, requiredChecksFrom, tagRuleset } from '../template/scripts/release-kit/protect.mjs'
+import { KIT, attempt, makeRepo, tmp } from './helpers.mjs'
+import { BRANCH_RULESET, TAG_RULESET, branchRuleset, drift, onlySometimes, protectionWarnings, requiredChecksFrom, safeguards, tagRuleset } from '../template/scripts/release-kit/protect.mjs'
 
 const ACTIONS = { id: 15368 }
 const run = (name, conclusion = 'success', app = ACTIONS) => ({ name, conclusion, status: 'completed', app })
@@ -228,12 +228,41 @@ test('--checks, .release.json protect.checks and --admin-bypass are honored', ()
   assert.match(configured.stdout, /required checks from .release.json "protect.checks"/)
 })
 
-test('a private repo on GitHub Free is told why, before anything changes', () => {
-  const result = protect([], { private: true })
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /can't have rulesets: GitHub offers them on public repos/)
-  assert.deepEqual(writes(result.calls), [])
+test('a private repo on GitHub Free gets the free safeguards instead, and is told what GitHub still lets through', () => {
+  // Without the kit's package mode (no package.json here): the command to run, and a failure.
+  const plain = protect([], { private: true })
+  assert.equal(plain.status, 1)
+  assert.match(plain.stdout, /private on GitHub Free, which has no rulesets or branch protection/)
+  assert.match(plain.stdout, /missing {2}the pre-push guard, active in this clone/)
+  assert.match(plain.stdout, /npx release-kit install-guard/)
+  assert.match(plain.stdout, /What GitHub does not enforce here, even so:\n {2}- anyone with write access can still push straight to the default branch/)
+  assert.deepEqual(writes(plain.calls), [])
+
+  // A package-mode repo: protect runs apply, and every safeguard is in place after.
+  const repo = makeRepo(tmp('protect-free'))
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ workflows: 'package', repository: 'o/r' }))
+  const dry = attempt(repo, 'node', [join(KIT, 'bin/release-kit.mjs'), 'protect', '--dry-run'], fakeGh({ private: true }).env)
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /apply --visibility private would add the missing ones/)
+  assert.ok(!existsSync(join(repo, '.github/workflows/direct-push.yml')))
+  const gh = fakeGh({ private: true })
+  const result = attempt(repo, 'node', [join(KIT, 'bin/release-kit.mjs'), 'protect'], gh.env)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.match(result.stdout, /running apply --visibility private/)
+  assert.deepEqual(safeguardsIn(repo).filter((item) => !item.ok), [])
+  assert.equal(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')).visibility, 'private')
+  assert.deepEqual(writes(gh.calls()), [])
 })
+
+const safeguardsIn = (dir) => {
+  const cwd = process.cwd()
+  try {
+    process.chdir(dir)
+    return safeguards()
+  } finally {
+    process.chdir(cwd)
+  }
+}
 
 test('check warns when the rulesets drift, and stays quiet when gh cannot tell', () => {
   const dir = tmp('protect-check')
@@ -260,5 +289,6 @@ test('check warns when the rulesets drift, and stays quiet when gh cannot tell',
     'o/r has no "release-kit: release tags" ruleset',
     'npx release-kit protect --dry-run shows the fix, and npx release-kit protect applies it',
   ])
-  assert.deepEqual(warn({ private: true }), [])
+  // A private repo on GitHub Free: the free safeguards it lacks.
+  assert.deepEqual(warn({ private: true }), ["o/r can't have rulesets (private on GitHub Free) and lacks the pre-push guard, active in this clone; the Direct push alarm (.github/workflows/direct-push.yml); merge when green for update pull requests (.github/workflows/auto-merge.yml): npx release-kit protect sets them up"])
 })

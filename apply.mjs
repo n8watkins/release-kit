@@ -22,6 +22,11 @@
 //                        the upstream repo, the only one whose Release and
 //                        train workflows run (default: .release.json
 //                        "repository", else the upstream or origin remote)
+//   --visibility <public|private>
+//                        whether the repo is public or private (default: what gh
+//                        says, else .release.json "visibility"); a private repo
+//                        skips work that costs runner minutes and gets the
+//                        merge-when-green auto-merge workflow
 //   --force              replace workflows with the same name the kit didn't write
 //
 // The choices are saved in .release.json, so re-running with no options keeps
@@ -34,6 +39,7 @@ import { execFileSync } from 'node:child_process'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readVersion } from './template/scripts/release-kit/versions.mjs'
+import { VISIBILITIES, detectVisibility, settings } from './template/scripts/release-kit/settings.mjs'
 
 const KIT = dirname(fileURLToPath(import.meta.url))
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
@@ -50,6 +56,11 @@ const BRANCHES_LINE = /^( {4}branches: )\[main, master\]$/m
 // The fork guard on the Release and train jobs: only the upstream repo publishes.
 const FORK_GUARD_LINE = /^( {4})if: .* # release-kit: fork guard$/m
 const SLUG = /^[\w.-]+\/[\w.-]+$/
+// The Direct push alarm's release branches (reusable caller), and its delete filter (vendored copy).
+const ALARM_BRANCHES_LINE = /^( {6}branches: )"[^"\n]*"( # release-kit: branches)$/m
+const ALARM_DELETE_FILTER = "format(',main,master,{0},'"
+// The security scan's pull request setting: the caller's input, or the vendored copy's default.
+const SECURITY_LINE = /^( {6}pull-requests: )\S+( # release-kit: security on pull requests)$/m
 const NPMRC_NOTE = '# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.'
 
 const argv = process.argv.slice(2)
@@ -63,11 +74,11 @@ function valueOf(name) {
 }
 function usage(problem) {
   if (problem) console.error(`apply: ${problem}`)
-  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--repository <owner/repo>] [--force]')
+  console.error('usage: node apply.mjs <path/to/repo> [--train] [--schedule "<cron>"] [--train-checks <a.yml,b.yml>] [--no-train] [--package | --reusable | --vendored] [--kit-ref <ref>] [--repository <owner/repo>] [--visibility public|private] [--force]')
   process.exit(1)
 }
 
-const valued = new Set(['--schedule', '--kit-ref', '--train-checks', '--repository'])
+const valued = new Set(['--schedule', '--kit-ref', '--train-checks', '--repository', '--visibility'])
 const repo = argv.find((a, i) => !a.startsWith('--') && !valued.has(argv[i - 1]))
 if (!repo || !existsSync(join(repo, 'package.json'))) usage('the repo needs a package.json')
 const force = has('force')
@@ -84,6 +95,8 @@ const kitRef = valueOf('kit-ref') ?? `v${KIT_VERSION}`
 if (!/^[\w./-]+$/.test(kitRef)) usage(`"${kitRef}" is not a tag, branch or commit`)
 const repositoryFlag = valueOf('repository')
 if (repositoryFlag !== undefined && !SLUG.test(repositoryFlag)) usage(`--repository takes owner/repo, not "${repositoryFlag}"`)
+const visibilityFlag = valueOf('visibility')
+if (visibilityFlag !== undefined && !VISIBILITIES.includes(visibilityFlag)) usage(`--visibility takes public or private, not "${visibilityFlag}"`)
 
 const done = []
 const skipped = []
@@ -114,6 +127,20 @@ else if (typeof config.repository !== 'string' || !SLUG.test(config.repository))
   if (found) config.repository = found
   else skipped.push('could not tell which GitHub repo this is (no upstream or origin remote on github.com): the Release workflow skips forks instead; rerun with --repository owner/repo to name it')
 }
+// Public or private: --visibility, else what gh says now, else what was saved.
+// Unknown, the repo runs with the public defaults (more checks, never fewer).
+if (visibilityFlag) config.visibility = visibilityFlag
+else {
+  const found = detectVisibility(config.repository)
+  if (found && config.visibility && found !== config.visibility) done.push(`.release.json visibility: ${config.visibility} -> ${found} (GitHub says so)`)
+  if (found) config.visibility = found
+  else if (!VISIBILITIES.includes(config.visibility)) {
+    delete config.visibility
+    skipped.push(`could not tell whether ${config.repository ?? 'the repo'} is public or private (gh isn't installed or signed in, or no GitHub repo): rerun with --visibility private or --visibility public; until then it gets the public defaults`)
+  }
+}
+const repoSettings = settings(config)
+const isPrivate = repoSettings.visibility === 'private'
 const forkGuard = config.repository ? `github.repository == '${config.repository}'` : '${{ !github.event.repository.fork }}'
 const packaged = config.workflows === 'package'
 // Package mode calls the kit's workflows at the pinned tag, like reusable mode.
@@ -189,6 +216,35 @@ if [ ! -x "$kit" ]; then
 fi
 exec "$kit" commit-msg "$1"
 `
+// The pre-push guard in package mode: the kit from node_modules. Before npm
+// install it still blocks the obvious (a push to main or master, a moved or
+// deleted v* tag), without the release flow's exception.
+const PACKAGE_PRE_PUSH = `# release-kit: pre-push guard. Blocks pushing straight to, force pushing or
+# deleting the protected branches, and moving or deleting a release tag
+# (release-kit pre-push; RELEASE_KIT_ALLOW_DIRECT_PUSH=1 overrides, logged).
+kit="$(git rev-parse --show-toplevel)/node_modules/.bin/release-kit"
+if [ -x "$kit" ]; then exec "$kit" pre-push "$@"; fi
+[ "\${GITHUB_ACTIONS:-}" = true ] && exit 0
+[ "\${RELEASE_KIT_ALLOW_DIRECT_PUSH:-}" = 1 ] && exit 0
+blocked=
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master) blocked="$blocked $remote_ref" ;;
+    refs/tags/v*) case "$remote_sha" in *[!0]*) blocked="$blocked $remote_ref" ;; esac ;;
+  esac
+done
+if [ -n "$blocked" ]; then
+  echo "release-kit: push blocked ($blocked): the kit isn't installed yet, so the pre-push guard can't check it. Run npm install, or push a branch and open a pull request." >&2
+  exit 1
+fi
+`
+const HOOKS = { 'commit-msg': PACKAGE_HOOK, 'pre-push': PACKAGE_PRE_PUSH }
+const HOOK_LINES = {
+  'commit-msg': packaged ? 'npx --no-install release-kit commit-msg "$1"' : 'node scripts/release-kit/commit-msg.mjs "$1"',
+  'pre-push': packaged ? 'npx --no-install release-kit pre-push "$@"' : 'node scripts/release-kit/guard.mjs "$@"',
+}
+// A hook file the kit may write: missing, or one it wrote before.
+const kitHook = (path) => !existsSync(join(repo, path)) || /^(#!.*\n)?# release-kit/.test(read(path))
 const usesHusky = existsSync(join(repo, '.husky'))
 const pkg = JSON.parse(read('package.json'))
 const hookManager = usesHusky ? null : otherHooks()
@@ -214,7 +270,17 @@ for (const source of walk(TEMPLATE)) {
       : readFileSync(source, 'utf8')
     if (train) content = content.replace(SCHEDULE_LINE, `- cron: "${train.schedule}" # release-kit: schedule`)
     content = content.replace(FORK_GUARD_LINE, `$1if: ${forkGuard} # release-kit: fork guard`)
-    if (name === 'commits.yml') content = content.replace(BRANCHES_LINE, `$1[${pushBranches.map(branchFilter).join(', ')}]`)
+    if (name === 'commits.yml' || name === 'direct-push.yml') content = content.replace(BRANCHES_LINE, `$1[${pushBranches.map(branchFilter).join(', ')}]`)
+    if (name === 'direct-push.yml') {
+      const extra = pushBranches.filter((b) => !['main', 'master'].includes(b))
+      content = reusable
+        ? content.replace(ALARM_BRANCHES_LINE, `$1${JSON.stringify(extra.join(','))}$2`)
+        : content.replace(ALARM_DELETE_FILTER, `format(',${pushBranches.map((b) => b.replaceAll("'", "''")).join(',')},{0},'`)
+    }
+    if (name === 'security.yml') {
+      const own = typeof config.security?.onPullRequest === 'boolean' ? String(config.security.onPullRequest) : 'auto'
+      content = reusable ? content.replace(SECURITY_LINE, `$1${own}$2`) : content.replaceAll("(inputs.pull-requests || 'auto')", `(inputs.pull-requests || '${own}')`)
+    }
     writeWorkflow(path, content)
     continue
   }
@@ -222,7 +288,11 @@ for (const source of walk(TEMPLATE)) {
   if (packaged && path.startsWith('scripts/release-kit/')) continue
   const target = join(repo, path)
   mkdirSync(dirname(target), { recursive: true })
-  if (packaged && path.startsWith('.githooks/')) writeFileSync(target, `#!/bin/sh\n${PACKAGE_HOOK}`)
+  if (path.startsWith('.githooks/') && !kitHook(path)) {
+    skipped.push(`${path} is the repo's own, so the kit's ${path.slice(10)} hook is not installed: add  ${HOOK_LINES[path.slice(10)]}  to it`)
+    continue
+  }
+  if (packaged && path.startsWith('.githooks/')) writeFileSync(target, `#!/bin/sh\n${HOOKS[path.slice(10)]}`)
   // RELEASING.md names the kit's commands as package mode runs them.
   else if (!packaged && path === 'RELEASING.md') writeFileSync(target, readFileSync(source, 'utf8').replaceAll('npx release-kit protect', 'node scripts/release-kit/protect.mjs'))
   else copyFileSync(source, target)
@@ -238,6 +308,10 @@ if (packaged) {
   write('scripts/release-kit/VERSION', `${KIT_VERSION}\n`)
 }
 if (reusable) done.push(`workflows call ${KIT_REPO}@${kitRef}`)
+
+// A private repo on GitHub Free can't require checks, so update pull requests
+// merge through the auto-merge workflow's merge-when-green fallback (docs/AUTO_MERGE.md).
+if (isPrivate && config.autoMerge !== false) writeAutoMerge()
 
 // The workflows use npm ci and npm caching, which need npm's lock file.
 const otherLock = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'].find((p) => existsSync(join(repo, p)))
@@ -288,12 +362,21 @@ if (!packaged && existsSync(join(repo, '.npmrc')) && read('.npmrc').includes(`${
   done.push('.npmrc: allow-git removed (no git dependency in this mode)')
 }
 if (usesHusky) {
-  write('.husky/commit-msg', packaged ? PACKAGE_HOOK : 'node scripts/release-kit/commit-msg.mjs "$1"\n')
-  chmodSync(join(repo, '.husky/commit-msg'), 0o755)
-  done.push('.husky/commit-msg (the repo uses husky)')
+  const vendoredHooks = { 'commit-msg': '# release-kit: reject commit messages that aren\'t Conventional Commits.\nnode scripts/release-kit/commit-msg.mjs "$1"\n', 'pre-push': '# release-kit: pre-push guard (scripts/release-kit/guard.mjs).\nnode scripts/release-kit/guard.mjs "$@"\n' }
+  for (const name of ['commit-msg', 'pre-push']) {
+    const path = `.husky/${name}`
+    // commit-msg was always the kit's in a husky repo; a pre-push may be the repo's own.
+    if (name === 'pre-push' && !kitHook(path)) {
+      skipped.push(`${path} is the repo's own, so the kit's pre-push guard is not installed: add  ${HOOK_LINES[name]}  as its first line`)
+      continue
+    }
+    write(path, packaged ? HOOKS[name] : vendoredHooks[name])
+    chmodSync(join(repo, path), 0o755)
+    done.push(`${path} (the repo uses husky)`)
+  }
 } else if (hookManager) {
   // Pointing core.hooksPath at .githooks would switch the repo's own hooks off.
-  skipped.push(`${hookManager}, so the kit's hook is not installed: add  ${packaged ? 'npx --no-install release-kit commit-msg' : 'node scripts/release-kit/commit-msg.mjs'} "$1"  to the commit-msg hook there (the CI check runs either way)`)
+  skipped.push(`${hookManager}, so the kit's hooks are not installed: add  ${HOOK_LINES['commit-msg']}  to the commit-msg hook there (the CI check runs either way), and  ${HOOK_LINES['pre-push']}  to the pre-push hook (the pre-push guard)`)
 } else {
   const hook = 'git config core.hooksPath .githooks || true'
   if (!scripts.prepare) scripts.prepare = hook
@@ -307,6 +390,57 @@ if (usesHusky) {
 }
 write('package.json', `${JSON.stringify(pkg, null, 2)}\n`)
 done.push('package.json scripts: release, release:check')
+
+/**
+ * The auto-merge workflow, for a private repo: it calls the kit's policy on
+ * pull_request and, as the merge-when-green fallback, whenever one of the
+ * repo's pull request workflows finishes (listed by name under workflow_run).
+ */
+function autoMergeWorkflow(workflowNames, ref) {
+  return `# release-kit: merge update pull requests once CI passes (docs/AUTO_MERGE.md in
+# release-kit). apply writes it in a private repo, which on GitHub Free can't
+# require checks: the merge-when-green fallback merges a release-kit update or a
+# Dependabot patch or minor update once every check on it has passed, and a
+# major update waits for a person. workflow_run lists every workflow that runs
+# on pull requests, so the one that finishes last still triggers a look; rerun
+# npx release-kit apply . after adding one.
+name: Auto-merge
+
+on:
+  pull_request:
+  workflow_run:
+    workflows: [${workflowNames.map((n) => JSON.stringify(n)).join(', ')}]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    # Only update pull requests, so other pull requests cost no runner time.
+    if: >-
+      (github.event_name == 'pull_request' && (github.event.pull_request.user.login == 'dependabot[bot]' || startsWith(github.head_ref, 'release-kit/')))
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+          && (github.event.workflow_run.actor.login == 'dependabot[bot]' || startsWith(github.event.workflow_run.head_branch, 'release-kit/')))
+    permissions:
+      contents: write # merge the pull request
+      pull-requests: write # turn on auto-merge
+    uses: ${KIT_REPO}/.github/workflows/auto-merge.yml@${ref}
+`
+}
+
+function writeAutoMerge() {
+  const dir = join(repo, '.github/workflows')
+  const names = []
+  for (const file of existsSync(dir) ? readdirSync(dir).sort() : []) {
+    if (!/\.ya?ml$/.test(file) || file === 'auto-merge.yml') continue
+    const text = readFileSync(join(dir, file), 'utf8')
+    const name = /^name:\s*["']?(.+?)["']?\s*$/m.exec(text)?.[1]
+    // A pull_request trigger, in the on: block or an inline on: list.
+    if (name && (/^ {2}pull_request(_target)?:/m.test(text) || /^on:.*\bpull_request\b/m.test(text))) names.push(name)
+  }
+  writeWorkflow('.github/workflows/auto-merge.yml', autoMergeWorkflow(names, /^[0-9a-f]{40}$/.test(kitRef) ? `${kitRef} # release-kit ${KIT_VERSION}` : kitRef))
+}
 
 /**
  * Package mode: Dependabot keeps the kit current, the dev dependency (npm) and

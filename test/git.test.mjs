@@ -176,6 +176,9 @@ test('--push checks origin and release:check first, and undoes the release if th
   assert.deepEqual(state(), red)
 
   // The remote rejects the push: the release commit and tag are undone.
+  // (The local commits are on origin first, as if merged: the pre-push guard
+  // would otherwise send the release through a pull request.)
+  run(repo, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
   writeFileSync(join(remote, 'hooks', 'pre-receive'), '#!/bin/sh\necho "protected branch" >&2\nexit 1\n', { mode: 0o755 })
   const rejected = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--no-check'])
   assert.notEqual(rejected.status, 0)
