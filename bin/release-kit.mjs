@@ -98,6 +98,8 @@ function staleFiles() {
   if (existsSync(dependabot)) {
     const text = readFileSync(dependabot, 'utf8')
     if (text.startsWith('# release-kit:') && !/cooldown:\s*\n\s*exclude:[^\n]*release-kit/.test(text)) out.push(`${dependabot} lets Dependabot's cooldown propose older kit versions (a downgrade): rerun npx release-kit apply .`)
+    // Kit 2.3.0 to 2.3.2 put commit-message on the grouped updates, which Dependabot rejects.
+    if (text.startsWith('# release-kit:') && /^ {4}commit-message:/m.test(text.split(/^updates:$/m)[1] ?? '')) out.push(`${dependabot} is rejected by Dependabot (commit-message belongs on the multi-ecosystem group), so no kit updates arrive: rerun npx release-kit apply .`)
   }
   return out
 }

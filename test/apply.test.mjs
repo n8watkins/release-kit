@@ -377,8 +377,13 @@ test('package mode groups a kit release into one Dependabot PR, and upgrades the
   assert.match(grouped, /package-ecosystem: npm\n {4}directory: \/\n {4}patterns: \["release-kit"\]/)
   assert.match(grouped, /package-ecosystem: github-actions\n {4}directory: \/\n {4}patterns: \["n8watkins\/release-kit\*"\]/)
   // Dependabot's default cooldown made it propose older kit tags (v2.2.0 -> v2.0.1): the kit is exempt.
-  assert.match(grouped, /patterns: \["release-kit"\][\s\S]*?\n {4}cooldown:\n {6}exclude: \["release-kit"\]\n {4}commit-message:/)
-  assert.match(grouped, /patterns: \["n8watkins\/release-kit\*"\][\s\S]*?\n {4}cooldown:\n {6}exclude: \["n8watkins\/release-kit\*"\]\n {4}commit-message:/)
+  assert.match(grouped, /patterns: \["release-kit"\][\s\S]*?\n {4}cooldown:\n {6}exclude: \["release-kit"\]\n/)
+  assert.match(grouped, /patterns: \["n8watkins\/release-kit\*"\][\s\S]*?\n {4}cooldown:\n {6}exclude: \["n8watkins\/release-kit\*"\]\n/)
+  // Dependabot rejects the whole file when an update in a multi-ecosystem group sets commit-message:
+  // "commit-message should only be set on the associated multi-ecosystem group".
+  assert.match(grouped, /^ {2}release-kit:\n {4}schedule:\n {6}interval: daily\n(?: {4}#.*\n)? {4}commit-message:\n {6}prefix: build\n {6}include: scope\nupdates:/m)
+  const entries = grouped.split(/^updates:$/m)[1]
+  assert.doesNotMatch(entries, /commit-message|schedule:/)
   const again = quiet(KIT, 'node', ['apply.mjs', repo])
   assert.doesNotMatch(again, /\.github\/dependabot\.yml/, 're-applying changes nothing')
 
@@ -450,6 +455,8 @@ test('check warns about files an older apply wrote without the fork guard or the
   const stale = check()
   assert.match(stale, /release\.yml has no fork guard, so a fork that pushes a tag publishes a release: rerun npx release-kit apply \./)
   assert.match(stale, /dependabot\.yml lets Dependabot's cooldown propose older kit versions/)
+  writeFileSync(join(repo, '.github/dependabot.yml'), '# release-kit: one PR.\nversion: 2\nupdates:\n  - package-ecosystem: npm\n    multi-ecosystem-group: release-kit\n    cooldown:\n      exclude: ["release-kit"]\n    commit-message:\n      prefix: build\n')
+  assert.match(check(), /dependabot\.yml is rejected by Dependabot \(commit-message belongs on the multi-ecosystem group\)/)
   assert.doesNotMatch(stale, /release-train\.yml has no fork guard/)
   quiet(KIT, 'node', ['apply.mjs', repo])
   assert.doesNotMatch(check(), /fork guard|cooldown/)

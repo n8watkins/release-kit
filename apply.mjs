@@ -326,6 +326,10 @@ multi-ecosystem-groups:
   release-kit:
     schedule:
       interval: daily
+    # On the group: Dependabot rejects commit-message on an update in a group.
+    commit-message:
+      prefix: build
+      include: scope
 updates:
   - package-ecosystem: npm
     directory: /
@@ -335,9 +339,6 @@ updates:
     multi-ecosystem-group: release-kit
     cooldown:
       exclude: ["release-kit"]
-    commit-message:
-      prefix: build
-      include: scope
   - package-ecosystem: github-actions
     directory: /
     patterns: ["${KIT_REPO}*"]
@@ -346,9 +347,6 @@ updates:
     multi-ecosystem-group: release-kit
     cooldown:
       exclude: ["${KIT_REPO}*"]
-    commit-message:
-      prefix: build
-      include: scope
 `
   if (existsSync(join(repo, path))) {
     const current = read(path)
