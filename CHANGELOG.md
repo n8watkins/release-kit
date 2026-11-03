@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.0 - 2026-11-02
+
+### New
+
+- Apply writes the auto-merge workflow in every repo, and protect allows auto-merge ([#39](https://github.com/n8watkins/release-kit/pull/39))
+
 ## 2.4.1 - 2026-11-02
 
 ### Fixed
