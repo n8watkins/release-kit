@@ -16,6 +16,8 @@ Difficulty is for one developer working with an agent, including tests and docs:
 | [6. Monorepos](#6-monorepos) | L | No |
 | [7. Per-repo settings: public and private repos](#7-per-repo-settings-public-and-private-repos) | Done in v2.4.0 | No |
 | [8. The rollout bot](#8-the-rollout-bot) | Done, next release | Done: GitHub App, environment |
+| [9. Stale-file detection without the App](#9-stale-file-detection-without-the-app) | S, for v2.6.0 | No |
+| [10. A rollout bot for outside users](#10-a-rollout-bot-for-outside-users) | M, for v3 | No; each adopter sets up their own App |
 | [Owner steps for what is already built](#owner-steps-for-what-is-already-built) | - | Yes |
 
 ## 1. Publish release-kit to npm with provenance
@@ -174,6 +176,46 @@ v2.1.0's `security.yml` reached none of them that way.
 **Owner steps.** Done 2026-11-02: the App (ID 5590953) is installed on the eight adopters, and the `rollout` environment holds its ID and key.
 What stays with the owner: approving each rollout's waves, and installing the App on another adopter before setting it to `"enabled": true` in `adopters.json`.
 The setup steps, and the steps for adding an adopter, are in [UPGRADES.md](UPGRADES.md#setting-up-the-app).
+
+## 9. Stale-file detection without the App
+
+**Targeted for v2.6.0.**
+
+**Why.** Without the App, a kit release that adds or changes a file reaches a repo only when someone runs `npx release-kit apply .`.
+Dependabot's update moves the version, `release:check` then says "up to date", and the new file never arrives unless someone reads the release notes ([UPGRADES.md](UPGRADES.md#without-the-app), step 4).
+The kit already knows exactly what apply would write at the installed version, so it can say when the repo differs.
+
+**Design.**
+
+- `release-kit apply --check .`: a dry run of apply at the installed kit version that writes nothing and compares what apply would write with what the repo has.
+  It prints each file that would be added, changed or removed, and exits 1 when anything differs and 0 when the repo is current.
+- It respects what apply deliberately leaves alone: a repo's own `release.yml` or other workflow the kit didn't write, a repo's own `dependabot.yml`, and hooks a custom hooks path or a hook manager owns (#46).
+  apply doesn't write those, so the dry run doesn't count them.
+- `release-kit check`, and so `npm run release:check`, runs the same comparison and warns: "release-kit vX.Y.Z adds or changes N files; run npx release-kit apply .", with the list.
+- The kit lane's `release-kit verify` runs it too, so an adopter's pull request that bumps the kit pin without running apply shows it in CI.
+  A warning, not a failure: a Dependabot kit update must not wait forever for a person, and a failing check would also stop the merge-when-green fallback, which waits for every check.
+  `apply --check` stays available as a hard gate for a repo that wants one.
+- The rollout bot's pull request is apply's output, so it is clean by construction.
+
+**Owner steps.** None.
+
+## 10. A rollout bot for outside users
+
+**Targeted for v3**, with the npm publish (item 1), after v2.6.0.
+
+**Why.** The rollout bot (item 8) runs only inside release-kit, from its `adopters.json`, with an App installed on the owner's account.
+Anyone else using the kit gets Dependabot plus apply, and a copy of `rollout.yml` doesn't help them: the pull requests it opens wouldn't merge on their own, because apply writes `release-kit-bot-n8watkins[bot]` into every `auto-merge.yml` as the only bot besides Dependabot ([UPGRADES.md](UPGRADES.md#who-it-is-for)).
+
+**Design.**
+
+- The rollout workflow becomes reusable: an adopter calls it from a repo of their own (for example `<owner>/release-kit-rollout`) with their own `adopters.json`, their own App's ID and key in their own `rollout` environment, and the kit version to roll out.
+  The waves, the approvals and the pull request stay as they are today.
+- The auto-merge policy trusts a configured bot identity: `.release.json` `"rolloutBot": "<app-slug>[bot]"`, which apply writes into the `bots` input of `auto-merge.yml` instead of `release-kit-bot-n8watkins[bot]`, and keeps on every rerun.
+  The default stays the owner's bot, so nothing changes for the current adopters.
+- apply runs from the registry package at the tag (item 1), so the reusable workflow doesn't need to check out release-kit at a git tag.
+- A documented setup in UPGRADES.md: create the App with the same four permissions, install it on your repos, create the environment, write `adopters.json`, set `rolloutBot` in each repo, and do a dry run.
+
+**Owner steps.** None for the owner; each outside adopter creates and installs their own App.
 
 ## Owner steps for what is already built
 

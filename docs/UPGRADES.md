@@ -44,6 +44,7 @@ That is the whole reason the App exists.
 
    It does not compare your files with what the new apply would write.
    Once Dependabot's update has landed, it says "up to date" even when that release added a file, so read the release notes, or just run apply after every kit update.
+   Comparing them is planned for v2.6.0 ([ROADMAP.md, item 9](ROADMAP.md#9-stale-file-detection-without-the-app)).
 
 ## With the App
 
@@ -83,6 +84,7 @@ A listed repo with `"enabled": false` and "Needs the App installed" gets Dependa
 Anyone else using the kit (from git today, from npm once [roadmap item 1](ROADMAP.md#1-publish-release-kit-to-npm-with-provenance) ships) uses Dependabot plus apply.
 Running the same automation for your own repos isn't supported yet.
 A copy of `rollout.yml` with your own App and adopters list would open the pull requests, but they wouldn't merge on their own: apply writes `release-kit-bot-n8watkins[bot]` into every `auto-merge.yml` as the only bot besides Dependabot, and rewrites the file on each run.
+A reusable rollout for your own repos, with your own App and a configured bot identity, is planned for v3 ([ROADMAP.md, item 10](ROADMAP.md#10-a-rollout-bot-for-outside-users)).
 
 ## Side by side
 
