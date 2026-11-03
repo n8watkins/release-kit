@@ -211,7 +211,10 @@ function* walk(dir) {
     else yield path
   }
 }
-const ownedByKit = (path) => existsSync(join(repo, path)) && read(path).includes(MARKER)
+// Every workflow the kit has ever written starts with a "# release-kit" comment.
+// A repo's own workflow that only mentions the kit (one that runs npx
+// release-kit in a build, say) is the repo's, and stays.
+const ownedByKit = (path) => existsSync(join(repo, path)) && read(path).startsWith(`# ${MARKER}`)
 function writeWorkflow(path, content) {
   if (existsSync(join(repo, path)) && !ownedByKit(path) && !force) {
     skipped.push(`${path} exists and isn't from the kit (rerun with --force to replace it)`)
@@ -581,6 +584,10 @@ function otherHooks() {
     hooksPath = execFileSync('git', ['-C', repo, 'config', '--local', 'core.hooksPath'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
   } catch {}
   if (hooksPath && hooksPath.replace(/\/$/, '') !== '.githooks') return `core.hooksPath is already ${hooksPath}`
+  // A prepare script that points core.hooksPath at the repo's own folder would
+  // switch .githooks off again on the next npm install.
+  const prepared = /core\.hooksPath\s+["']?([^\s"'|&;)]+)/.exec(pkg.scripts?.prepare ?? '')?.[1]
+  if (prepared && !['.githooks', '.husky'].includes(prepared.replace(/\/$/, ''))) return `the prepare script sets core.hooksPath to ${prepared}`
   // Already the kit's own .githooks: nothing else to look for.
   if (hooksPath) return null
   try {

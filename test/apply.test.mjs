@@ -164,6 +164,38 @@ test("a workflow the kit didn't write is left alone unless --force", async () =>
   assert.match(usage.stderr, /pick one of --package, --reusable and --vendored/)
 })
 
+test("a repo's own workflow that runs the kit is still the repo's own", async () => {
+  // Scribe's release.yml builds and signs the app and calls npx release-kit in
+  // a step; apply 2.5.2 took the mention for its marker and replaced the file.
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-mentions'))
+  run(repo, 'mkdir', ['-p', '.github/workflows'])
+  const own = 'name: Release\n# release-kit owns the version; this file owns the build.\njobs:\n  build:\n    steps:\n      - run: npx --no-install release-kit release --verify-tag "$TAG"\n'
+  writeFileSync(join(repo, '.github/workflows/release.yml'), own)
+  writeFileSync(join(repo, '.github/workflows/release-train.yml'), own)
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /release\.yml exists and isn't from the kit/)
+  assert.equal(readFileSync(join(repo, '.github/workflows/release.yml'), 'utf8'), own)
+  // Without --train, apply removes only a train it wrote.
+  assert.equal(readFileSync(join(repo, '.github/workflows/release-train.yml'), 'utf8'), own)
+  // Its own workflows, which start with the marker, are still upgraded.
+  assert.match(readFileSync(join(repo, '.github/workflows/commits.yml'), 'utf8'), /^# release-kit/)
+})
+
+test("a prepare script that points core.hooksPath at the repo's own folder counts as a hook manager", async () => {
+  // voicedock's prepare set core.hooksPath to tools/hooks: apply wrote .githooks,
+  // and the next npm install switched it off again.
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-prepare'), { scripts: { prepare: 'git config core.hooksPath tools/hooks || true' } })
+  const out = quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.match(out, /the prepare script sets core\.hooksPath to tools\/hooks, so the kit's hooks are not installed/)
+  assert.equal(existsSync(join(repo, '.githooks')), false)
+  assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts.prepare, 'git config core.hooksPath tools/hooks || true')
+  // .githooks itself, or husky's folder, is the kit's to use.
+  const kitFolder = makeRepo(tmp('apply-prepare-kit'), { scripts: { prepare: 'git config core.hooksPath .githooks || true' } })
+  quiet(KIT, 'node', ['apply.mjs', kitFolder])
+  assert.ok(existsSync(join(kitFolder, '.githooks/commit-msg')))
+})
+
 test("apply leaves other hook managers and an existing release script alone, and says so", async () => {
   const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
   for (const setup of [
@@ -416,7 +448,7 @@ test('the Release and train jobs run only in the upstream repo, named from .rele
   // Rerunning apply (which rewrites the workflows) keeps the guard, even with the remotes gone.
   run(repo, 'git', ['remote', 'remove', 'upstream'])
   run(repo, 'git', ['remote', 'remove', 'origin'])
-  writeFileSync(join(repo, '.github/workflows/release.yml'), 'name: Release # release-kit\n')
+  writeFileSync(join(repo, '.github/workflows/release.yml'), '# release-kit (reusable): an older caller.\nname: Release\n')
   quiet(KIT, 'node', ['apply.mjs', repo])
   assert.match(workflow('release.yml'), guard('acme/app'))
 
@@ -450,7 +482,7 @@ test('check warns about files an older apply wrote without the fork guard or the
   quiet(KIT, 'node', ['apply.mjs', repo, '--train'])
   assert.doesNotMatch(check(), /fork guard|cooldown/)
   // What kit 2.2.0 wrote.
-  writeFileSync(join(repo, '.github/workflows/release.yml'), 'name: Release # release-kit\njobs:\n  release:\n    uses: n8watkins/release-kit/.github/workflows/release.yml@v2.2.0\n')
+  writeFileSync(join(repo, '.github/workflows/release.yml'), '# release-kit (reusable): an older caller.\nname: Release\njobs:\n  release:\n    uses: n8watkins/release-kit/.github/workflows/release.yml@v2.2.0\n')
   writeFileSync(join(repo, '.github/dependabot.yml'), '# release-kit: a new kit release arrives as one update PR.\nversion: 2\n')
   const stale = check()
   assert.match(stale, /release\.yml has no fork guard, so a fork that pushes a tag publishes a release: rerun npx release-kit apply \./)
