@@ -273,6 +273,9 @@ if (push) {
   if (flag('via-pr')) throughPullRequest()
   else {
     // One atomic push: the branch and the tag land together or not at all.
+    // RELEASE_KIT_RELEASE tells the pre-push guard (guard.mjs) that this is
+    // the kit's release push, which it then checks is exactly the release commit.
+    process.env.RELEASE_KIT_RELEASE = tag
     let rejected
     try {
       git('push', '--atomic', 'origin', branch, `refs/tags/${tag}`)
@@ -281,7 +284,7 @@ if (push) {
     }
     if (!rejected) console.log(`release: pushed ${tag}; the Release workflow publishes it`)
     else if (RULE_REJECTION.test(rejected.stderr ?? '')) {
-      console.log(`release: ${branch} rejected the push (its rules want a pull request), so the release goes through one`)
+      console.log(`release: ${/release-kit: push blocked/.test(rejected.stderr) ? `the pre-push guard stopped the push (it carries commits that ${branch} hasn't seen)` : `${branch} rejected the push (its rules want a pull request)`}, so the release goes through one`)
       throughPullRequest()
     } else {
       // Nothing reached origin: undo the release commit and tag, so a rerun starts clean.

@@ -1,0 +1,85 @@
+# release-kit: the Direct push alarm. On every push to a protected branch (the
+# default branch, main, master and the .release.json release branches) it
+# checks that each pushed commit came from a merged pull request and that the
+# push wasn't a force push; it also reports a moved or deleted release tag and
+# a deleted protected branch. The kit's own release commits (npm run release
+# -- --push and the release train) are recognized by their content and pass.
+# A finding fails the run and opens or comments on one issue labeled
+# "release-kit: direct push" (see docs/PRIVATE_REPOS.md).
+#
+# It matters most in a private repo on GitHub Free, which can't have rulesets;
+# the pre-push guard stops the same things before they leave a machine.
+# Pushes made with a workflow's GITHUB_TOKEN start no workflow, so it never
+# sees those.
+#
+# Vendored into a repo by apply.mjs, or called from n8watkins/release-kit:
+#   uses: n8watkins/release-kit/.github/workflows/direct-push.yml@vX.Y.Z
+name: Direct push alarm
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  delete:
+  workflow_call:
+    inputs:
+      branches:
+        description: "Protected branches besides the default branch, main, master and .release.json branches (comma-separated)"
+        type: string
+        default: ""
+      allow-paths:
+        description: "Globs: a direct push whose commits change only these isn't reported (for a bot that commits generated files)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  alarm:
+    name: Direct push alarm
+    # A deleted feature branch costs no runner: only a deleted tag, or a
+    # deleted branch that may be protected, is looked at.
+    if: >-
+      github.event_name != 'delete' || github.event.ref_type == 'tag'
+      || contains(format(',main,master,{0},', inputs.branches), format(',{0},', github.event.ref))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # No concurrency group: GitHub keeps only one pending run per group and
+    # cancels the rest, which would drop reports. Two reports at the same
+    # moment may open two issues instead of one.
+    permissions:
+      contents: read # the pushed commits and .release.json
+      pull-requests: read # which pull request each commit came from
+      issues: write # open or comment on the "release-kit: direct push" issue
+    steps:
+      # The scripts from the same commit as this workflow file: the kit's at the
+      # pinned ref when called from another repo, else the repo's own copy.
+      - name: Check out the release-kit scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || github.repository }}
+          ref: ${{ job.workflow_sha || github.sha }}
+          path: .release-kit-source
+          sparse-checkout: |
+            template/scripts/release-kit
+            scripts/release-kit
+          persist-credentials: false
+
+      - name: Locate the release-kit scripts
+        run: |
+          if [ -d .release-kit-source/template/scripts/release-kit ]; then
+            mv .release-kit-source/template/scripts/release-kit "$RUNNER_TEMP/release-kit"
+          else
+            mv .release-kit-source/scripts/release-kit "$RUNNER_TEMP/release-kit"
+          fi
+          rm -rf .release-kit-source
+          echo "RELEASE_KIT=$RUNNER_TEMP/release-kit" >> "$GITHUB_ENV"
+
+      # Reads only metadata through the API; no pushed code runs.
+      - name: Check the push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCHES: ${{ inputs.branches }}
+          ALLOW_PATHS: ${{ inputs.allow-paths }}
+        run: node "$RELEASE_KIT/alarm.mjs" --branches "$BRANCHES" --allow-paths "$ALLOW_PATHS"

@@ -13,6 +13,7 @@ release-kit sets up a whole release process in a GitHub repo with one command:
 - **An optional release train** releases on a schedule, but only when something a user would notice has landed.
 - **A weekly security scan** checks every lock file against [OSV.dev](https://osv.dev) and fails on malicious packages and high or critical vulnerabilities.
 - **Agents get the rules too**: apply writes a short section into `AGENTS.md` (and `CLAUDE.md` when the repo has one), so coding agents write commits the check accepts.
+- **Direct pushes are stopped and reported**, even in a private repo on GitHub Free, which has no rulesets: a pre-push guard blocks pushes to `main`, force pushes and moved release tags before they leave the machine, and a Direct push alarm reports any that get through ([docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md)).
 
 It has no runtime dependencies: plain Node scripts and GitHub Actions workflows, with every third-party action pinned to a commit SHA.
 The rules and the reasoning behind them are in [STANDARD.md](STANDARD.md).
@@ -124,12 +125,13 @@ Its design, with the owner's setup steps, is in [docs/ROADMAP.md](docs/ROADMAP.m
 ## What apply adds
 
 - In package mode (the default), the `release-kit` dev dependency and `.github/dependabot.yml`; in the other modes, `scripts/release-kit/` with the release, notes and commit-check scripts.
-- `.github/workflows/release.yml`, `commits.yml` and `security.yml`, plus `release-train.yml` with `--train`.
+- `.github/workflows/release.yml`, `commits.yml`, `security.yml` and `direct-push.yml` (the [Direct push alarm](docs/PRIVATE_REPOS.md#the-direct-push-alarm)), plus `release-train.yml` with `--train`, and in a private repo `auto-merge.yml` ([merge when green](docs/AUTO_MERGE.md)).
   The Release and train jobs carry a fork guard, `if: github.repository == 'owner/repo'`, so a fork that pushes a tag or runs the train publishes nothing; apply names the repo from `.release.json` `repository`, else the `upstream` or `origin` remote (`--repository owner/repo` sets it), and keeps the guard on every rerun.
-- `.githooks/commit-msg` (or `.husky/commit-msg` in a husky repo), switched on by the `prepare` script.
-  A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`) keeps them: apply prints the line to add to its commit-msg hook instead.
+- `.githooks/commit-msg` and `.githooks/pre-push` (or `.husky/commit-msg` and `.husky/pre-push` in a husky repo), switched on by the `prepare` script.
+  The pre-push hook is the [pre-push guard](docs/PRIVATE_REPOS.md#the-pre-push-guard).
+  A repo whose hooks are run by something else (lefthook, pre-commit, simple-git-hooks, its own `core.hooksPath` or `.git/hooks`), or that has a pre-push hook of its own, keeps them: apply prints the lines to add instead.
 - `.release.json`: other files that carry the version (`versionFiles`; it detects `manifest.json`, and for a Tauri app `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, plus `app/package.json` and its lock when the app lives in `app/`), the workflow mode (`workflows`: `package`, `reusable` or `vendored`) and the train's schedule (`train`).
-  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in) and `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`).
+  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in), `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`), `visibility` (`"public"` or `"private"`; apply fills it in from gh) and the settings whose defaults depend on it: `security` (`{ "onPullRequest": false }` scans lock-file pull requests or not), `attest` (artifact attestations, once built) and `autoMerge` (`false` stops apply writing `auto-merge.yml` in a private repo); see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md#settings-for-private-repos).
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
@@ -149,6 +151,7 @@ If the repo ships files, add a `release:artifacts` script that writes them into 
 | `--vendored` | Full copies of the workflows and the scripts. |
 | `--kit-ref <ref>` | Pin a commit SHA (or another tag) instead of this kit's version tag. |
 | `--repository <owner/repo>` | The upstream repo, the only one whose Release and train jobs run (default: `.release.json` `repository`, else the `upstream` or `origin` remote). |
+| `--visibility <public\|private>` | Whether the repo is public or private, when gh can't tell (default: what `gh repo view` says, else `.release.json` `visibility`). A private repo gets the private defaults. |
 | `--force` | Replace a workflow with the same name that the kit didn't write. |
 
 The choices are saved in `.release.json`, so re-running apply to upgrade keeps them.
@@ -156,7 +159,7 @@ The choices are saved in `.release.json`, so re-running apply to upgrade keeps t
 ### Package, reusable and vendored modes
 
 In package mode nothing of the kit is copied into the repo: `npm run release` runs `release-kit release`, and the commit-msg hook runs `release-kit commit-msg` from `node_modules` (before `npm install` it lets commits through with a note; CI checks every commit anyway).
-The `release-kit` command also runs `notes`, `train`, `protect`, `check`, `verify`, `lanes` and `apply`.
+The `release-kit` command also runs `notes`, `train`, `protect`, `check`, `verify`, `lanes`, `pre-push` (the guard), `install-guard` (the guard in a repo without the kit), `alarm` (the Direct push alarm's check) and `apply`.
 
 Package and reusable mode write short callers of the kit's workflows, for example:
 
@@ -221,7 +224,8 @@ It needs a release tag to start from, so baseline a new repo first.
 - **The trade-off:** a release takes as long as the pull request's checks, instead of one push.
   `--admin-bypass` lets admins push straight to the branch instead, at the cost of letting anything signed in as an admin do the same.
 - **Drift:** `npm run release:check` (through `release-kit check`) warns when the rulesets no longer match, whenever gh can read them.
-- Rulesets need a public repo, or GitHub Pro for a private one.
+- **A private repo on GitHub Free** can't have rulesets, so there `protect` sets up the free safeguards instead: the pre-push guard, the Direct push alarm and merge when green, and it says plainly what GitHub still lets through.
+  [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md) has the details.
 
 [RELEASING.md](RELEASING.md#protecting-the-branch-and-the-tags) has the details.
 
@@ -244,7 +248,7 @@ A repo that can't require checks (a private repo on GitHub Free) gets a "merge w
 
 ## Security scan
 
-`security.yml` scans every lock file in the repo (npm, pnpm, yarn, bun, Cargo, uv, poetry, pip, Go) against OSV.dev every Monday and on any pull request that changes a lock file.
+`security.yml` scans every lock file in the repo (npm, pnpm, yarn, bun, Cargo, uv, poetry, pip, Go) against OSV.dev every Monday and on any pull request that changes a lock file (in a private repo, weekly only unless `.release.json` says `"security": { "onPullRequest": true }`).
 OSV also lists malicious packages, which Dependabot alerts don't cover, so the two complement each other.
 
 - **It fails** on a malicious package (an OSV `MAL-` entry) or a high or critical vulnerability (CVSS 7.0 or more, or rated HIGH or CRITICAL by its advisory).

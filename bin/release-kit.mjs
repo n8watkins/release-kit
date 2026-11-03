@@ -7,7 +7,13 @@
 //   release-kit notes [...]       print release notes for a range
 //   release-kit train [...]       the release train's last step (CI)
 //   release-kit protect [...]     branch and tag rulesets for the release flow
-//                                 (and the train's deploy key)
+//                                 (and the train's deploy key); in a private repo
+//                                 on GitHub Free, the free safeguards instead
+//   release-kit pre-push          the pre-push guard (the pre-push hook)
+//   release-kit install-guard [<repo>]
+//                                 the pre-push guard in one clone of a repo
+//                                 that doesn't use the kit
+//   release-kit alarm [...]       the Direct push alarm (CI)
 //   release-kit check             warn when this kit is behind the newest release,
 //                                 or the repo's rulesets drifted from protect's
 //   release-kit verify            the fast check a kit-only update runs: the kit
@@ -23,12 +29,13 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { protectionWarnings } from '../template/scripts/release-kit/protect.mjs'
+import { detectVisibility } from '../template/scripts/release-kit/settings.mjs'
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPTS = join(KIT, 'template', 'scripts', 'release-kit')
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
 const KIT_REPO = /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(kitPackage.repository?.url ?? '')?.[1] ?? 'n8watkins/release-kit'
-const SCRIPT_COMMANDS = new Set(['release', 'commit-msg', 'notes', 'train', 'protect', 'lanes'])
+const SCRIPT_COMMANDS = new Set(['release', 'commit-msg', 'notes', 'train', 'protect', 'lanes', 'alarm'])
 
 const [command, ...rest] = process.argv.slice(2)
 
@@ -63,13 +70,28 @@ function check() {
   warnings.push(...pinMismatches(installed))
   warnings.push(...branchGaps())
   warnings.push(...staleFiles())
-  // The rulesets, when gh can read them (it can't in CI without a token: then nothing is said).
+  const config = existsSync('.release.json') ? JSON.parse(readFileSync('.release.json', 'utf8')) : {}
+  warnings.push(...visibilityGaps(config))
+  // The rulesets, or in a private repo on GitHub Free the free safeguards, when
+  // gh can read them (it can't in CI without a token: then nothing is said).
   if (!process.env.RELEASE_KIT_OFFLINE) {
-    const config = existsSync('.release.json') ? JSON.parse(readFileSync('.release.json', 'utf8')) : {}
     warnings.push(...protectionWarnings({ repo: typeof config.repository === 'string' ? config.repository : undefined }))
   }
   for (const w of warnings) console.warn(`release-kit: ${w}`)
   if (!warnings.length) console.log(`release-kit ${installed}: up to date`)
+}
+
+/** .release.json "visibility" against GitHub, and what a private repo is missing to keep its minutes down. */
+function visibilityGaps(config) {
+  const out = []
+  const live = typeof config.repository === 'string' ? detectVisibility(config.repository, { timeout: 8000 }) : null
+  if (live && live !== config.visibility) out.push(`${config.repository} is ${live} on GitHub, but .release.json says ${config.visibility ?? 'nothing'}: rerun npx release-kit apply . to switch to the ${live} defaults`)
+  const dir = '.github/workflows'
+  if ((live ?? config.visibility) === 'private' && existsSync(dir)) {
+    const texts = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).map((f) => readFileSync(join(dir, f), 'utf8'))
+    if (!texts.some((t) => /\/\.github\/workflows\/changes\.yml@/.test(t))) out.push('a private repo pays for runner minutes, and its CI runs in full for a kit-only update: adopt the CI lanes (docs/CI_LANES.md in release-kit) so those take the one-minute kit lane')
+  }
+  return out
 }
 
 /** Workflows that call the kit at another version than the one installed. */
@@ -165,10 +187,12 @@ function verify() {
 
 if (command === 'check') check()
 else if (command === 'verify') verify()
+else if (command === 'pre-push') run(join(SCRIPTS, 'guard.mjs'), rest)
+else if (command === 'install-guard') run(join(SCRIPTS, 'guard.mjs'), ['--install', ...rest])
 else if (SCRIPT_COMMANDS.has(command)) run(join(SCRIPTS, `${command}.mjs`), rest)
 else if (command === 'apply') run(join(KIT, 'apply.mjs'), rest)
 else if (command && !command.startsWith('-')) run(join(KIT, 'apply.mjs'), [command, ...rest])
 else {
-  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | train | protect | check | verify | lanes | apply <repo>`)
+  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | train | protect | check | verify | lanes | pre-push | install-guard | alarm | apply <repo>`)
   process.exit(command ? 1 : 0)
 }

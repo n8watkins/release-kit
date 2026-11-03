@@ -37,11 +37,28 @@
 // Classic branch protection on those branches is removed last (the rulesets
 // replace it, and a deploy key can't bypass it), so the branch is never
 // unprotected. Rulesets need a public repo, or GitHub Pro for a private one.
+//
+// A private repo on GitHub Free can't have them, so there protect sets up the
+// free safeguards instead (docs/PRIVATE_REPOS.md), and says what GitHub
+// itself won't enforce:
+//
+//   the pre-push guard        blocks direct pushes, force pushes and deletions
+//                             of the protected branches, and moved or deleted
+//                             release tags, before they leave this machine
+//   the Direct push alarm     reports them after the fact, from any machine
+//                             (.github/workflows/direct-push.yml)
+//   merge when green          update pull requests merge once every check
+//                             passed (.github/workflows/auto-merge.yml)
+//
+// In package mode it runs apply --visibility private to add whichever is
+// missing; a vendored repo is told the command.
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { isMain } from './git.mjs'
+import { HOOK_MARKER } from './guard.mjs'
 
 export const KEY_TITLE = 'release-kit train'
 export const SECRET = 'RELEASE_TRAIN_KEY'
@@ -212,6 +229,63 @@ const splitChecks = (list) => list.map((context) => String(context).trim()).filt
 /** Rulesets need a public repo or GitHub Pro: the API answers 403 with "Upgrade to GitHub Pro". */
 export const NOT_AVAILABLE = /Upgrade to GitHub Pro|make this repository public/i
 
+/** What GitHub doesn't enforce in a repo without rulesets, said plainly. */
+export const NOT_ENFORCED = [
+  'anyone with write access can still push straight to the default branch, force push it or delete a branch: the guard stops that only on machines where it is installed, and the alarm reports it afterwards',
+  'a release tag can still be moved or deleted on GitHub: the guard and the alarm cover it the same way',
+  'a pull request can still be merged with failing checks by a person: only update pull requests wait for green, through the auto-merge workflow',
+  'pushes made with a workflow\'s GITHUB_TOKEN start no workflow, so the alarm never sees them',
+]
+
+/**
+ * The free safeguards in the repo at `root`: [{ name, ok, detail }].
+ *   guard    the pre-push hook is active in this clone
+ *   alarm    .github/workflows/direct-push.yml is the kit's
+ *   merge    .github/workflows/auto-merge.yml exists (merge when green)
+ */
+export function safeguards(root = '.') {
+  const at = (path) => join(root, path)
+  const kitFile = (path) => existsSync(at(path)) && readFileSync(at(path), 'utf8').includes('release-kit')
+  let hooks = null
+  try {
+    hooks = resolve(root, execFileSync('git', ['-C', root, 'rev-parse', '--git-path', 'hooks'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim())
+  } catch {}
+  const marked = (path) => existsSync(path) && readFileSync(path, 'utf8').includes(HOOK_MARKER)
+  // husky's hooks folder (.husky/_) runs the hooks one level up.
+  const guard = Boolean(hooks) && (marked(join(hooks, 'pre-push')) || (/[\\/]\.husky[\\/]_$/.test(hooks) && marked(join(hooks, '..', 'pre-push'))))
+  return [
+    { name: 'guard', ok: guard, detail: 'the pre-push guard, active in this clone' },
+    { name: 'alarm', ok: kitFile('.github/workflows/direct-push.yml'), detail: 'the Direct push alarm (.github/workflows/direct-push.yml)' },
+    { name: 'merge', ok: existsSync(at('.github/workflows/auto-merge.yml')), detail: 'merge when green for update pull requests (.github/workflows/auto-merge.yml)' },
+  ]
+}
+
+/** protect in a private repo on GitHub Free: set up the free safeguards. */
+function freeFallback(repo, { dryRun }) {
+  console.log(`protect: ${repo} is private on GitHub Free, which has no rulesets or branch protection, so protect sets up the free safeguards instead${dryRun ? ' (dry run: nothing changes)' : ''}:`)
+  let items = safeguards()
+  for (const item of items) console.log(`  ${item.ok ? 'ok     ' : 'missing'}  ${item.detail}`)
+  const missing = items.filter((item) => !item.ok)
+  const apply = resolve(dirname(fileURLToPath(import.meta.url)), '../../../apply.mjs')
+  const config = readConfig()
+  if (missing.length && !dryRun) {
+    if (existsSync(apply) && config.workflows !== 'vendored' && existsSync('package.json')) {
+      console.log('protect: running apply --visibility private to add them')
+      execFileSync(process.execPath, [apply, '.', '--visibility', 'private'], { stdio: 'inherit' })
+      items = safeguards()
+      for (const item of items) console.log(`  ${item.ok ? 'ok     ' : 'missing'}  ${item.detail}`)
+    } else {
+      console.log(`protect: add them with ${existsSync('package.json') ? 'npx release-kit apply . --visibility private' : 'npx release-kit install-guard (the guard), and a direct-push.yml calling the kit\'s (see docs/PRIVATE_REPOS.md)'}`)
+    }
+  } else if (missing.length) console.log('  apply --visibility private would add the missing ones')
+  if (!dryRun && items.some((item) => item.name !== 'guard' && item.ok)) console.log('protect: commit the workflow files through a pull request: they work once they are on the default branch')
+  console.log('\nWhat GitHub does not enforce here, even so:')
+  for (const line of NOT_ENFORCED) console.log(`  - ${line}`)
+  console.log('GitHub Pro (or making the repo public) brings real rulesets: rerun protect then.')
+  const still = items.filter((item) => !item.ok)
+  if (!dryRun && still.length) process.exitCode = 1
+}
+
 /**
  * Everything protect would do, read from GitHub without changing anything.
  * Returns { repo, branch, wanted: { branches, tags }, existing, checksFrom, ... }.
@@ -330,7 +404,13 @@ export function protectionWarnings({ repo, timeout = 10_000 } = {}) {
     }
     if (warnings.length) warnings.push('npx release-kit protect --dry-run shows the fix, and npx release-kit protect applies it')
     return warnings
-  } catch {
+  } catch (error) {
+    // A private repo on GitHub Free: the free safeguards stand in for the rulesets.
+    if (NOT_AVAILABLE.test(error.stderr ?? '')) {
+      const missing = safeguards().filter((item) => !item.ok)
+      if (process.env.GITHUB_ACTIONS === 'true') return []
+      return missing.length ? [`${repo} can't have rulesets (private on GitHub Free) and lacks ${missing.map((item) => item.detail).join('; ')}: npx release-kit protect sets them up`] : []
+    }
     return []
   }
 }
@@ -368,7 +448,7 @@ function main() {
   try {
     p = plan(github, repo, { checks: checksFlag, adminBypass: args.includes('--admin-bypass'), trainKey: !args.includes('--no-train-key'), rotateKey: args.includes('--rotate-key') })
   } catch (error) {
-    if (NOT_AVAILABLE.test(error.stderr ?? '')) fail(`${repo} can't have rulesets: GitHub offers them on public repos, and on private ones only with GitHub Pro, Team or Enterprise`)
+    if (NOT_AVAILABLE.test(error.stderr ?? '')) return freeFallback(repo, { dryRun })
     fail(error.stderr?.trim() || error.message)
   }
 

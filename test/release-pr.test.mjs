@@ -68,7 +68,7 @@ function setup() {
   run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
   run(repo, 'git', ['remote', 'add', 'origin', remote])
   run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
-  run(repo, 'git', ['push', '-q', '--atomic', 'origin', 'main', 'v1.0.0'])
+  run(repo, 'git', ['push', '-q', '--no-verify', '--atomic', 'origin', 'main', 'v1.0.0'])
   writeFileSync(join(remote, 'hooks', 'pre-receive'), PRE_RECEIVE, { mode: 0o755 })
   const bin = tmp('release-pr-bin')
   writeFileSync(join(bin, 'gh'), FAKE_GH, { mode: 0o755 })
@@ -82,11 +82,21 @@ function setup() {
   return { repo, remote, release, gh, at }
 }
 
+test('the server\'s rules send the release through a pull request too, when only the release commit is pushed', () => {
+  const { repo, release, at } = setup()
+  // The feature is on the remote's main already (bypassing its pre-receive rule), so the guard lets the release commit through.
+  run(repo, 'git', ['push', '-q', '--no-verify', `--receive-pack=git -c core.hooksPath=/dev/null receive-pack`, 'origin', 'main'])
+  const result = release([])
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /main rejected the push \(its rules want a pull request\), so the release goes through one/)
+  assert.equal(at('refs/tags/v1.1.0^{commit}'), at('refs/heads/main'))
+})
+
 test('a rejected push releases through a pull request: merged once green, and the merged commit is tagged', () => {
   const { repo, release, gh, at } = setup()
   const result = release([], { FAKE_CHECKS: 'slow' })
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stdout, /main rejected the push \(its rules want a pull request\), so the release goes through one/)
+  assert.match(result.stdout, /the pre-push guard stopped the push \(it carries commits that main hasn't seen\), so the release goes through one/)
   assert.match(result.stdout, /opened https:\/\/github\.com\/o\/r\/pull\/7, waiting for its checks/)
   assert.match(result.stdout, /merged #7 and pushed v1\.1\.0/)
   const calls = gh()

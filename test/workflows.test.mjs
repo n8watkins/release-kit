@@ -13,7 +13,7 @@ const dirs = ['template/.github/workflows', '.github/workflows', 'reusable', 'do
 const files = dirs.flatMap((dir) => readdirSync(join(KIT, dir)).map((name) => join(dir, name)))
 
 test("the kit's own workflows are the ones it ships, so repos can call them", () => {
-  for (const name of ['release.yml', 'commits.yml', 'security.yml']) {
+  for (const name of ['release.yml', 'commits.yml', 'security.yml', 'direct-push.yml']) {
     assert.equal(read(`.github/workflows/${name}`), read(`template/.github/workflows/${name}`), `.github/workflows/${name} drifted from the template`)
   }
   // The train is the same file without a schedule: the kit doesn't release itself on one.
@@ -43,12 +43,14 @@ test('workflows read by default and grant write only to the jobs that need it', 
     const text = read(file)
     assert.match(text, /^permissions:\n {2}contents: read\n\n/m, file)
     for (const [, block] of text.matchAll(/^ {4}permissions:\n((?: {6}.*\n)+)/gm)) {
-      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(contents|actions|pull-requests): write(?: #.*)?$/, `${file}: ${line}`)
+      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(?:(contents|actions|pull-requests|issues): write|(contents|pull-requests): read)(?: #.*)?$/, `${file}: ${line}`)
     }
   }
   assert.doesNotMatch(read('template/.github/workflows/commits.yml'), /: write/)
   // Only the auto-merge policy touches pull requests.
   for (const file of files) if (!/auto-merge\.yml$/.test(file)) assert.doesNotMatch(read(file), /pull-requests: write/, file)
+  // Only the Direct push alarm opens issues.
+  for (const file of files) if (!/direct-push\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
 })
 
 test('every job that runs on a runner has a timeout, so a hung step never runs for GitHub\'s default 6 hours', () => {

@@ -18,7 +18,7 @@ function adopted() {
   run(dev, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
   run(dev, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
   run(dev, 'git', ['remote', 'add', 'origin', join(root, 'remote.git')])
-  run(dev, 'git', ['push', '-q', '--atomic', 'origin', 'main', 'v1.1.0'])
+  run(dev, 'git', ['push', '-q', '--no-verify', '--atomic', 'origin', 'main', 'v1.1.0'])
   return { root, dev, remote: join(root, 'remote.git') }
 }
 
@@ -51,7 +51,7 @@ test('a week of chores releases nothing; a fix releases a patch; the next run fi
 
   commit(dev, 'docs: explain the build')
   commit(dev, 'chore: tidy')
-  run(dev, 'git', ['push', '-q', 'origin', 'main'])
+  run(dev, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
   const quiet = plan(checkout(root, remote, 'week1'))
   assert.equal(quiet.status, 0, quiet.stderr)
   assert.equal(quiet.out.release, 'false')
@@ -60,7 +60,7 @@ test('a week of chores releases nothing; a fix releases a patch; the next run fi
   assert.equal(quiet.out.version, undefined)
 
   commit(dev, 'fix(nav): keep the menu open')
-  run(dev, 'git', ['push', '-q', 'origin', 'main'])
+  run(dev, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
   const week2 = checkout(root, remote, 'week2')
   const planned = plan(week2)
   assert.equal(planned.status, 0, planned.stderr)
@@ -101,12 +101,12 @@ test('a week of chores releases nothing; a fix releases a patch; the next run fi
 test('if main moves between the plan and the cut, the push is rejected and nothing is tagged', () => {
   const { root, dev, remote } = adopted()
   commit(dev, 'feat: a')
-  run(dev, 'git', ['push', '-q', 'origin', 'main'])
+  run(dev, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
   const planned = plan(checkout(root, remote, 'plan'))
   assert.equal(planned.out.version, '1.2.0')
   const cutDir = checkout(root, remote, 'cut')
   commit(dev, 'fix: landed during the checks')
-  run(dev, 'git', ['push', '-q', 'origin', 'main'])
+  run(dev, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
 
   const pushed = cut(cutDir, planned.out)
   assert.notEqual(pushed.status, 0)
@@ -119,7 +119,7 @@ test('if main moves between the plan and the cut, the push is rejected and nothi
 test('an explicit bump from "Run workflow" releases even without user-facing work', () => {
   const { root, dev, remote } = adopted()
   commit(dev, 'docs: a')
-  run(dev, 'git', ['push', '-q', 'origin', 'main'])
+  run(dev, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
   const dir = checkout(root, remote, 'plan')
   assert.equal(plan(dir).out.release, 'false')
   assert.deepEqual([plan(dir, 'minor').out.release, plan(dir, 'minor').out.version], ['true', '1.2.0'])
@@ -219,7 +219,7 @@ function protectedRepo({ checks, required = ['ci.yml', 'commits.yml'] } = {}) {
     run(dev, 'git', ['commit', '-q', '-am', 'ci: the train runs the required checks'])
   }
   commit(dev, 'fix: a thing')
-  run(dev, 'git', ['push', '-q', 'origin', 'main'])
+  run(dev, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
   const bin = join(root, 'bin')
   mkdirSync(bin)
   writeFileSync(join(bin, 'gh'), FAKE_GH, { mode: 0o755 })

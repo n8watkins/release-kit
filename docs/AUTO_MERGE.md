@@ -26,6 +26,7 @@ Without a required check it merges as soon as it is turned on, before CI has fin
 ### Merge when green, for repos that can't require checks
 
 A private repo on GitHub Free has no rulesets and no branch protection, so it can't require checks and GitHub's auto-merge can't be used safely.
+(The other free safeguards for such repos, the pre-push guard and the Direct push alarm, are in [PRIVATE_REPOS.md](PRIVATE_REPOS.md); apply writes this workflow for a private repo by itself.)
 For such repos the same workflow runs on `workflow_run`: each time one of the repo's pull request workflows finishes, it looks at every check on the pull request's head commit, and merges (with `--match-head-commit`, so a newer push is never merged unchecked) only when all of them have finished and passed.
 It reacts to finished workflows instead of polling, so it costs one short job per finished workflow, not a job that waits.
 List every workflow that runs on pull requests under `workflow_run`, so a check that finishes last still triggers a look.

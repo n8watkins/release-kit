@@ -125,7 +125,9 @@ if (checks.length) {
   }
 }
 
-// 3. main and the tag together.
+// 3. main and the tag together. RELEASE_KIT_RELEASE marks the kit's own
+// release push for the pre-push guard, should a hook be installed here.
+process.env.RELEASE_KIT_RELEASE = tag
 try {
   git('push', '--atomic', 'origin', `HEAD:refs/heads/${branch}`, `refs/tags/${tag}`)
 } catch (error) {

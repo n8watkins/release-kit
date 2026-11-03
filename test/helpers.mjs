@@ -9,11 +9,14 @@ export const KIT_VERSION = JSON.parse(readFileSync(join(KIT, 'package.json'), 'u
 
 const identity = (name = 'T', email = 't@t') => ({ GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email })
 // Keep the user's git config (hooks, signing, templates) out of the tests.
-const ENV = { ...process.env, ...identity(), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
+// Offline: apply and check ask gh nothing unless a test says so.
+const ENV = { ...process.env, ...identity(), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', RELEASE_KIT_OFFLINE: '1' }
 delete ENV.GITHUB_OUTPUT
 delete ENV.GITHUB_STEP_SUMMARY
 delete ENV.GITHUB_REPOSITORY
 delete ENV.GITHUB_SERVER_URL
+// The tests run in GitHub Actions too, where the pre-push guard stands aside.
+delete ENV.GITHUB_ACTIONS
 
 export const run = (cwd, cmd, args, env = {}) => execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 1024 ** 3, env: { ...ENV, ...env } })
 export const attempt = (cwd, cmd, args, env = {}, input = undefined) => spawnSync(cmd, args, { cwd, input, encoding: 'utf8', maxBuffer: 1024 ** 3, env: { ...ENV, ...env } })

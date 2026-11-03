@@ -2,13 +2,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const KIT = new URL('..', import.meta.url).pathname
-const run = (cwd, cmd, args) => execFileSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
-const attempt = (cwd, cmd, args) => spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
+const run = (cwd, cmd, args) => execFileSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '', RELEASE_KIT_OFFLINE: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
+const attempt = (cwd, cmd, args) => spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '', RELEASE_KIT_OFFLINE: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
 
 test('apply, then the hook, the release command and tag verification all work', () => {
   const repo = mkdtempSync(join(tmpdir(), 'release-kit-'))
@@ -175,7 +175,7 @@ test("apply leaves other hook managers and an existing release script alone, and
     const repo = makeRepo(tmp('apply-hooks'))
     setup(repo)
     const out = quiet(KIT, 'node', ['apply.mjs', repo, '--vendored'])
-    assert.match(out, /so the kit's hook is not installed: add {2}node scripts\/release-kit\/commit-msg\.mjs "\$1"/)
+    assert.match(out, /so the kit's hooks are not installed: add {2}node scripts\/release-kit\/commit-msg\.mjs "\$1" {2}to the commit-msg hook there .*, and {2}node scripts\/release-kit\/guard\.mjs "\$@" {2}to the pre-push hook/)
     assert.ok(!existsSync(join(repo, '.githooks')))
     assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts.prepare, undefined)
     assert.notEqual(attempt(repo, 'git', ['config', '--local', 'core.hooksPath']).stdout.trim(), '.githooks')
@@ -460,4 +460,78 @@ test('check warns about files an older apply wrote without the fork guard or the
   assert.doesNotMatch(stale, /release-train\.yml has no fork guard/)
   quiet(KIT, 'node', ['apply.mjs', repo])
   assert.doesNotMatch(check(), /fork guard|cooldown/)
+})
+
+test('apply installs the pre-push guard beside the commit-msg hook, and keeps a pre-push hook of the repo\'s own', async () => {
+  const { makeRepo, tmp, run: quiet, attempt: tryIt } = await import('./helpers.mjs')
+  // .githooks, package mode: the kit from node_modules, with a fallback before npm install.
+  const repo = makeRepo(tmp('apply-guard'))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  const hook = readFileSync(join(repo, '.githooks/pre-push'), 'utf8')
+  assert.match(hook, /^#!\/bin\/sh\n# release-kit: pre-push guard/)
+  assert.match(hook, /exec "\$kit" pre-push "\$@"/)
+  // Not installed yet: a push to main is still blocked, a branch goes through.
+  const fallback = (line) => tryIt(repo, 'sh', ['.githooks/pre-push', 'origin', 'x'], {}, `${line}\n`)
+  assert.equal(fallback(`refs/heads/main ${'a'.repeat(40)} refs/heads/main ${'b'.repeat(40)}`).status, 1)
+  assert.equal(fallback(`refs/heads/f ${'a'.repeat(40)} refs/heads/f ${'b'.repeat(40)}`).status, 0)
+  assert.equal(fallback(`refs/tags/v1.0.0 ${'a'.repeat(40)} refs/tags/v1.0.0 ${'0'.repeat(40)}`).status, 0)
+  assert.equal(fallback(`refs/tags/v1.0.0 ${'a'.repeat(40)} refs/tags/v1.0.0 ${'b'.repeat(40)}`).status, 1)
+
+  // husky: .husky/pre-push, unless the repo has its own.
+  const husky = makeRepo(tmp('apply-guard-husky'))
+  mkdirSync(join(husky, '.husky'))
+  quiet(KIT, 'node', ['apply.mjs', husky])
+  assert.match(readFileSync(join(husky, '.husky/pre-push'), 'utf8'), /^# release-kit: pre-push guard/)
+  writeFileSync(join(husky, '.husky/pre-push'), 'npm test\n')
+  const out = quiet(KIT, 'node', ['apply.mjs', husky])
+  assert.match(out, /\.husky\/pre-push is the repo's own, so the kit's pre-push guard is not installed: add {2}npx --no-install release-kit pre-push "\$@" {2}as its first line/)
+  assert.equal(readFileSync(join(husky, '.husky/pre-push'), 'utf8'), 'npm test\n')
+
+  // .githooks with a pre-push of the repo's own.
+  const own = makeRepo(tmp('apply-guard-own'))
+  mkdirSync(join(own, '.githooks'))
+  writeFileSync(join(own, '.githooks/pre-push'), '#!/bin/sh\nnpm test\n')
+  assert.match(quiet(KIT, 'node', ['apply.mjs', own, '--vendored']), /\.githooks\/pre-push is the repo's own, so the kit's pre-push hook is not installed: add {2}node scripts\/release-kit\/guard\.mjs "\$@" {2}to it/)
+  assert.equal(readFileSync(join(own, '.githooks/pre-push'), 'utf8'), '#!/bin/sh\nnpm test\n')
+  assert.ok(existsSync(join(own, '.githooks/commit-msg')))
+})
+
+test('visibility: a private repo scans weekly only, gets merge-when-green, and the settings can be overridden', async () => {
+  const { makeRepo, tmp, run: quiet, attempt: tryIt } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-private'))
+  const config = () => JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8'))
+  const workflow = (name) => readFileSync(join(repo, '.github/workflows', name), 'utf8')
+  // gh can't tell (offline): a note, and the public defaults.
+  const unknown = quiet(KIT, 'node', ['apply.mjs', repo, '--repository', 'o/r'], { RELEASE_KIT_OFFLINE: '1' })
+  assert.match(unknown, /could not tell whether o\/r is public or private .*rerun with --visibility private/)
+  assert.equal(config().visibility, undefined)
+  assert.ok(!existsSync(join(repo, '.github/workflows/auto-merge.yml')))
+
+  // gh says private.
+  const bin = tmp('apply-gh')
+  writeFileSync(join(bin, 'gh'), '#!/bin/sh\necho PRIVATE\n', { mode: 0o755 })
+  quiet(KIT, 'node', ['apply.mjs', repo], { PATH: `${bin}:${process.env.PATH}`, RELEASE_KIT_OFFLINE: '' })
+  assert.equal(config().visibility, 'private')
+  assert.match(workflow('security.yml'), /pull-requests: auto # release-kit: security on pull requests/)
+  const autoMerge = workflow('auto-merge.yml')
+  assert.match(autoMerge, /^# release-kit: merge update pull requests once CI passes/)
+  assert.match(autoMerge, /workflows: \["Commit messages", "Security scan"\]/)
+  assert.match(autoMerge, /uses: n8watkins\/release-kit\/\.github\/workflows\/auto-merge\.yml@v/)
+  // The policy is the documented example's.
+  const policy = (text) => /^ {4}if: >-\n((?: {6}.*\n)+)/m.exec(text)[1]
+  assert.equal(policy(autoMerge), policy(readFileSync(join(KIT, 'docs/examples/auto-merge.yml'), 'utf8')))
+  assert.match(workflow('direct-push.yml'), /uses: n8watkins\/release-kit\/\.github\/workflows\/direct-push\.yml@v/)
+
+  // Overrides, and release branches reach the alarm.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...config(), security: { onPullRequest: true }, branches: ['main', 'review/v1'] }))
+  quiet(KIT, 'node', ['apply.mjs', repo, '--visibility', 'public'])
+  assert.equal(config().visibility, 'public')
+  assert.match(workflow('security.yml'), /pull-requests: true # release-kit: security on pull requests/)
+  assert.match(workflow('direct-push.yml'), /branches: \[main, master, review\/v1\]/)
+  assert.match(workflow('direct-push.yml'), /branches: "review\/v1" # release-kit: branches/)
+  // Vendored: the same settings in the full copies.
+  quiet(KIT, 'node', ['apply.mjs', repo, '--vendored'], { RELEASE_KIT_OFFLINE: '1' })
+  assert.match(workflow('security.yml'), /\(inputs\.pull-requests \|\| 'true'\) == 'true'/)
+  assert.match(workflow('direct-push.yml'), /format\(',main,master,review\/v1,\{0\},'/)
+  assert.match(tryIt(KIT, 'node', ['apply.mjs', repo, '--visibility', 'secret']).stderr, /--visibility takes public or private, not "secret"/)
 })
