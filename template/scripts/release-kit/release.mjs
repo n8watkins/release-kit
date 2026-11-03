@@ -35,7 +35,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { RELEASE_TAG, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
 import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
 import { noteStyle, renderNotes } from './notes.mjs'
-import { readVersion, setVersion } from './versions.mjs'
+import { entryLabel, entryPath, readVersion, setVersion, versionFilesProblems } from './versions.mjs'
 import { RULE_REJECTION, releaseThroughPullRequest } from './release-pr.mjs'
 
 const args = process.argv.slice(2)
@@ -43,11 +43,15 @@ const flag = (name) => args.includes(`--${name}`)
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'))
 
 // Other files that carry the version (an extension manifest, tauri.conf.json,
-// a Cargo.toml and its Cargo.lock, a package.json and package-lock.json in a
-// subfolder), listed in .release.json as { "versionFiles": ["path/to/file"] }.
+// a Cargo.toml and its Cargo.lock, a pyproject.toml and its uv.lock, a
+// package.json and package-lock.json in a subfolder), listed in .release.json
+// as { "versionFiles": ["path/to/file"] }; any other file as
+// { "path": "...", "pattern": "<regex with one capture group>" }.
 // versions.mjs knows how each kind keeps it.
 const config = existsSync('.release.json') ? readJson('.release.json') : {}
 const versionFiles = config.versionFiles ?? []
+const versionFilesProblem = versionFilesProblems(versionFiles)
+if (versionFilesProblem.length) fail(`.release.json "versionFiles": ${versionFilesProblem.join('; ')}`)
 // The whole line a baseline tag's message carries, and nothing else does: a
 // release tag's message is its changelog section, whose lines are headings
 // or "- " items.
@@ -60,9 +64,16 @@ if (!Array.isArray(BRANCHES) || !BRANCHES.length || BRANCHES.some((b) => typeof 
   fail('.release.json "branches" must be a list of branch names, like ["main"]')
 }
 
+/** [file, version] for package.json and every version file. */
 function versions() {
-  const found = { 'package.json': readJson('package.json').version }
-  for (const path of versionFiles) found[path] = readVersion(path)
+  const found = [['package.json', readJson('package.json').version]]
+  for (const entry of versionFiles) {
+    try {
+      found.push([entryLabel(entry), readVersion(entry)])
+    } catch (error) {
+      fail(error.message)
+    }
+  }
   return found
 }
 
@@ -98,11 +109,11 @@ if (flag('verify-tag')) {
   const tag = valueOf('verify-tag')
   if (!tag || !RELEASE_TAG.test(tag)) fail(`"${tag ?? ''}" is not a release tag; release tags look like v1.2.3`)
   const found = versions()
-  const wrong = Object.entries(found).filter(([, v]) => `v${v}` !== tag)
+  const wrong = found.filter(([, v]) => `v${v}` !== tag)
   if (wrong.length) {
     fail(`tag ${tag} does not match: ${wrong.map(([file, v]) => `${file} has ${v}`).join(', ')}`)
   }
-  console.log(`release: ${tag} matches ${Object.keys(found).join(', ')}`)
+  console.log(`release: ${tag} matches ${found.map(([file]) => file).join(', ')}`)
   process.exit(0)
 }
 
@@ -232,6 +243,10 @@ const section = renderNotes(commits, {
   style: noteStyle(config.notes),
 })
 
+// Every version file must be readable before anything changes, so a bad one
+// stops the release here instead of halfway through the bump.
+versions()
+
 console.log(`release: ${current} -> ${version} (${kind}), ${commits.length} commit${commits.length === 1 ? '' : 's'} since ${since ?? 'the start'}\n`)
 console.log(section)
 if (flag('dry-run')) {
@@ -254,7 +269,7 @@ const existing = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf8
 const rest = existing.startsWith(TITLE) ? existing.slice(TITLE.length).replace(/^\n+/, '') : existing
 writeFileSync('CHANGELOG.md', `${TITLE}\n\n${section}\n${rest}`.replace(/\n{3,}/g, '\n\n'))
 
-const files = ['package.json', 'CHANGELOG.md', ...versionFiles]
+const files = [...new Set(['package.json', 'CHANGELOG.md', ...versionFiles.map(entryPath)])]
 if (existsSync('package-lock.json')) files.push('package-lock.json')
 git('add', '--', ...files)
 git('commit', '-m', `chore(release): ${tag}`)

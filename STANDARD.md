@@ -44,7 +44,8 @@ What the standard changes:
 
 ### Versions
 
-- SemVer, `vX.Y.Z` tags, the version in `package.json` (plus any `.release.json` `versionFiles`: JSON files such as an extension `manifest.json` or `tauri.conf.json`, `package-lock.json`, a `Cargo.toml` and its `Cargo.lock`). `apply.mjs` finds them on the first run and warns when one disagrees with `package.json`.
+- SemVer, `vX.Y.Z` tags, the version in `package.json` (plus any `.release.json` `versionFiles`: JSON files such as an extension `manifest.json` or `tauri.conf.json`, `package-lock.json`, a `Cargo.toml` and its `Cargo.lock`, a `pyproject.toml` (its `[project]` version) and its `uv.lock`, and any other file as `{ "path", "pattern" }`, a regex whose one capture group is the version and that matches exactly once).
+  `apply.mjs` finds them on the first run and warns when one disagrees with `package.json` or an entry is malformed.
 - Before 1.0, minor carries features and patch carries fixes.
 - 1.0.0 means ready for people who aren't the author.
 - The bump comes from the commits unless forced: breaking means major, a feature means minor, otherwise patch.
