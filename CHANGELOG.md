@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.3 - 2026-11-02
+
+### Fixed
+
+- Kit updates arrive again, because Dependabot accepts the dependabot.yml apply writes ([#32](https://github.com/n8watkins/release-kit/pull/32))
+
 ## 2.3.2 - 2026-11-02
 
 ### Fixed
