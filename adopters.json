@@ -79,7 +79,7 @@
       "reason": "Needs the App installed. Targets review/tube-vault-v0.3.81, never master, which is frozen at 0.3.80."
     },
     {
-      "repo": "n8watkins/deadlink",
+      "repo": "n8watkins/relink",
       "branch": "master",
       "visibility": "public",
       "wave": "public",
