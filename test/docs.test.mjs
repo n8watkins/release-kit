@@ -95,3 +95,22 @@ test('the docs use plain hyphens, never an em dash', () => {
   const files = [...DOCS, 'apply.mjs', 'bin/release-kit.mjs', ...['template/.github/workflows', '.github/workflows', 'reusable', 'template/scripts/release-kit'].flatMap((dir) => readdirSync(join(KIT, dir)).map((f) => `${dir}/${f}`))]
   for (const file of files) assert.ok(!read(file).includes('—'), `${file} has an em dash`)
 })
+
+test('the zizmor config in docs/ZIZMOR.md covers the caller pins and the auto-merge workflow apply writes', () => {
+  const repo = makeRepo(tmp('docs-zizmor'))
+  run(KIT, 'node', ['apply.mjs', repo, '--reusable'])
+  const doc = read('docs/ZIZMOR.md')
+  const policy = /"([^"]+)\/\*": ref-pin/.exec(doc)?.[1]
+  assert.ok(policy, 'no ref-pin policy')
+  const dir = join(repo, '.github/workflows')
+  const callers = readdirSync(dir).flatMap((file) => [...readFileSync(join(dir, file), 'utf8').matchAll(/uses: (\S+)@(\S+)/g)].map((m) => [file, m[1], m[2]]))
+    .filter(([, action]) => !/^actions\//.test(action))
+  assert.ok(callers.length >= 4)
+  for (const [file, action, ref] of callers) {
+    assert.ok(action.startsWith(`${policy}/`), `${file} calls ${action}, which the policy ${policy}/* doesn't cover`)
+    assert.match(ref, /^v\d+\.\d+\.\d+$/, `${file} pins ${ref}`)
+  }
+  assert.ok(existsSync(join(dir, 'auto-merge.yml')))
+  assert.match(readFileSync(join(dir, 'auto-merge.yml'), 'utf8'), /^ {2}workflow_run:/m)
+  assert.match(doc, /dangerous-triggers:\n {4}ignore:\n(?: {6}#.*\n)* {6}- auto-merge\.yml\n/)
+})

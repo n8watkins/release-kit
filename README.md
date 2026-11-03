@@ -274,6 +274,12 @@ OSV also lists malicious packages, which Dependabot alerts don't cover, so the t
 - OSV-Scanner is a pinned release, checked against its published SHA-256 before it runs.
 - Don't make "Security scan" a required status check: it only runs on pull requests that change a lock file, and GitHub leaves a required check from a skipped workflow waiting forever.
 
+## zizmor
+
+[zizmor](https://docs.zizmor.sh/) flags the kit's callers for pinning a version tag (`unpinned-uses`) and `auto-merge.yml` for its `workflow_run` trigger (`dangerous-triggers`).
+Both are expected: [docs/ZIZMOR.md](docs/ZIZMOR.md) has a config to copy that allows tag pins for n8watkins/release-kit only, and explains why the `workflow_run` use is safe.
+apply doesn't write it, since zizmor reads one config file and a repo's own would have to be rewritten.
+
 ## When a Release run fails
 
 Fix the cause, then use **Re-run failed jobs** on the run: the workflow is safe to run again, and a release a failed run already created is finished instead of duplicated.
