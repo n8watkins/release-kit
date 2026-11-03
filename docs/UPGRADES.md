@@ -14,6 +14,7 @@ A release can change two things in a repo that uses the kit:
 
 Dependabot can change a version, not add or rewrite a file.
 That is the whole reason the App exists.
+Without it, `release:check` and CI tell you when a release added or changed a file (steps 4 to 6 below).
 
 ## Without the App
 
@@ -39,12 +40,19 @@ That is the whole reason the App exists.
    In package mode it starts with `release-kit check`, which warns (and never fails) when:
    - the installed kit is older than the newest release tag;
    - a workflow pins a different kit version than the one installed;
+   - the files differ from what apply writes at the installed version: "release-kit vX.Y.Z adds or changes N files; run npx release-kit apply .", with each file;
    - a file is missing a fix the kit knows about (a `release.yml` without the fork guard, a `dependabot.yml` without the cooldown exclusion);
    - and a few repo settings, like visibility and branch protection.
 
-   It does not compare your files with what the new apply would write.
-   Once Dependabot's update has landed, it says "up to date" even when that release added a file, so read the release notes, or just run apply after every kit update.
-   Comparing them is planned for v2.6.0 ([ROADMAP.md, item 9](ROADMAP.md#9-stale-file-detection-without-the-app)).
+   So once Dependabot's update has landed, it tells you when that release added or changed a file.
+   Files apply deliberately leaves alone never count: a workflow of the repo's own with a kit file's name (a custom `release.yml`), a `dependabot.yml` of its own, and hooks that another hook manager or the repo's own `core.hooksPath` runs.
+5. **`npx release-kit apply --check .` is the same comparison as a command.**
+   It writes nothing, prints each file apply would add, change or remove, and exits 1 when any differs and 0 when the repo is current (`--json` prints it as JSON).
+   Use it as a hard gate in a repo that wants one.
+6. **CI shows it on the update pull request.**
+   In a repo with [CI lanes](CI_LANES.md), a kit-only pull request runs `release-kit verify`, which warns about the same files with an annotation and a line in the job summary, "release-kit files are behind".
+   It is a warning, not a failure, on purpose: Dependabot's pull request moves only the version and must still merge, and a failing check would also stop the merge-when-green fallback, which waits for every check.
+   The rollout bot's pull request is apply's own output, so it shows no warning; in a repo without the bot, running apply and committing the result clears it.
 
 ## With the App
 

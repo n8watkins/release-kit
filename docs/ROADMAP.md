@@ -1,7 +1,7 @@
 # Roadmap
 
 Designs for what comes next, with a difficulty for each item and the exact steps only the owner can take.
-Nothing here is built yet, except items 7 and 8, which stay here as a record of their design: item 7 shipped in v2.4.0, and item 8 is on main for the next release.
+Nothing here is built yet, except items 7, 8 and 9, which stay here as a record of their design: item 7 shipped in v2.4.0, and items 8 and 9 are on main for the next release.
 What is built is in the [README](../README.md); the reasoning behind the order is in the [November 2026 review](REVIEW_2026-11.md#6-roadmap).
 
 Difficulty is for one developer working with an agent, including tests and docs: **S** is under a day, **M** one to three days, **L** a week or more.
@@ -16,7 +16,7 @@ Difficulty is for one developer working with an agent, including tests and docs:
 | [6. Monorepos](#6-monorepos) | L | No |
 | [7. Per-repo settings: public and private repos](#7-per-repo-settings-public-and-private-repos) | Done in v2.4.0 | No |
 | [8. The rollout bot](#8-the-rollout-bot) | Done, next release | Done: GitHub App, environment |
-| [9. Stale-file detection without the App](#9-stale-file-detection-without-the-app) | S, for v2.6.0 | No |
+| [9. Stale-file detection without the App](#9-stale-file-detection-without-the-app) | Done, next release (v2.6.0) | No |
 | [10. A rollout bot for outside users](#10-a-rollout-bot-for-outside-users) | M, for v3 | No; each adopter sets up their own App |
 | [Owner steps for what is already built](#owner-steps-for-what-is-already-built) | - | Yes |
 
@@ -179,7 +179,8 @@ The setup steps, and the steps for adding an adopter, are in [UPGRADES.md](UPGRA
 
 ## 9. Stale-file detection without the App
 
-**Targeted for v2.6.0.**
+**Done**, as designed below, for the next release (v2.6.0): `apply --check`, the warning in `release-kit check` and step 5 of `release-kit verify`; [UPGRADES.md](UPGRADES.md#without-the-app) has how it works.
+Where the build differs from the design: a dry run also counts a hook whose executable bit a real run would restore.
 
 **Why.** Without the App, a kit release that adds or changes a file reaches a repo only when someone runs `npx release-kit apply .`.
 Dependabot's update moves the version, `release:check` then says "up to date", and the new file never arrives unless someone reads the release notes ([UPGRADES.md](UPGRADES.md#without-the-app), step 4).
