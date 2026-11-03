@@ -8,8 +8,14 @@ The kit's reusable `auto-merge.yml` merges them on their own, within a strict po
 - **What may merge on its own:** release-kit updates, and Dependabot patch and minor updates, including Dependabot security updates.
 - **What never does:** a major update of anything, a downgrade, an update whose kind can't be read, a draft, and any pull request that isn't from an update bot.
 - **Who counts as an update bot:** `dependabot[bot]`, plus any author listed in the `bots` input, whose pull requests must also come from a `release-kit/` branch; the `auto-merge.yml` apply writes lists the rollout bot, `release-kit-bot-n8watkins[bot]`.
-- **How the kind is read:** the release-kit pin in `package.json` on both sides of the pull request, and Dependabot's own `updated-dependencies` metadata in its commit messages.
+- **How the kind is read:** the release-kit pin in `package.json` on both sides of the pull request, and the `update-type` of each dependency in Dependabot's `updated-dependencies` metadata in its commit messages.
   A grouped pull request takes the biggest change in it, so a group with one major update waits for a person.
+- **When `update-type` is missing:** Dependabot sometimes leaves it out (a multi-ecosystem group pull request did), so the policy reads the old and new version Dependabot names instead and compares them with semver.
+  It takes them from the commit messages first, then the pull request description: `Bumps [x](https://...) from A to B` for one dependency, and "Updates x from A to B" lines (the name in backticks) or the package table for each dependency in a group.
+  A GitHub Action pinned to a commit SHA counts only when a version is written next to the SHA.
+  What stays for a person, with the reason in the notice and the job summary: commit SHAs with no version, versions that aren't semver (`v4`, `22-alpine`), a move to a prerelease, a downgrade, and a dependency with neither an `update-type` nor a "from A to B" line.
+  A prerelease's own release (2.0.0-rc.1 to 2.0.0) counts as the change its release line makes, here a major.
+- **The job summary** lists each dependency, the kind of update it is and where that was read from.
 - **Only metadata is read**, through the GitHub API; no pull request code runs in the job that holds the write token.
 
 ## How it merges

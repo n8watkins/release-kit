@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { KIT, attempt, tmp } from './helpers.mjs'
-import { checksState, decide, dependabotUpdates, kitVersion, semverChange } from '../template/scripts/release-kit/automerge.mjs'
+import { checksState, classifyUpdate, decide, dependabotUpdates, dependabotVersions, kitVersion, semverChange, versionChange } from '../template/scripts/release-kit/automerge.mjs'
 
 // A Dependabot commit message as Dependabot writes it (a grouped update).
 const DEPENDABOT = `build(deps): bump the release-kit group with 2 updates
@@ -107,12 +107,12 @@ process.stdout.write(JSON.stringify(answer[1]))
 const b64 = (text) => Buffer.from(text).toString('base64')
 const pkg = (version) => ({ content: b64(JSON.stringify({ devDependencies: { 'release-kit': `github:n8watkins/release-kit#v${version}` } })) })
 
-function automerge({ event = 'pull_request', from = '2.1.0', to = '2.2.0', rules = [], allowAutoMerge = true, runs = [], payload } = {}) {
+function automerge({ summary, event = 'pull_request', from = '2.1.0', to = '2.2.0', rules = [], allowAutoMerge = true, runs = [], payload, commits, body = null, headRef = 'dependabot/npm_and_yarn/release-kit' } = {}) {
   const dir = tmp('automerge')
   writeFileSync(join(dir, 'gh'), FAKE_GH, { mode: 0o755 })
   const state = {
-    'repos/o/r/pulls/7/commits': [{ commit: { message: DEPENDABOT.replaceAll('semver-minor', semverChange(from, to) ? `semver-${semverChange(from, to)}` : 'semver-minor') } }],
-    'repos/o/r/pulls/7': { number: 7, state: 'open', draft: false, auto_merge: null, user: { login: 'dependabot[bot]' }, head: { ref: 'dependabot/npm_and_yarn/release-kit', sha: 'h'.repeat(40) }, base: { ref: 'main', sha: 'b'.repeat(40), repo: { allow_auto_merge: allowAutoMerge } } },
+    'repos/o/r/pulls/7/commits': commits ?? [{ commit: { message: DEPENDABOT.replaceAll('semver-minor', semverChange(from, to) ? `semver-${semverChange(from, to)}` : 'semver-minor') } }],
+    'repos/o/r/pulls/7': { number: 7, state: 'open', draft: false, auto_merge: null, body, user: { login: 'dependabot[bot]' }, head: { ref: headRef, sha: 'h'.repeat(40) }, base: { ref: 'main', sha: 'b'.repeat(40), repo: { allow_auto_merge: allowAutoMerge } } },
     [`repos/o/r/contents/package.json?ref=${'b'.repeat(40)}`]: pkg(from),
     [`repos/o/r/contents/package.json?ref=${'h'.repeat(40)}`]: pkg(to),
     'repos/o/r/rules/branches/main': rules,
@@ -126,6 +126,7 @@ function automerge({ event = 'pull_request', from = '2.1.0', to = '2.2.0', rules
   const result = attempt(dir, 'node', [join(KIT, 'template/scripts/release-kit/automerge.mjs')], {
     PATH: `${dir}:${process.env.PATH}`, FAKE_GH_STATE: join(dir, 'state.json'), FAKE_GH_LOG: join(dir, 'log'),
     GITHUB_REPOSITORY: 'o/r', GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: join(dir, 'event.json'),
+    ...(summary ? { GITHUB_STEP_SUMMARY: summary } : {}),
   })
   const merges = readFileSync(join(dir, 'log'), 'utf8').split('\n').filter((line) => line.startsWith('pr merge'))
   return { ...result, merges }
@@ -160,4 +161,108 @@ test('end to end: with no required checks it skips with a notice, and merges on 
   const push = automerge({ event: 'workflow_run', payload: { workflow_run: { event: 'push', head_sha: 'h'.repeat(40) } } })
   assert.deepEqual(push.merges, [])
   assert.match(push.stdout, /a push run is not a pull request's/)
+})
+
+// n8watkins/pivot#19: a multi-ecosystem group pull request whose Dependabot
+// metadata has no update-type line. The versions are only in the prose.
+const fixture = (name) => readFileSync(join(KIT, 'test/fixtures/automerge', name), 'utf8')
+const PIVOT_19 = { body: fixture('pivot-19-body.txt'), commits: JSON.parse(fixture('pivot-19-commits.json')), headRef: 'dependabot/release_kit-0d65bea298', from: '2.5.2', to: '2.5.2' }
+
+test('end to end: a Dependabot pull request without update-type is classified from the versions it names (pivot#19)', () => {
+  const required = [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI result' }] } }]
+  const summary = join(tmp('automerge-summary'), 'summary.md')
+  const pull = automerge({ ...PIVOT_19, rules: required, summary })
+  assert.equal(pull.status, 0, pull.stderr)
+  assert.match(pull.stdout, /auto-merge on for #7: vitest is a patch update/)
+  assert.match(readFileSync(summary, 'utf8'), /\| vitest \| patch \| 4\.1\.10 to 4\.1\.11 \(the versions Dependabot names\) \|/)
+  assert.deepEqual(pull.merges, [`pr merge 7 --repo o/r --auto --squash --match-head-commit ${'h'.repeat(40)}`])
+
+  const green = automerge({ ...PIVOT_19, event: 'workflow_run', runs: [{ name: 'CI result', status: 'completed', conclusion: 'success' }] })
+  assert.equal(green.status, 0, green.stderr)
+  assert.deepEqual(green.merges, [`pr merge 7 --repo o/r --squash --match-head-commit ${'h'.repeat(40)}`])
+})
+
+test('end to end: an update whose versions cannot be read stays for a person, with the reason in the job summary', () => {
+  const required = [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI result' }] } }]
+  const summary = join(tmp('automerge-summary'), 'summary.md')
+  const sha = (c) => c.repeat(40)
+  const message = `build(deps): bump actions/cache from ${sha('a')} to ${sha('b')}\n\nBumps [actions/cache](https://github.com/actions/cache) from ${sha('a')} to ${sha('b')}.\n\n---\nupdated-dependencies:\n- dependency-name: actions/cache\n  dependency-version: ${sha('b')}\n  dependency-type: direct:production\n...\n`
+  const run = automerge({ commits: [{ commit: { message } }], from: '2.5.2', to: '2.5.2', rules: required, summary })
+  assert.equal(run.status, 0, run.stderr)
+  assert.deepEqual(run.merges, [])
+  assert.match(run.stdout, /left for a person: could not tell what kind of update this is \(actions\/cache: pinned to commit SHAs with no version/)
+  assert.match(readFileSync(summary, 'utf8'), /left for a person[\s\S]*\| actions\/cache \| unknown \| pinned to commit SHAs/)
+})
+
+// Dependabot commit messages and descriptions without the update-type line.
+const meta = (...entries) => `---\nupdated-dependencies:\n${entries.map(([name, type]) => `- dependency-name: ${name}\n  dependency-version: 1.0.0\n  dependency-type: direct:production\n${type ? `  update-type: version-update:semver-${type}\n` : ''}`).join('')}...\n\nSigned-off-by: dependabot[bot] <support@github.com>`
+const classify = (messages, body = '', kit) => classifyUpdate({ dependabot: true, messages, body, kit })
+
+test('versionChange: semver levels, prereleases, downgrades and versions that cannot be compared', () => {
+  assert.deepEqual(versionChange('4.1.10', '4.1.11'), { type: 'patch', why: '4.1.10 to 4.1.11' })
+  assert.equal(versionChange('v1.2.3', 'v1.3.0').type, 'minor')
+  assert.equal(versionChange('1.9.9', '2.0.0').type, 'major')
+  assert.equal(versionChange('1.0.0+build.1', '1.0.1+build.2').type, 'patch')
+  // A move to a prerelease promises no compatibility; its release counts as the line's change.
+  assert.match(versionChange('1.2.3', '2.0.0-beta.1').why, /2\.0\.0-beta\.1 is a prerelease/)
+  assert.equal(versionChange('2.0.0-beta.1', '2.0.0-beta.2').type, null)
+  assert.equal(versionChange('2.0.0-rc.1', '2.0.0').type, 'major')
+  assert.equal(versionChange('1.3.0-rc.1', '1.3.0').type, 'minor')
+  assert.equal(versionChange('1.3.1-rc.1', '1.3.1').type, 'patch')
+  assert.equal(versionChange('1.2.3', '1.2.4-rc.1').type, null)
+  assert.equal(versionChange('2.0.0', '2.0.0-rc.1').type, 'downgrade')
+  assert.equal(versionChange('1.0.0-beta.2', '1.0.0-beta.10').type, null, 'still a prerelease, not a downgrade')
+  assert.equal(versionChange('1.0.0-beta.10', '1.0.0-beta.2').type, 'downgrade')
+  assert.equal(versionChange('1.0.0-alpha', '1.0.0-alpha.1').type, null)
+  assert.equal(versionChange('1.0.0-alpha.1', '1.0.0-alpha').type, 'downgrade')
+  assert.equal(versionChange('1.0.0-rc.1', '1.0.0-beta.1').type, 'downgrade')
+  assert.equal(versionChange('3.1.0', '3.0.9').type, 'downgrade')
+  assert.match(versionChange('v4', 'v5').why, /not semantic versions \(v4 to v5\)/)
+  assert.match(versionChange('11bd719', '08c6903').why, /commit SHAs with no version/)
+  assert.match(versionChange('1.0.0', '1.0.0').why, /no version change/)
+})
+
+test('dependabotVersions: single, grouped, table, multi-directory and SHA-pinned lines', () => {
+  assert.deepEqual(dependabotVersions('Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.10 to 4.1.11.\r\n'), [{ name: 'vitest', from: '4.1.10', to: '4.1.11' }])
+  assert.deepEqual(dependabotVersions('Bumps lodash from 4.17.20 to 4.17.21.'), [{ name: 'lodash', from: '4.17.20', to: '4.17.21' }])
+  const group = 'Bumps the npm group with 2 updates in the / directory: [a](u) and [@s/b](u).\n\nUpdates `a` from 1.0.0 to 1.0.1\n- [Release notes](u)\n\nUpdates `@s/b` from 2.0.0 to 2.1.0 in /web\n'
+  assert.deepEqual(dependabotVersions(group), [{ name: 'a', from: '1.0.0', to: '1.0.1' }, { name: '@s/b', from: '2.0.0', to: '2.1.0' }])
+  assert.deepEqual(dependabotVersions('| Package | From | To |\n| --- | --- | --- |\n| [next](u) | `15.0.0` | `15.1.0` |\n'), [{ name: 'next', from: '15.0.0', to: '15.1.0' }])
+  const sha = 'Bumps [actions/checkout](https://github.com/actions/checkout) from 11bd71901bbe5b1630ceea73d27597364c9af683 (v4.2.2) to 08c6903cd8c0fde910a37f88322edcfb5dd907a8 (v5.0.0).'
+  assert.deepEqual(dependabotVersions(sha), [{ name: 'actions/checkout', from: 'v4.2.2', to: 'v5.0.0' }])
+  assert.deepEqual(dependabotVersions('Bumps [actions/cache](u) from 1bd1e32 to 5a3ec84.'), [{ name: 'actions/cache', from: '1bd1e32', to: '5a3ec84' }])
+  assert.deepEqual(dependabotVersions('Updates the requirements on [x](u) to permit the latest version.\nBumps the npm group with 3 updates: [a](u), [b](u) and [c](u).'), [])
+})
+
+test('classifyUpdate: without update-type, each dependency is read from its versions and the group takes the biggest', () => {
+  // A single update.
+  const single = classify([`build(deps): bump next from 15.0.0 to 15.0.3\n\nBumps [next](u) from 15.0.0 to 15.0.3.\n\n${meta(['next'])}`])
+  assert.deepEqual([single.type, single.what], ['patch', 'next'])
+  // A group: minor wins over patch, and one major makes the group major.
+  const grouped = (bVersion) => classify([`build(deps): bump the npm group with 2 updates\n\nBumps the npm group with 2 updates: [a](u) and [b](u).\n\nUpdates \`a\` from 1.0.0 to 1.0.1\n\nUpdates \`b\` from 2.0.0 to ${bVersion}\n\n${meta(['a'], ['b'])}`])
+  assert.equal(grouped('2.1.0').type, 'minor')
+  assert.equal(grouped('3.0.0').type, 'major')
+  // A multi-ecosystem group: an npm entry with update-type next to an actions entry without one, read from the description.
+  const multi = classify([`chore(deps): bump the release-kit group across 2 directories\n\n${meta(['release-kit', 'minor'], ['actions/setup-node'])}`], 'Updates `actions/setup-node` from 7.0.0 to 7.1.0\n')
+  assert.deepEqual([multi.type, multi.what], ['minor', 'release-kit, actions/setup-node'])
+  const multiMajor = classify([meta(['release-kit', 'patch'], ['actions/setup-node'])], 'Updates `actions/setup-node` from 6.4.0 to 7.0.0\n')
+  assert.equal(multiMajor.type, 'major')
+  // SHA-pinned actions: a version next to the SHA counts, SHAs alone don't.
+  assert.equal(classify([meta(['actions/checkout'])], 'Bumps [actions/checkout](u) from 11bd719 (v4.2.2) to 08c6903 (v4.3.0).').type, 'minor')
+  const shaOnly = classify([meta(['actions/cache'])], 'Bumps [actions/cache](u) from 1bd1e32 to 5a3ec84.')
+  assert.deepEqual([shaOnly.type, shaOnly.why], [null, 'actions/cache: pinned to commit SHAs with no version (1bd1e32 to 5a3ec84)'])
+  // Prereleases and versions that are not semver stay for a person.
+  assert.match(classify([meta(['react'])], 'Bumps [react](u) from 19.0.0 to 19.1.0-canary.1.').why, /react: 19\.1\.0-canary\.1 is a prerelease/)
+  assert.match(classify([meta(['node'])], 'Bumps node from 22-alpine to 24-alpine.').why, /node: not semantic versions/)
+  // A downgrade in the text is still refused, and a dependency with no line at all is unknown.
+  assert.equal(classify([meta(['x'])], 'Bumps [x](u) from 2.2.0 to 2.0.1.').type, 'downgrade')
+  assert.match(classify([meta(['a'], ['b'])], 'Updates `a` from 1.0.0 to 1.0.1\n').why, /b has no update-type and no "from A to B" line/)
+  // Commit messages win over a stale description; no metadata at all falls back to the lines themselves.
+  assert.equal(classify([`Bumps [x](u) from 1.0.0 to 1.0.1.\n\n${meta(['x'])}`], 'Bumps [x](u) from 1.0.0 to 2.0.0.').type, 'patch')
+  assert.equal(classify(['Bumps [x](u) from 1.0.0 to 1.1.0.']).type, 'minor')
+  assert.deepEqual([classify(['chore: nothing']).type, classify(['chore: nothing']).why], [null, 'no version change found'])
+  // update-type, where present, is still what counts, and the kit pin's downgrade refusal stays.
+  assert.equal(classify([meta(['x', 'patch'])], 'Bumps [x](u) from 1.0.0 to 2.0.0.').type, 'patch')
+  assert.equal(classify([meta(['release-kit', 'minor'])], '', ['2.2.0', '2.0.1']).type, 'downgrade')
+  assert.equal(classifyUpdate({ kit: ['2.1.0', '2.2.0'] }).type, 'minor')
 })
