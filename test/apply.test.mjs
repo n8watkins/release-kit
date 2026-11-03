@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const KIT = new URL('..', import.meta.url).pathname
-const run = (cwd, cmd, args) => execFileSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, RELEASE_KIT_OFFLINE: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
-const attempt = (cwd, cmd, args) => spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, RELEASE_KIT_OFFLINE: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
+const run = (cwd, cmd, args) => execFileSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '', RELEASE_KIT_OFFLINE: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
+const attempt = (cwd, cmd, args) => spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '', RELEASE_KIT_OFFLINE: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } })
 
 test('apply, then the hook, the release command and tag verification all work', () => {
   const repo = mkdtempSync(join(tmpdir(), 'release-kit-'))

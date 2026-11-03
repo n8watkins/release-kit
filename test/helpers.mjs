@@ -15,6 +15,8 @@ delete ENV.GITHUB_OUTPUT
 delete ENV.GITHUB_STEP_SUMMARY
 delete ENV.GITHUB_REPOSITORY
 delete ENV.GITHUB_SERVER_URL
+// The tests run in GitHub Actions too, where the pre-push guard stands aside.
+delete ENV.GITHUB_ACTIONS
 
 export const run = (cwd, cmd, args, env = {}) => execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 1024 ** 3, env: { ...ENV, ...env } })
 export const attempt = (cwd, cmd, args, env = {}, input = undefined) => spawnSync(cmd, args, { cwd, input, encoding: 'utf8', maxBuffer: 1024 ** 3, env: { ...ENV, ...env } })

@@ -274,6 +274,7 @@ test('check warns when the rulesets drift, and stays quiet when gh cannot tell',
     try {
       process.chdir(dir)
       Object.assign(process.env, gh.env)
+      delete process.env.GITHUB_ACTIONS
       return protectionWarnings({ repo: 'o/r' })
     } finally {
       process.chdir(saved.cwd)
