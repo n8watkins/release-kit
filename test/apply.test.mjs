@@ -521,6 +521,9 @@ test('visibility: a private repo scans weekly only, every repo gets auto-merge, 
   // The policy is the documented example's.
   const policy = (text) => /^ {4}if: >-\n((?: {6}.*\n)+)/m.exec(text)[1]
   assert.equal(policy(autoMerge), policy(readFileSync(join(KIT, 'docs/examples/auto-merge.yml'), 'utf8')))
+  // And its permissions: merge when green reads the checks on the pull request.
+  const grants = (text) => /^ {4}permissions:\n((?: {6}.*\n)+)/m.exec(text)[1]
+  assert.equal(grants(autoMerge), grants(readFileSync(join(KIT, 'docs/examples/auto-merge.yml'), 'utf8')))
   assert.match(workflow('direct-push.yml'), /uses: n8watkins\/release-kit\/\.github\/workflows\/direct-push\.yml@v/)
 
   // Overrides, and release branches reach the alarm.
