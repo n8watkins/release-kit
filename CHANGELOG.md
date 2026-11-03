@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.1 - 2026-11-02
+
+### Fixed
+
+- A release-kit update that adds or re-pins the auto-merge workflow or the Direct push alarm runs the one-minute kit check, not the full CI
+
 ## 2.5.0 - 2026-11-02
 
 ### New
