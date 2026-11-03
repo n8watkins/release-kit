@@ -42,8 +42,12 @@ A pull request's own `pull_request` run uses the kit version it moves to, so for
 
 ## Setting it up
 
-1. Copy [examples/auto-merge.yml](examples/auto-merge.yml) to `.github/workflows/auto-merge.yml` and set the kit version.
-2. In a repo that can require checks, require the one aggregate check (for example "CI result", see [CI_LANES.md](CI_LANES.md)) with a ruleset, or `npx release-kit protect --checks "CI result"`, and allow auto-merge:
+1. `npx release-kit apply .` writes `.github/workflows/auto-merge.yml` in every repo, public or private, pinned to the installed kit version (since v2.5.0; before that, only in a private repo).
+   `"autoMerge": false` in `.release.json` stops it (then delete the file).
+   A repo without the kit can copy [examples/auto-merge.yml](examples/auto-merge.yml) and set the kit version.
+2. In a repo that can require checks, require the checks that cover all of CI (the one aggregate check, for example "CI result", see [CI_LANES.md](CI_LANES.md), or every CI job) with `npx release-kit protect`.
+   GitHub's auto-merge waits only for required checks, so a CI job left out of them could fail and the update would still merge.
+   When protect requires checks it also allows auto-merge on the repo; by hand that is:
 
    ```sh
    gh api -X PATCH repos/{owner}/{repo} -F allow_auto_merge=true

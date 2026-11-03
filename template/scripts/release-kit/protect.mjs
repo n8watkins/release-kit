@@ -14,6 +14,10 @@
 //   "release-kit: release tags"  refs/tags/v*: anyone with write access may
 //                                create one, nobody may delete or move one.
 //
+// With required checks it also allows auto-merge on the repo, so the
+// auto-merge workflow can merge update pull requests once they pass
+// (docs/AUTO_MERGE.md).
+//
 // The required checks are --checks, else .release.json "protect.checks", else
 // the ones the ruleset already requires, else the GitHub Actions checks that
 // passed on the latest merged pull request (leaving out workflows that run on
@@ -376,7 +380,9 @@ export function plan({ api, maybe }, repo, { checks: checksFlag, adminBypass = f
   const tagsListed = rulesets.find((r) => r.name === TAG_RULESET)
   const existing = { branches: existingBranches, tags: tagsListed ? api(`repos/${repo}/rulesets/${tagsListed.id}`) : null }
   const others = rulesets.filter((r) => r.id !== existing.branches?.id && r.id !== existing.tags?.id)
-  return { repo, branch, extra, missing, classic, checks, checksFrom, train, makeKey, keys, wanted, existing, others }
+  // GitHub's auto-merge waits for required checks; without any it would merge at once.
+  const allowAutoMerge = checks.length > 0 && !info.allow_auto_merge
+  return { repo, branch, extra, missing, classic, checks, checksFrom, train, makeKey, keys, wanted, existing, others, allowAutoMerge }
 }
 
 /**
@@ -468,6 +474,7 @@ function main() {
   if (p.missing.length) console.log(`  .release.json branches not on GitHub, so not protected yet: ${p.missing.join(', ')} (rerun once they exist)`)
   if (p.train) console.log(`  release train: deploy key "${KEY_TITLE}" and secret ${SECRET}: ${p.makeKey ? 'new' : 'kept (--rotate-key replaces them)'}`)
   if (p.classic) console.log(`  classic branch protection on ${p.branch}: removed after the rulesets are active`)
+  if (p.allowAutoMerge) console.log('  allow auto-merge: on, so update pull requests merge once the required checks pass (.github/workflows/auto-merge.yml)')
   for (const other of p.others) console.log(`  another ruleset, left alone: "${other.name}" (${other.target}, ${other.enforcement})`)
   console.log(`  releases: npm run release -- --push opens a release pull request and tags it once merged${p.train ? '; the train pushes with its deploy key' : ''}`)
   if (dryRun) return
@@ -494,6 +501,9 @@ function main() {
 
   // 3. Classic protection would still reject the deploy key.
   if (p.classic) github.api(`repos/${repo}/branches/${encodeURIComponent(p.branch)}/protection`, { method: 'DELETE' })
+
+  // 4. Auto-merge, now that the branch requires checks.
+  if (p.allowAutoMerge) github.api(`repos/${repo}`, { method: 'PATCH', body: { allow_auto_merge: true } })
   console.log('protect: done')
 }
 

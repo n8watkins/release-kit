@@ -120,7 +120,7 @@ What it can't see: a push made with a workflow's `GITHUB_TOKEN` starts no workfl
 ## Merge when green
 
 A private repo can't require checks, so GitHub's own auto-merge would merge an update pull request before CI finishes.
-apply writes `.github/workflows/auto-merge.yml` in a private repo: the [auto-merge policy](AUTO_MERGE.md) with its merge-when-green fallback, which merges a release-kit update or a Dependabot patch or minor update only once every check on its head commit has finished and passed.
+apply writes `.github/workflows/auto-merge.yml` (in every repo since v2.5.0): the [auto-merge policy](AUTO_MERGE.md) with its merge-when-green fallback, which merges a release-kit update or a Dependabot patch or minor update only once every check on its head commit has finished and passed.
 Its `workflow_run` trigger lists every workflow in the repo that runs on pull requests, read when apply runs; rerun `npx release-kit apply .` after adding one.
 
 ## Settings for private repos
@@ -132,7 +132,7 @@ Standard runners are free in public repos and billed per minute, rounded up per 
 |---|---|---|---|
 | Security scan on lock-file pull requests | On | Off: weekly only, since Dependabot alerts cover pull requests | `"security": { "onPullRequest": true }` |
 | Artifact attestations (planned, [roadmap item 2](ROADMAP.md#2-signed-releases-artifact-attestations)) | On | Off: private repos need GitHub Enterprise Cloud for them | `"attest": true` |
-| Merge when green for update pull requests | Opt-in ([AUTO_MERGE.md](AUTO_MERGE.md)) | `auto-merge.yml` written | `"autoMerge": false` (then delete the file) |
+| Auto-merge for update pull requests ([AUTO_MERGE.md](AUTO_MERGE.md)) | `auto-merge.yml` written: GitHub auto-merge on the required checks | `auto-merge.yml` written: merge when green | `"autoMerge": false` (then delete the file) |
 | CI lanes | Opt-in | `release-kit check` recommends them | [CI_LANES.md](CI_LANES.md) |
 
 One workflow file serves both kinds of repo: the security scan's job decides from the event (`github.event.repository.private`), before a runner starts, so a skipped scan costs nothing; the override reaches it as the `pull-requests` input apply writes into the caller.
