@@ -17,7 +17,7 @@ A change gets the most demanding lane that any of its files needs.
 | Lane | When | What usually runs |
 |---|---|---|
 | `docs` | Only Markdown, `docs/`, `LICENSE`, issue and pull request templates, and the `.release.json` `lanes.docs` globs | Nothing beyond the commit check |
-| `kit` | Only the `release-kit` dev dependency (its `package.json` entry and its lock entries), the kit's own workflows, hook and `.release.json` settings, and `.github/dependabot.yml` | `release-kit verify`, about a minute |
+| `kit` | Only the `release-kit` dev dependency (its `package.json` entry and its lock entries), the kit's own workflows, hooks (commit-msg and the pre-push guard) and `.release.json` settings, and `.github/dependabot.yml` | `release-kit verify`, about a minute |
 | `deps` | Only `devDependencies` and the lock entries npm marks `"dev"`, and none listed in `.release.json` `lanes.fullFor` | Install, lint, types, unit tests, build |
 | `full` | Anything else | Everything, including E2E tests and OS matrices |
 

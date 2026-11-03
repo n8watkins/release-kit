@@ -98,6 +98,8 @@ test('classify: fullFor, the lanes settings, a workflow that only borrows the ki
   assert.equal(classify([{ path: 'package-lock.json', base: '{', head: '{}' }]).lane, 'full')
   assert.equal(classify([{ path: 'package.json', base: null, head: '{}' }]).lane, 'full')
   assert.equal(classify([{ path: '.github/dependabot.yml', base: 'a', head: 'b' }]).lane, 'kit')
+  // The hooks apply writes, the pre-push guard included (v2.4.0 added it).
+  for (const path of ['.githooks/commit-msg', '.githooks/pre-push', '.husky/pre-push']) assert.equal(classify([{ path, base: null, head: '# release-kit' }]).lane, 'kit', path)
 })
 
 test('globs match paths the way the docs lane needs', () => {

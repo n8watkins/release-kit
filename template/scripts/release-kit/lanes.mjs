@@ -29,7 +29,7 @@ import { isMain } from './git.mjs'
 export const LANES = ['docs', 'kit', 'deps', 'full']
 const rank = (lane) => LANES.indexOf(lane)
 const KIT_WORKFLOWS = ['commits.yml', 'release.yml', 'release-train.yml', 'security.yml']
-const KIT_FILES = ['.github/dependabot.yml', '.githooks/commit-msg', '.husky/commit-msg']
+const KIT_FILES = ['.github/dependabot.yml', '.githooks/commit-msg', '.husky/commit-msg', '.githooks/pre-push', '.husky/pre-push']
 const DOCS = ['**/*.md', '**/*.mdx', 'docs/**', 'LICENSE', 'LICENSE.*', '.github/ISSUE_TEMPLATE/**', '.github/PULL_REQUEST_TEMPLATE*', '.github/pull_request_template.md']
 
 /** A glob ("**" any depth, "*" within a path segment) as a RegExp. */
