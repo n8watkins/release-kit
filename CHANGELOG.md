@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.1 - 2026-11-02
+
+### Fixed
+
+- A kit update that adds the pre-push guard takes the one-minute kit lane, not the full CI ([#37](https://github.com/n8watkins/release-kit/pull/37))
+
 ## 2.4.0 - 2026-11-02
 
 Free safeguards for private repos: a pre-push guard and a Direct push alarm.
