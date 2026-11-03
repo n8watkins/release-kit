@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.4.0 - 2026-11-02
+
+Free safeguards for private repos: a pre-push guard and a Direct push alarm.
+
+### New
+
+- Stop and report direct pushes, even in private repos on GitHub Free ([#34](https://github.com/n8watkins/release-kit/pull/34))
+
 ## 2.3.3 - 2026-11-02
 
 ### Fixed
