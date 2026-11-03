@@ -153,6 +153,15 @@
       "reason": "Needs the App installed (joined the kit 2026-11-03)."
     },
     {
+      "repo": "n8watkins/pr-post",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed (joined the kit 2026-11-03)."
+    },
+    {
       "repo": "n8watkins/pr-post-private",
       "branch": "main",
       "visibility": "private",
