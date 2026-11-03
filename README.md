@@ -60,7 +60,7 @@ It is a poor fit today for monorepos with several independently versioned packag
 - **One version per repo:** no monorepo support.
 - **npm only:** pnpm, yarn and bun repos need a `package-lock.json` too (support is planned).
 - **No reviewable release PR or pre-release channels yet** (both planned).
-- **Upgrades that add files** still need a re-run of apply in each repo until the rollout bot exists (planned).
+- **Upgrades that add files** reach the repos the rollout bot's GitHub App is installed on by pull request; any other repo needs a re-run of apply.
 - **One maintainer.**
 
 The plans are in [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -110,17 +110,29 @@ Each repo installs the kit as a dev dependency pinned to a release tag, `"releas
   The kit is excluded from Dependabot's default 3-day cooldown: with the cooldown, Dependabot skips the newest tags of a git dependency and proposes the newest older one, even below the installed version (repos on v2.2.0 got "bump release-kit from v2.2.0 to v2.0.1").
   So a release reaches each repo's PR queue within a day, and the auto-merge policy refuses any downgrade as a second line of defense.
 - **`npm run release:check` warns** when the installed kit is behind the newest release, or when the workflows pin a different version than the one installed.
-- **New files need a re-run of apply.** Dependabot can change a version, not add a file, so when a kit release adds or changes a file apply writes (for example `security.yml` in v2.1.0), run this in each repo after the update lands:
+- **New files arrive from the rollout bot.** Dependabot can change a version, not add a file, so when a kit release adds or changes a file apply writes (for example `security.yml` in v2.1.0), apply has to run in each repo.
+  The rollout bot does that: see [The rollout bot](#the-rollout-bot).
+  In a repo the bot doesn't cover, run this after the update lands:
 
   ```bash
   npx release-kit apply .
   ```
 
-Planned, not built yet:
+### The rollout bot
 
-- A rollout workflow in release-kit that runs apply against every adopting repo on each release and opens one PR per repo through a GitHub App.
+On every published release, `.github/workflows/rollout.yml` in release-kit runs apply in each adopter and opens one pull request per repo, `ci: update release-kit to vX.Y.Z` from the branch `release-kit/update`.
 
-Its design, with the owner's setup steps, is in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along with npm publishing, signed releases, pre-releases and the other planned work.
+- **Who gets it:** the repos in [adopters.json](adopters.json) with `"enabled": true`, each with the branch to target, its visibility, its wave and how its pull requests merge (`auto-merge`, `merge-when-green` or `person`).
+  A repo the bot's GitHub App isn't installed on stays listed with `"enabled": false` and the reason.
+- **In waves:** the canary repo first, then the public repos, then the private ones; a wave starts only when the one before it succeeded, so a red canary stops the rollout.
+- **With the owner's approval:** every wave runs in the protected `rollout` environment, which holds the App's ID and key and waits for one click per wave.
+- **Per repo:** a token scoped to that one repo (`actions/create-github-app-token`, pinned by SHA), apply from the kit checked out at the tag (`apply.mjs --json`), `npm install --package-lock-only --ignore-scripts` for the new pin (with `allow-git=root`, so npm 12 accepts the kit as a git dependency), and the pull request: what apply added, changed and removed, the notes it left for a person, how the pull request merges, and the release notes.
+  A repo with its own `dependabot.yml` keeps it; apply's notes in the pull request say what to add.
+  A rerun updates the same pull request.
+- **Merging:** pull requests opened with an App token run CI like any other, and the `auto-merge.yml` apply writes lists the bot (`release-kit-bot-n8watkins[bot]`) next to Dependabot, so its update merges under the same policy.
+- **By hand:** Actions, Rollout, "Run workflow" takes a tag, an optional list of repos and a dry-run switch (on by default), which shows each pull request in the run summary and pushes nothing.
+
+Its design and the owner's setup steps are in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along with npm publishing, signed releases, pre-releases and the other planned work.
 
 ## What apply adds
 
@@ -153,6 +165,7 @@ If the repo ships files, add a `release:artifacts` script that writes them into 
 | `--repository <owner/repo>` | The upstream repo, the only one whose Release and train jobs run (default: `.release.json` `repository`, else the `upstream` or `origin` remote). |
 | `--visibility <public\|private>` | Whether the repo is public or private, when gh can't tell (default: what `gh repo view` says, else `.release.json` `visibility`). A private repo gets the private defaults. |
 | `--force` | Replace a workflow with the same name that the kit didn't write. |
+| `--json` | Print the report as JSON: the files added, changed and removed, what was done, and the notes (the rollout bot reads it). |
 
 The choices are saved in `.release.json`, so re-running apply to upgrade keeps them.
 
@@ -300,7 +313,7 @@ npm test        # unit tests, end-to-end runs against throwaway repos, workflow 
 The kit has no `prepare` script on purpose: npm runs a git dependency's `prepare` in every adopting repo, and npm 12 holds install scripts back with a warning.
 
 Release kit changes with `npm run release` like any other repo.
-When a release changes what apply writes (a new workflow, a workflow input, the hook), re-run `npx release-kit apply .` in each repo after the update lands.
+When a release changes what apply writes (a new workflow, a workflow input, the hook), the rollout bot opens the update in each enabled adopter once the owner approves the run; re-run `npx release-kit apply .` by hand in any other repo.
 
 ## License
 
