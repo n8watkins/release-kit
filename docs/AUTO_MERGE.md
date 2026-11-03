@@ -54,6 +54,8 @@ A pull request's own `pull_request` run uses the kit version it moves to, so for
    ```
 
 3. Dependabot's own pull requests run with a read-only token unless the workflow asks for more, which the example does (`contents: write` and `pull-requests: write`, for that one job).
+   The merge-when-green fallback also reads the pull request's checks, so the job asks for `checks: read` and `statuses: read` too: without them a private repo's token gets a 403 ("Resource not accessible by integration") and nothing merges.
+   An `auto-merge.yml` from before v2.5.2 lacks them: rerun `npx release-kit apply .`, or add the two lines by hand.
 
 The inputs:
 

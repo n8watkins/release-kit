@@ -426,6 +426,8 @@ jobs:
     permissions:
       contents: write # merge the pull request
       pull-requests: write # turn on auto-merge
+      checks: read # merge when green: read the checks on the pull request
+      statuses: read
     uses: ${KIT_REPO}/.github/workflows/auto-merge.yml@${ref}
 `
 }

@@ -43,7 +43,7 @@ test('workflows read by default and grant write only to the jobs that need it', 
     const text = read(file)
     assert.match(text, /^permissions:\n {2}contents: read\n\n/m, file)
     for (const [, block] of text.matchAll(/^ {4}permissions:\n((?: {6}.*\n)+)/gm)) {
-      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(?:(contents|actions|pull-requests|issues): write|(contents|pull-requests): read)(?: #.*)?$/, `${file}: ${line}`)
+      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(?:(contents|actions|pull-requests|issues): write|(contents|pull-requests|checks|statuses): read)(?: #.*)?$/, `${file}: ${line}`)
     }
   }
   assert.doesNotMatch(read('template/.github/workflows/commits.yml'), /: write/)
@@ -51,6 +51,15 @@ test('workflows read by default and grant write only to the jobs that need it', 
   for (const file of files) if (!/auto-merge\.yml$/.test(file)) assert.doesNotMatch(read(file), /pull-requests: write/, file)
   // Only the Direct push alarm opens issues.
   for (const file of files) if (!/direct-push\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
+})
+
+test('the auto-merge callers grant every permission the reusable job asks for', () => {
+  // A called workflow's job gets at most what the caller's job grants: a missing
+  // checks: read made merge when green fail with a 403 in private repos.
+  const perms = (text) => [...text.matchAll(/^ {4}permissions:\n((?: {6}.*\n)+)/gm)].flatMap(([, block]) => block.trim().split('\n').map((l) => l.trim().replace(/ #.*$/, '')))
+  const wanted = perms(read('.github/workflows/auto-merge.yml'))
+  assert.deepEqual(wanted.toSorted(), ['checks: read', 'contents: write', 'pull-requests: write', 'statuses: read'])
+  assert.deepEqual(perms(read('docs/examples/auto-merge.yml')).toSorted(), wanted.toSorted())
 })
 
 test('every job that runs on a runner has a timeout, so a hung step never runs for GitHub\'s default 6 hours', () => {

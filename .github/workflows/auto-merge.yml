@@ -13,6 +13,8 @@
 #       permissions:
 #         contents: write
 #         pull-requests: write
+#         checks: read
+#         statuses: read
 #       uses: n8watkins/release-kit/.github/workflows/auto-merge.yml@vX.Y.Z
 #
 # On pull_request it turns on GitHub's auto-merge, but only when the base
@@ -49,6 +51,8 @@ jobs:
     permissions:
       contents: write # merge the pull request
       pull-requests: write # turn on auto-merge
+      checks: read # merge when green: read the checks on the pull request
+      statuses: read
     steps:
       # The scripts from the same commit as this workflow file: the kit's at the
       # pinned ref when called from another repo, else the repo's own copy.
