@@ -17,7 +17,8 @@
 //   docs  Markdown, docs/, LICENSE, issue and pull request templates, and the
 //         .release.json "lanes.docs" globs
 //   kit   only the release-kit dev dependency (package.json and its lock
-//         entries), the kit's own workflows, hook and .release.json settings,
+//         entries), the kit's own workflows (auto-merge and the Direct push
+//         alarm included), hooks and .release.json settings,
 //         and .github/dependabot.yml
 //   deps  only devDependencies (package.json and lock entries npm marks
 //         "dev"), and none listed in .release.json "lanes.fullFor"
@@ -28,7 +29,7 @@ import { isMain } from './git.mjs'
 
 export const LANES = ['docs', 'kit', 'deps', 'full']
 const rank = (lane) => LANES.indexOf(lane)
-const KIT_WORKFLOWS = ['commits.yml', 'release.yml', 'release-train.yml', 'security.yml']
+const KIT_WORKFLOWS = ['auto-merge.yml', 'commits.yml', 'direct-push.yml', 'release.yml', 'release-train.yml', 'security.yml']
 const KIT_FILES = ['.github/dependabot.yml', '.githooks/commit-msg', '.husky/commit-msg', '.githooks/pre-push', '.husky/pre-push']
 const DOCS = ['**/*.md', '**/*.mdx', 'docs/**', 'LICENSE', 'LICENSE.*', '.github/ISSUE_TEMPLATE/**', '.github/PULL_REQUEST_TEMPLATE*', '.github/pull_request_template.md']
 

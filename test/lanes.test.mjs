@@ -100,6 +100,14 @@ test('classify: fullFor, the lanes settings, a workflow that only borrows the ki
   assert.equal(classify([{ path: '.github/dependabot.yml', base: 'a', head: 'b' }]).lane, 'kit')
   // The hooks apply writes, the pre-push guard included (v2.4.0 added it).
   for (const path of ['.githooks/commit-msg', '.githooks/pre-push', '.husky/pre-push']) assert.equal(classify([{ path, base: null, head: '# release-kit' }]).lane, 'kit', path)
+  // The auto-merge workflow and the Direct push alarm apply writes: added or re-pinned, they are kit files;
+  // a hand-copied auto-merge.yml without the marker is the repo's own.
+  for (const name of ['auto-merge.yml', 'direct-push.yml']) {
+    const path = `.github/workflows/${name}`
+    assert.equal(classify([{ path, base: null, head: '# release-kit: x\n' }]).lane, 'kit', `${name} added`)
+    assert.equal(classify([{ path, base: '# release-kit: x\n@v2.4.0\n', head: '# release-kit: x\n@v2.5.0\n' }]).lane, 'kit', `${name} re-pinned`)
+  }
+  assert.equal(classify([{ path: '.github/workflows/auto-merge.yml', base: 'name: Auto-merge\n', head: 'name: Auto-merge\n# v2\n' }]).lane, 'full')
 })
 
 test('globs match paths the way the docs lane needs', () => {
