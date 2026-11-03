@@ -159,7 +159,7 @@ v2.1.0's `security.yml` reached none of them that way.
 - PRs opened with an App token run CI normally, unlike PRs opened with `GITHUB_TOKEN`, and the auto-merge policy already accepts the bot's `release-kit/` branch (pass its login in the `bots` input).
 - Once the bot is live, apply stops writing the npm and github-actions Dependabot entries for the kit, so there is one source of kit PRs, not two.
 
-**Owner steps.**
+**Owner steps.** Done 2026-11-02: the App (ID 5590953) is installed on the eight adopters, and the `rollout` environment holds its ID and key. Only the workflow itself remains.
 
 1. Create the App at <https://github.com/settings/apps/new>:
    - GitHub App name: `release-kit bot (n8watkins)`; homepage URL: `https://github.com/n8watkins/release-kit`.
@@ -191,7 +191,12 @@ gh api -X PATCH repos/n8watkins/<repo> -f squash_merge_commit_title=PR_TITLE -f 
 
 ### Required checks on scribe, voicedock, portfolio-rank and tl-dw
 
-These four public repos have no ruleset today, so GitHub's auto-merge (#19) can't be used safely there; the auto-merge workflow skips them with a notice until they require checks.
+**Done 2026-11-02.**
+Each repo has a "main: required checks" ruleset and allows auto-merge.
+Required checks: scribe `check / check`, CLI, Desktop frontend, Desktop backend (Windows) and MCP server (Rust dependency audit stays optional, since a new advisory would block unrelated pull requests); voicedock `check / check` and test; portfolio-rank `check / check` and typecheck; tl-dw `check / check` and verify.
+When a repo adopts the CI lanes pattern, replace its list with `CI result`.
+The steps below stay as the recipe for new adopters.
+
 Rulesets are available on GitHub Free for public repos.
 
 1. Best: adopt the CI lanes pattern ([CI_LANES.md](CI_LANES.md)) so each repo has one always-running `CI result` job, then require only that.
