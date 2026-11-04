@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { KIT, attempt, tmp } from './helpers.mjs'
-import { checksState, classifyUpdate, decide, dependabotUpdates, dependabotVersions, kitVersion, semverChange, versionChange } from '../template/scripts/release-kit/automerge.mjs'
+import { alreadyMergeable, checksState, classifyUpdate, decide, dependabotUpdates, dependabotVersions, kitVersion, semverChange, versionChange } from '../template/scripts/release-kit/automerge.mjs'
 
 // A Dependabot commit message as Dependabot writes it (a grouped update).
 const DEPENDABOT = `build(deps): bump the release-kit group with 2 updates
@@ -269,4 +269,15 @@ test('classifyUpdate: without update-type, each dependency is read from its vers
   assert.equal(classify([meta(['x', 'patch'])], 'Bumps [x](u) from 1.0.0 to 2.0.0.').type, 'patch')
   assert.equal(classify([meta(['release-kit', 'minor'])], '', ['2.2.0', '2.0.1']).type, 'downgrade')
   assert.equal(classifyUpdate({ kit: ['2.1.0', '2.2.0'] }).type, 'minor')
+})
+
+test('a pull request whose required checks already passed is merged directly, since GitHub refuses auto-merge on it (voicedock, v2.7.0)', () => {
+  assert.equal(alreadyMergeable({ stderr: 'GraphQL: Pull request Pull request is in unstable status (enablePullRequestAutoMerge)\n' }), true)
+  assert.equal(alreadyMergeable(new Error('GraphQL: Pull request Pull request is in clean status (enablePullRequestAutoMerge)')), true)
+  assert.equal(alreadyMergeable({ stderr: 'GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)' }), false)
+  assert.equal(alreadyMergeable({ stderr: 'Pull request is in blocked status' }), false)
+  assert.equal(alreadyMergeable(undefined), false)
+  // main merges directly only after that refusal, still matching the head commit.
+  const source = readFileSync(join(KIT, 'template/scripts/release-kit/automerge.mjs'), 'utf8')
+  assert.match(source, /if \(!alreadyMergeable\(error\)\) throw error\n(?: {6}\/\/.*\n)* {6}gh\('pr', 'merge', String\(number\), '--repo', repoName, `--\$\{method\}`, '--match-head-commit', raw\.head\.sha\)/)
 })
