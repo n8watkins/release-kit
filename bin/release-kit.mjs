@@ -128,9 +128,13 @@ function staleFiles() {
   const dependabot = '.github/dependabot.yml'
   if (existsSync(dependabot)) {
     const text = readFileSync(dependabot, 'utf8')
-    if (text.startsWith('# release-kit:') && !/cooldown:\s*\n\s*exclude:[^\n]*release-kit/.test(text)) out.push(`${dependabot} lets Dependabot's cooldown propose older kit versions (a downgrade): rerun npx release-kit apply .`)
+    const kits = text.startsWith('# release-kit:')
+    const entries = (text.split(/^updates:$/m)[1] ?? '').split(/\n(?=\s*-\s*package-ecosystem:)/)
+    if (kits && !/cooldown:\s*\n\s*exclude:[^\n]*release-kit/.test(text)) out.push(`${dependabot} lets Dependabot's cooldown propose older kit versions (a downgrade): rerun npx release-kit apply .`)
     // Kit 2.3.0 to 2.3.2 put commit-message on the grouped updates, which Dependabot rejects.
-    if (text.startsWith('# release-kit:') && /^ {4}commit-message:/m.test(text.split(/^updates:$/m)[1] ?? '')) out.push(`${dependabot} is rejected by Dependabot (commit-message belongs on the multi-ecosystem group), so no kit updates arrive: rerun npx release-kit apply .`)
+    if (kits && entries.some((e) => /^ {4}multi-ecosystem-group:/m.test(e) && /^ {4}commit-message:/m.test(e))) out.push(`${dependabot} is rejected by Dependabot (commit-message belongs on the multi-ecosystem group), so no kit updates arrive: rerun npx release-kit apply .`)
+    // Kit 2.0.0 to 2.7.0 allowed only the kit, which Dependabot also applies to security updates.
+    if (kits && /^[ \t]+-?[ \t]*allow:/m.test(text)) out.push(`${dependabot} allows only the kit, so Dependabot opens no security updates and no updates for any other dependency: rerun npx release-kit apply .`)
   }
   return out
 }

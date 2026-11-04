@@ -509,17 +509,36 @@ function writeAutoMerge() {
 
 /**
  * Package mode: Dependabot keeps the kit current, the dev dependency (npm) and
- * the workflow pins (github-actions). A repo with its own dependabot.yml keeps
- * it; it needs both ecosystems listed, and nothing ignoring release-kit.
+ * the workflow pins (github-actions), and keeps every other dependency current
+ * too, with security updates. A repo with its own dependabot.yml keeps it; it
+ * needs both ecosystems listed, nothing ignoring release-kit, and no allow
+ * list (which would block security updates).
  */
 function writeDependabot() {
   const path = '.github/dependabot.yml'
-  const ours = `# release-kit: a new kit release arrives as one update PR (the dev dependency and the workflow pins).
-# One multi-ecosystem group, so the npm and github-actions updates land together:
-# separate PRs would leave package.json and the workflows on different kit versions.
-# No cooldown for the kit: Dependabot's default 3-day cooldown skips the newest
-# tags, and for a git dependency it then proposes the newest older tag, even
-# one below the installed version (a downgrade).
+  const ours = `# release-kit: Dependabot for this repo, written by npx release-kit apply.
+#
+# Two entries per ecosystem, both for the repo root:
+#
+# 1. The kit. A new kit release arrives as one update PR (the dev dependency and
+#    the workflow pins), daily. One multi-ecosystem group, so the npm and
+#    github-actions updates land together: separate PRs would leave package.json
+#    and the workflows on different kit versions. An entry in a multi-ecosystem
+#    group updates only what its patterns name, so it covers the kit alone.
+#    No cooldown for the kit: Dependabot's default 3-day cooldown skips the newest
+#    tags, and for a git dependency it then proposes the newest older tag, even
+#    one below the installed version (a downgrade).
+# 2. Everything else, weekly: patch and minor updates in one PR per ecosystem,
+#    which the kit's auto-merge merges once CI passes, and major updates in
+#    another, which waits for a person. A cooldown (3 days, and 7 for an npm
+#    major) lets a bad release be pulled before it reaches the repo. These
+#    entries ignore the kit, which the first ones update.
+#
+# Security updates use neither allow nor groups here, so Dependabot opens one for
+# any vulnerable dependency, direct or transitive, as soon as an alert appears
+# (no cooldown). Don't add an allow list: Dependabot applies it to security
+# updates too, and a dependency it leaves out gets none ("all versions were
+# ignored").
 version: 2
 multi-ecosystem-groups:
   release-kit:
@@ -533,19 +552,49 @@ updates:
   - package-ecosystem: npm
     directory: /
     patterns: ["release-kit"]
-    allow:
-      - dependency-name: release-kit
     multi-ecosystem-group: release-kit
     cooldown:
       exclude: ["release-kit"]
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: release-kit
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+      npm-major:
+        update-types: [major]
   - package-ecosystem: github-actions
     directory: /
     patterns: ["${KIT_REPO}*"]
-    allow:
-      - dependency-name: ${KIT_REPO}*
     multi-ecosystem-group: release-kit
     cooldown:
       exclude: ["${KIT_REPO}*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: ${KIT_REPO}*
+    # Days per semver level are npm-only: Dependabot rejects them for github-actions.
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+      actions-major:
+        update-types: [major]
 `
   if (exists(path)) {
     const current = read(path)
@@ -553,7 +602,7 @@ updates:
     if (current.startsWith('# release-kit:')) {
       if (current !== ours) {
         write(path, ours)
-        done.push(`${path} (one grouped PR per kit release)`)
+        done.push(`${path} (one grouped PR per kit release, weekly grouped updates and security updates for every other dependency)`)
       }
       return
     }
@@ -564,12 +613,22 @@ updates:
     const missing = ['npm', 'github-actions'].filter((e) => !atRoot(e))
     if (missing.length) skipped.push(`${path} has no ${missing.join(' or ')} entry for directory "/": add one so kit releases arrive as update PRs`)
     else if (/release-kit/.test(current)) skipped.push(`${path} mentions release-kit: make sure it doesn't ignore it`)
+    if (allowList(current)) skipped.push(`${path} is the repo's own and has an allow list: Dependabot applies it to security updates too, so a vulnerable dependency it leaves out gets no security update ("all versions were ignored"). Drop allow, and use ignore or groups to limit version updates`)
     if (!/cooldown:[\s\S]*exclude:[^\n]*release-kit/.test(current)) skipped.push(`${path} is the repo's own and doesn't exclude release-kit from Dependabot's default 3-day cooldown, which can propose a downgrade to an older kit tag: add cooldown: exclude: ["release-kit"] to the npm entry and ["${KIT_REPO}*"] to the github-actions entry`)
     if (!/multi-ecosystem-group:\s*["']?release-kit/.test(current)) skipped.push(`${path} is the repo's own, so kit releases arrive as separate npm and github-actions PRs: group them with a "release-kit" multi-ecosystem group (see README, "How upgrades reach your repos")`)
     return
   }
   write(path, ours)
   done.push(path)
+}
+
+/**
+ * Whether a dependabot.yml has an allow list on any entry. Dependabot applies
+ * allow to security updates too, so a dependency the list leaves out gets no
+ * security update ("all versions were ignored").
+ */
+function allowList(text) {
+  return /^[ \t]+-?[ \t]*allow:/m.test(text)
 }
 
 /**

@@ -22,6 +22,7 @@ Without it, `release:check` and CI tell you when a release added or changed a fi
    apply writes `.github/dependabot.yml` with a multi-ecosystem group named `release-kit`, so one pull request, `build(deps): ...`, moves the dev dependency and every workflow pin together, and the repo's CI tests it.
    The kit is excluded from Dependabot's 3-day cooldown, so the pull request shows up within a day of the release.
    A repo with its own `dependabot.yml` keeps it: apply leaves it alone and says what to add, and until then the kit arrives as separate npm and github-actions pull requests (or not at all, if that file doesn't cover them).
+   The same file keeps the repo's other dependencies current; see [Everything else Dependabot updates](#everything-else-dependabot-updates).
 2. **`auto-merge.yml` merges it.**
    apply writes this workflow in every repo, and it merges a patch or minor kit update once the required checks pass, or once every check passes in a repo that can't require checks (merge when green).
    A major update or a downgrade waits for you.
@@ -41,7 +42,7 @@ Without it, `release:check` and CI tell you when a release added or changed a fi
    - the installed kit is older than the newest release tag;
    - a workflow pins a different kit version than the one installed;
    - the files differ from what apply writes at the installed version: "release-kit vX.Y.Z adds or changes N files; run npx release-kit apply .", with each file;
-   - a file is missing a fix the kit knows about (a `release.yml` without the fork guard, a `dependabot.yml` without the cooldown exclusion);
+   - a file is missing a fix the kit knows about (a `release.yml` without the fork guard, a `dependabot.yml` without the cooldown exclusion, or one that allows only the kit and so blocks security updates);
    - and a few repo settings, like visibility and branch protection.
 
    So once Dependabot's update has landed, it tells you when that release added or changed a file.
@@ -53,6 +54,30 @@ Without it, `release:check` and CI tell you when a release added or changed a fi
    In a repo with [CI lanes](CI_LANES.md), a kit-only pull request runs `release-kit verify`, which warns about the same files with an annotation and a line in the job summary, "release-kit files are behind".
    It is a warning, not a failure, on purpose: Dependabot's pull request moves only the version and must still merge, and a failing check would also stop the merge-when-green fallback, which waits for every check.
    The rollout bot's pull request is apply's own output, so it shows no warning; in a repo without the bot, running apply and committing the result clears it.
+
+### Everything else Dependabot updates
+
+The `dependabot.yml` apply writes has two entries per ecosystem (npm and github-actions), both for the repo root.
+The first covers only the kit, in the `release-kit` group above.
+The second covers every other dependency:
+
+- **Version updates, weekly, in two pull requests per ecosystem.**
+  `npm-minor-patch` and `actions-minor-patch` hold the patch and minor updates, which `auto-merge.yml` merges once CI passes.
+  `npm-major` and `actions-major` hold the major updates, which wait for you.
+  Dependabot proposes each dependency's newest version, so a dependency with a new major is in the major pull request only, not also in the minor one at its newest minor.
+  Their commits read `build(deps): ...` (`build(deps-dev): ...` for a dev dependency), like the kit's.
+- **A cooldown:** a new release is proposed after 3 days, and a new npm major after 7 (Dependabot has no per-level cooldown for GitHub Actions), so a broken or malicious release has time to be pulled first.
+- **Security updates as soon as an alert appears**, one pull request per vulnerable dependency, direct or transitive, with no cooldown.
+  `auto-merge.yml` merges a patch or minor one; a major one waits for you.
+
+This matters for transitive vulnerabilities too.
+When a fix needs a new major of a transitive dependency (minimatch 11, say), Dependabot's security update can't force it, and the fix arrives only once the direct dependency that pulls it in releases a version that accepts it.
+The weekly version updates bring that release in, tested by CI like any other.
+
+The kit's files from 2.0.0 to 2.7.0 listed only the kit under `allow`.
+Dependabot applies `allow` to security updates too, so in those repos every security update failed with "all versions were ignored", and no other dependency got a version update.
+`npm run release:check` says so; rerun `npx release-kit apply .` to get the current file.
+A repo's own `dependabot.yml` with an `allow` list has the same problem, and apply says so.
 
 ## With the App
 
