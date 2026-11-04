@@ -180,12 +180,12 @@ export function decide({ pr, update, repo, event, fallback = true, bots = ['depe
     if (!repo.requiredChecks) {
       return skip(`the base branch requires no status checks, so auto-merge would merge before CI finishes${fallback ? '; the merge-when-green fallback merges it once every check passes' : ''}`)
     }
-    if (!repo.allowAutoMerge) return skip('the repo does not allow auto-merge: gh api -X PATCH repos/{owner}/{repo} -F allow_auto_merge=true')
+    if (!repo.allowAutoMerge) return skip(`the repo does not allow auto-merge (allow it: gh api -X PATCH repos/{owner}/{repo} -F allow_auto_merge=true)${fallback ? '; the merge-when-green fallback merges it once every check passes' : ''}`)
     if (pr.autoMerge) return skip('auto-merge is already on')
     return { action: 'enable', reason: `${update.what} is a ${update.type} update; GitHub merges it once the required checks pass` }
   }
   if (event === 'workflow_run') {
-    if (repo.requiredChecks) return skip('the base branch requires checks, so GitHub auto-merge handles it')
+    if (repo.requiredChecks && repo.allowAutoMerge) return skip('the base branch requires checks, so GitHub auto-merge handles it')
     if (!fallback) return skip('the merge-when-green fallback is off')
     if (checks === 'pending') return skip('checks are still running; the next completed workflow tries again')
     if (checks === 'red') return skip('a check failed')
@@ -277,7 +277,7 @@ function main() {
   const repo = { requiredChecks, allowAutoMerge: Boolean(raw.base.repo?.allow_auto_merge ?? tryApi(`repos/${repoName}`, {}).allow_auto_merge) }
 
   let checks
-  if (event === 'workflow_run' && !requiredChecks && fallback) {
+  if (event === 'workflow_run' && !(requiredChecks && repo.allowAutoMerge) && fallback) {
     const runs = api(`repos/${repoName}/commits/${raw.head.sha}/check-runs?per_page=100`).check_runs
     const statuses = api(`repos/${repoName}/commits/${raw.head.sha}/status`)
     checks = checksState(runs, statuses, ['Auto-merge', 'auto-merge / Auto-merge'])

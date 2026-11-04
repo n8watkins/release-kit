@@ -4,8 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BRANCH, filesFromStatus, linkReleaseNotes, parseAdopters, planWaves, prBody, prTitle } from '../scripts/rollout.mjs'
+import { BRANCH, filesFromStatus, linkReleaseNotes, parseAdopters, planWaves, prBody, prTitle, updateLock } from '../scripts/rollout.mjs'
 import { KIT, attempt, makeRepo, run, tmp } from './helpers.mjs'
+import { execFileSync } from 'node:child_process'
 
 const read = (path) => readFileSync(join(KIT, path), 'utf8')
 const adopter = (over = {}) => ({ repo: 'acme/app', branch: 'main', visibility: 'public', wave: 'public', merge: 'auto-merge', enabled: true, ...over })
@@ -242,4 +243,34 @@ test('a release the Release workflow publishes starts one real rollout, in this 
     assert.equal(started, '', JSON.stringify(over))
     assert.match(notice, why)
   }
+})
+
+test("the lock file moves to the kit at the new tag, not only package.json's pin (v2.6.0 rollout)", () => {
+  // The kit as a git dependency with two tags, served from disk.
+  const dir = tmp('rollout-lock')
+  const kit = join(dir, 'kit')
+  mkdirSync(kit)
+  run(kit, 'git', ['init', '-q', '-b', 'main'])
+  for (const version of ['1.0.0', '1.1.0']) {
+    writeFileSync(join(kit, 'package.json'), JSON.stringify({ name: 'release-kit', version }))
+    run(kit, 'git', ['add', '-A'])
+    run(kit, 'git', ['commit', '-q', '-m', version])
+    run(kit, 'git', ['tag', `v${version}`])
+  }
+  const app = join(dir, 'app')
+  mkdirSync(app)
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', npm_config_cache: join(dir, 'npm-cache') }
+  const manifest = (tag) => `{\n    "name": "app",\n    "version": "1.0.0",\n    "devDependencies": {\n        "release-kit": "git+file://${kit}#${tag}"\n    }\n}\n`
+  writeFileSync(join(app, 'package.json'), manifest('v1.0.0'))
+  execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: app, env: { ...env, npm_config_allow_git: 'root' }, stdio: 'ignore' })
+  const locked = () => JSON.parse(readFileSync(join(app, 'package-lock.json'), 'utf8')).packages['node_modules/release-kit'].version
+  assert.equal(locked(), '1.0.0')
+
+  // apply moves the pin; npm 10 and 11 alone would keep the lock on 1.0.0.
+  writeFileSync(join(app, 'package.json'), manifest('v1.1.0'))
+  updateLock(app, 'v1.1.0', env)
+  assert.equal(locked(), '1.1.0')
+  assert.equal(readFileSync(join(app, 'package.json'), 'utf8'), manifest('v1.1.0'), "package.json stays apply's, byte for byte")
+  // A lock that still doesn't match the tag stops the rollout for that repo.
+  assert.throws(() => updateLock(app, 'v1.2.0', env), /lock file has release-kit 1.1.0 after npm install, not v1.2.0/)
 })
