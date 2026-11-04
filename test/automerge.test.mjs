@@ -70,7 +70,11 @@ test('decide: auto-merge for patch and minor updates where checks are required, 
 
 test('decide: no required checks means no GitHub auto-merge; the fallback merges when green instead', () => {
   assert.match(decide({ pr: pr(), update: minor, repo: freePrivate, event: 'pull_request' }).reason, /requires no status checks, so auto-merge would merge before CI finishes; the merge-when-green fallback/)
-  assert.match(decide({ pr: pr(), update: minor, repo: { requiredChecks: true, allowAutoMerge: false }, event: 'pull_request' }).reason, /allow_auto_merge=true/)
+  // Required checks but auto-merge not allowed (open-ping#101): the fallback merges it when green.
+  const noAutoMerge = { requiredChecks: true, allowAutoMerge: false }
+  assert.match(decide({ pr: pr(), update: minor, repo: noAutoMerge, event: 'pull_request' }).reason, /allow_auto_merge=true\); the merge-when-green fallback/)
+  assert.equal(decide({ pr: pr(), update: minor, repo: noAutoMerge, event: 'workflow_run', checks: 'green' }).action, 'merge')
+  assert.match(decide({ pr: pr(), update: minor, repo: noAutoMerge, event: 'workflow_run', checks: 'pending' }).reason, /still running/)
   assert.equal(decide({ pr: pr(), update: minor, repo: freePrivate, event: 'workflow_run', checks: 'green' }).action, 'merge')
   assert.match(decide({ pr: pr(), update: minor, repo: freePrivate, event: 'workflow_run', checks: 'pending' }).reason, /still running/)
   assert.match(decide({ pr: pr(), update: minor, repo: freePrivate, event: 'workflow_run', checks: 'red' }).reason, /a check failed/)

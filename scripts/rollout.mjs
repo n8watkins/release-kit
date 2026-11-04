@@ -179,6 +179,30 @@ function plan(opts) {
   console.log(JSON.stringify(waves, null, 2))
 }
 
+/**
+ * The lock file, for the kit pin apply just wrote. npm 10 and 11 keep a git
+ * dependency's locked commit when only its tag changes in package.json, so a
+ * plain `npm install --package-lock-only` left v2.6.0's rollout locked to the
+ * old kit and Dependabot opened a lock-only pull request after it. Naming the
+ * kit makes npm resolve it again. package.json stays apply's, byte for byte.
+ * npm 12 refuses git dependencies (EALLOWGIT) unless allowed; apply writes
+ * allow-git=root to .npmrc, and the environment says the same for npm runs
+ * that don't read it. No scripts run.
+ */
+export function updateLock(target, tag, env = process.env) {
+  const manifest = join(target, 'package.json')
+  const before = readFileSync(manifest, 'utf8')
+  const pkg = JSON.parse(before)
+  const spec = pkg.devDependencies?.['release-kit'] ?? pkg.dependencies?.['release-kit']
+  const args = ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund']
+  if (spec) args.push(`release-kit@${spec}`)
+  execFileSync('npm', args, { cwd: target, stdio: ['ignore', 'inherit', 'inherit'], env: { ...env, npm_config_allow_git: 'root' } })
+  writeFileSync(manifest, before)
+  if (!spec) return
+  const locked = JSON.parse(readFileSync(join(target, 'package-lock.json'), 'utf8')).packages?.['node_modules/release-kit']?.version
+  if (locked !== tag.replace(/^v/, '')) throw new Error(`the lock file has release-kit ${locked ?? '(none)'} after npm install, not ${tag}`)
+}
+
 function update(opts) {
   const adopter = JSON.parse(opts.adopter ?? 'null')
   if (!adopter || !SLUG.test(adopter.repo ?? '')) throw new Error('--adopter must be one adopter from the plan, as JSON')
@@ -205,13 +229,8 @@ function update(opts) {
   const notes = report?.notes ?? applied.stdout.split('\n').filter((l) => l.startsWith('  ! ')).map((l) => l.slice(4))
   console.log(report ? JSON.stringify(report, null, 2) : applied.stdout)
 
-  // The lock file, for the new kit pin. npm 12 refuses git dependencies
-  // (EALLOWGIT) unless allowed; apply writes allow-git=root to .npmrc, and the
-  // environment says the same for npm runs that don't read it. No scripts run.
   const config = existsSync(join(target, '.release.json')) ? JSON.parse(readFileSync(join(target, '.release.json'), 'utf8')) : {}
-  if ((config.workflows ?? 'package') === 'package' && existsSync(join(target, 'package-lock.json'))) {
-    sh('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], { stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, npm_config_allow_git: 'root' } })
-  }
+  if ((config.workflows ?? 'package') === 'package' && existsSync(join(target, 'package-lock.json'))) updateLock(target, opts.tag)
 
   const status = sh('git', ['status', '--porcelain', '--untracked-files=all'])
   const files = filesFromStatus(status)

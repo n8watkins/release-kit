@@ -26,14 +26,14 @@ Without a required check it merges as soon as it is turned on, before CI has fin
 | The repo | What happens |
 |---|---|
 | Requires status checks and allows auto-merge | On `pull_request`, auto-merge is turned on; GitHub merges once the required checks pass |
-| Requires status checks, auto-merge not allowed | A notice with the command to allow it: `gh api -X PATCH repos/{owner}/{repo} -F allow_auto_merge=true` |
+| Requires status checks, auto-merge not allowed | A notice with the command to allow it, `gh api -X PATCH repos/{owner}/{repo} -F allow_auto_merge=true`; until then the merge-when-green fallback merges it |
 | Requires no status checks | A notice on `pull_request`; the merge-when-green fallback merges it instead |
 
 ### Merge when green, for repos that can't require checks
 
 A private repo on GitHub Free has no rulesets and no branch protection, so it can't require checks and GitHub's auto-merge can't be used safely.
 (The other free safeguards for such repos, the pre-push guard and the Direct push alarm, are in [PRIVATE_REPOS.md](PRIVATE_REPOS.md); apply writes this workflow for a private repo by itself.)
-For such repos the same workflow runs on `workflow_run`: each time one of the repo's pull request workflows finishes, it looks at every check on the pull request's head commit, and merges (with `--match-head-commit`, so a newer push is never merged unchecked) only when all of them have finished and passed.
+For such repos, and for a repo that requires checks but doesn't allow auto-merge, the same workflow runs on `workflow_run`: each time one of the repo's pull request workflows finishes, it looks at every check on the pull request's head commit, and merges (with `--match-head-commit`, so a newer push is never merged unchecked) only when all of them have finished and passed.
 It reacts to finished workflows instead of polling, so it costs one short job per finished workflow, not a job that waits.
 List every workflow that runs on pull requests under `workflow_run`, so a check that finishes last still triggers a look.
 Turn it off with `fallback: false`.

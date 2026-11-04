@@ -33,7 +33,7 @@
       "wave": "public",
       "merge": "merge-when-green",
       "enabled": true,
-      "note": "Requires no checks and doesn't allow auto-merge, so the merge-when-green fallback merges once auto-merge.yml is on main."
+      "note": "Requires checks but doesn't allow auto-merge, so the merge-when-green fallback merges once every check passes."
     },
     {
       "repo": "n8watkins/scribe",
