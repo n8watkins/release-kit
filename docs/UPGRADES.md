@@ -58,6 +58,10 @@ Without it, `release:check` and CI tell you when a release added or changed a fi
 
 On every published release (pre-releases are skipped), [`.github/workflows/rollout.yml`](../.github/workflows/rollout.yml) in release-kit does step 3 for you:
 
+- **When:** on its own, once a release is published.
+  The Release workflow publishes with the workflow's own token, and GitHub starts no workflow from that release event, so [`rollout-start.yml`](../.github/workflows/rollout-start.yml) starts the rollout instead, for real, after a Release run that published a release.
+  A release a person publishes starts it through the release event.
+  A tag that already had a real rollout gets no second one; start another by hand if you want it.
 - **Who:** every repo in [adopters.json](../adopters.json) with `"enabled": true`.
 - **In waves:** the canary repo, then the public repos, then the private ones.
   A wave starts only when every repo in the waves before it succeeded, so a red canary stops the rollout.
