@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.6.0 - 2026-11-03
+
+### New
+
+- Kit updates that add or change files now arrive as one pull request in each repo after a release, from the rollout bot.
+- Releases bump pyproject.toml and uv.lock, and any file through a version pattern ([#51](https://github.com/n8watkins/release-kit/pull/51))
+- Release:check and CI say when a kit update adds or changes files you haven't applied ([#57](https://github.com/n8watkins/release-kit/pull/57))
+
+### Fixed
+
+- Rerunning apply no longer replaces a repo's own workflow that calls release-kit, or switches off hooks a prepare script sets up.
+- Auto-merge reads the versions a Dependabot pull request names when its update-type is missing ([#48](https://github.com/n8watkins/release-kit/pull/48))
+- A release pull request waits for the checks that gate the merge and ignores the rest ([#53](https://github.com/n8watkins/release-kit/pull/53))
+
 ## 2.5.2 - 2026-11-02
 
 ### Fixed
