@@ -171,6 +171,24 @@
       "reason": "Needs the App installed (joined the kit 2026-11-03). Its own dependabot.yml and zizmor config."
     },
     {
+      "repo": "n8watkins/devguard",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed (joined the kit 2026-11-04). Its own release.yml."
+    },
+    {
+      "repo": "n8watkins/pass-env",
+      "branch": "main",
+      "visibility": "public",
+      "wave": "public",
+      "merge": "auto-merge",
+      "enabled": false,
+      "reason": "Needs the App installed (joined the kit 2026-11-04). Its own release.yml."
+    },
+    {
       "repo": "n8watkins/pr-post-private",
       "branch": "main",
       "visibility": "private",
