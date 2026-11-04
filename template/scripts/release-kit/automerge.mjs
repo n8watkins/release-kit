@@ -195,6 +195,15 @@ export function decide({ pr, update, repo, event, fallback = true, bots = ['depe
 }
 
 /**
+ * Whether GitHub refused to turn on auto-merge because the pull request can
+ * already merge: its required checks passed before this job ran, so it is in
+ * "clean" status, or "unstable" while checks that aren't required (this job
+ * among them) are still running. A direct merge then does what auto-merge
+ * would have done; GitHub still refuses it if a required check hasn't passed.
+ */
+export const alreadyMergeable = (error) => /is in (clean|unstable|has_hooks) status/i.test(String(error?.stderr ?? error?.message ?? error ?? ''))
+
+/**
  * Whether every check on a commit has finished and passed. `runs` are check
  * runs ({ name, status, conclusion }), `statuses` the combined commit status
  * ({ state, total_count }); `ignore` names this workflow's own job.
@@ -285,8 +294,15 @@ function main() {
 
   const decision = decide({ pr, update, repo, event, fallback, bots, checks })
   if (decision.action === 'enable') {
-    gh('pr', 'merge', String(number), '--repo', repoName, '--auto', `--${method}`, '--match-head-commit', raw.head.sha)
-    notice(`auto-merge on for #${number}: ${decision.reason}`, update.parts)
+    try {
+      gh('pr', 'merge', String(number), '--repo', repoName, '--auto', `--${method}`, '--match-head-commit', raw.head.sha)
+      notice(`auto-merge on for #${number}: ${decision.reason}`, update.parts)
+    } catch (error) {
+      if (!alreadyMergeable(error)) throw error
+      // voicedock, v2.7.0 rollout: the required checks had already passed.
+      gh('pr', 'merge', String(number), '--repo', repoName, `--${method}`, '--match-head-commit', raw.head.sha)
+      notice(`merged #${number}: its required checks had already passed, so GitHub would not turn on auto-merge; ${decision.reason}`, update.parts)
+    }
   } else if (decision.action === 'merge') {
     gh('pr', 'merge', String(number), '--repo', repoName, `--${method}`, '--match-head-commit', raw.head.sha)
     notice(`merged #${number}: ${decision.reason}`, update.parts)
