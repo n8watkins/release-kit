@@ -496,6 +496,10 @@ test('check warns about files an older apply wrote without the fork guard or the
   assert.doesNotMatch(stale, /release-train\.yml has no fork guard/)
   quiet(KIT, 'node', ['apply.mjs', repo])
   assert.doesNotMatch(check(), /fork guard|cooldown/)
+  // A repo's own release.yml (scribe's Tauri build) that runs the kit is the
+  // repo's: apply keeps it, so check doesn't ask for the kit's fork guard in it.
+  writeFileSync(join(repo, '.github/workflows/release.yml'), 'name: Release\non:\n  push:\n    tags: [v*]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npx release-kit notes\n')
+  assert.doesNotMatch(check(), /fork guard/)
 })
 
 test('apply installs the pre-push guard beside the commit-msg hook, and keeps a pre-push hook of the repo\'s own', async () => {
