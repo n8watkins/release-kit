@@ -111,14 +111,19 @@ function pinMismatches(installed) {
   return out
 }
 
-/** Files an older apply wrote that miss a fix a rerun of apply brings. */
+/**
+ * Files an older apply wrote that miss a fix a rerun of apply brings. A
+ * workflow counts only when apply owns it, by apply's own rule: it starts with
+ * a "# release-kit" comment. A repo's own release.yml (a Tauri build, say)
+ * that only mentions the kit is the repo's, and apply never touches it.
+ */
 function staleFiles() {
   const out = []
   for (const name of ['release.yml', 'release-train.yml']) {
     const path = `.github/workflows/${name}`
     if (!existsSync(path)) continue
     const text = readFileSync(path, 'utf8')
-    if (text.includes('release-kit') && !text.includes('# release-kit: fork guard')) out.push(`${path} has no fork guard, so a fork that pushes a tag publishes a release: rerun npx release-kit apply .`)
+    if (text.startsWith('# release-kit') && !text.includes('# release-kit: fork guard')) out.push(`${path} has no fork guard, so a fork that pushes a tag publishes a release: rerun npx release-kit apply .`)
   }
   const dependabot = '.github/dependabot.yml'
   if (existsSync(dependabot)) {
