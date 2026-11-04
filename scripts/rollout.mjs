@@ -184,7 +184,10 @@ export function isMajorRelease(tag, tags = []) {
  */
 export function mergeState({ tag, adopter, pin, pr, checks, failed = [] }) {
   const version = tag.replace(/^v/, '')
-  if (pin === version) return { state: 'merged', why: `${adopter.branch} pins release-kit ${tag}${pr?.merged ? ` (${pr.url} merged)` : ''}` }
+  // An open update waits even when the pin is already there: Dependabot's kit
+  // update can move the pin first, and the bot's pull request still carries
+  // the rest (portfolio-rank, v2.8.0 rollout).
+  if (pin === version && pr?.state !== 'open') return { state: 'merged', why: `${adopter.branch} pins release-kit ${tag}${pr?.merged ? ` (${pr.url} merged)` : ''}` }
   if (!pr) return { state: 'failed', why: `no update pull request for ${tag}, and ${adopter.branch} pins ${pin ? `release-kit ${pin}` : 'no release-kit version'}` }
   if (pr.merged) return { state: 'pending', why: `${pr.url} merged; waiting for ${adopter.branch} to pin ${tag}` }
   if (pr.state !== 'open') return { state: 'failed', why: `${pr.url} was closed without merging` }

@@ -101,6 +101,10 @@ test('the canary gate passes once the branch pins the tag, and fails on a closed
   // Merged: the branch pins the tag, with or without a pull request (apply had nothing to change).
   assert.equal(mergeState({ ...base, pin: '2.7.2', pr: pr({ state: 'closed', merged: true }) }).state, 'merged')
   assert.equal(mergeState({ ...base, pin: '2.7.2', pr: null }).state, 'merged')
+  assert.equal(mergeState({ ...base, pin: '2.7.2', pr: pr({ state: 'closed' }) }).state, 'merged')
+  // Dependabot moved the pin first, but the bot's pull request (the lock, apply's files) is still open.
+  assert.equal(mergeState({ ...base, pin: '2.7.2', pr: pr(), checks: 'pending' }).state, 'pending')
+  assert.equal(mergeState({ ...base, pin: '2.7.2', pr: pr(), checks: 'red' }).state, 'failed')
   // Still going: open and checks running, green but not merged yet, or unreadable checks.
   for (const checks of ['pending', 'green', null]) assert.equal(mergeState({ ...base, pin: '2.7.1', pr: pr(), checks }).state, 'pending', String(checks))
   // Merged a moment ago, the branch not read yet.
@@ -134,9 +138,13 @@ test('wait-merge reads the canary through gh: passes on the pin, stops on a red 
   const runs = (conclusion) => JSON.stringify({ check_runs: [{ name: 'CI result', status: 'completed', conclusion }, { name: 'auto-merge / Auto-merge', status: 'completed', conclusion: 'success' }] })
   const go = (over) => attempt(KIT, 'node', ['scripts/rollout.mjs', 'wait-merge', '--adopter', JSON.stringify({ repo: 'acme/canary', owner: 'acme', name: 'canary', branch: 'main' }), '--tag', 'v2.7.2', '--timeout-minutes', '0', '--interval-seconds', '0'],
     { PATH: `${dir}:${process.env.PATH}`, FAKE_PKG: pkg('2.7.1'), FAKE_PULLS: pulls, FAKE_RUNS: runs('success'), ...over })
-  const merged = go({ FAKE_PKG: pkg('2.7.2') })
+  const merged = go({ FAKE_PKG: pkg('2.7.2'), FAKE_PULLS: pulls.replace('"state":"open","merged_at":null', '"state":"closed","merged_at":"2026-11-04T00:00:00Z"') })
   assert.equal(merged.status, 0, merged.stderr)
-  assert.match(merged.stdout, /acme\/canary: main pins release-kit v2\.7\.2/)
+  assert.match(merged.stdout, /acme\/canary: main pins release-kit v2\.7\.2 \(https:\/\/github\.com\/acme\/canary\/pull\/4 merged\)/)
+  // The pin alone (Dependabot moved it) doesn't pass while the bot's pull request is open.
+  const early = go({ FAKE_PKG: pkg('2.7.2') })
+  assert.equal(early.status, 1)
+  assert.match(early.stderr, /not merged after 0 minutes \(https:\/\/github\.com\/acme\/canary\/pull\/4 is open, checks green\)/)
   const red = go({ FAKE_RUNS: runs('failure') })
   assert.equal(red.status, 1)
   assert.match(red.stderr, /acme\/canary: a check failed on https:\/\/github\.com\/acme\/canary\/pull\/4: CI result/)
