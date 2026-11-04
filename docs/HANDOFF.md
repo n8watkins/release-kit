@@ -26,7 +26,7 @@ The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the p
 - The bot moved the package.json pin but left `package-lock.json` on the old kit commit (npm 10 keeps a git dependency's locked commit when only its tag changes).
   Dependabot then opened a lock-only "Bump the release-kit group" pull request in seven repos, and auto-merge refused each one ("pinned to commit SHAs with no version").
   Six were merged by hand on 2026-11-04 (dev-portfolio #54, n8builds-admin #36, tl-dw #32, open-ping #102, portfolio-rank #30, voicedock #27); n8builds-web #149 merges once its E2E finishes.
-  scribe has its own `dependabot.yml` and got no such pull request, so its lock still needs the same fix by hand.
+  scribe has its own `dependabot.yml` and got no such pull request; scribe #92 fixes its lock by hand.
   On main, the rollout names the kit to npm and fails a repo whose lock doesn't end up on the tag.
 
 ### Unreleased on main
@@ -50,6 +50,5 @@ The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the p
 ### Next
 
 1. Cut the next release when the owner asks; its rollout is the first with the lock fix, and needs the owner's approval for each wave.
-2. Fix scribe's lock (`npm install --package-lock-only release-kit@github:n8watkins/release-kit#v2.6.0` with `npm_config_allow_git=root`) by pull request.
-3. Install the App on the disabled adopters and enable them in `adopters.json`, then drop the kit's Dependabot entries (open problem 2).
-4. Fix open problem 1, then re-run `apply` in tl-dw and voicedock.
+2. Install the App on the disabled adopters and enable them in `adopters.json`, then drop the kit's Dependabot entries (open problem 2).
+3. Fix open problem 1, then re-run `apply` in tl-dw and voicedock.
