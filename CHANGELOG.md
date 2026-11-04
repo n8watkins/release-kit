@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.0 - 2026-11-04
+
+### Fixed
+
+- The rollout bot's waves can read the App key again, so a real rollout no longer fails at the first adopter.
+- Find a uv.lock's own entry by its source when the name is stale ([#61](https://github.com/n8watkins/release-kit/pull/61))
+- Flag a missing fork guard only in workflows apply owns ([#62](https://github.com/n8watkins/release-kit/pull/62))
+- Kit updates merge on their own after a rollout ([#64](https://github.com/n8watkins/release-kit/pull/64))
+
 ## 2.6.0 - 2026-11-03
 
 ### New
