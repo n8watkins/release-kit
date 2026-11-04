@@ -196,3 +196,50 @@ test('the rollout workflow runs the waves in order, each in the protected enviro
   // apply comes from the tag being rolled out.
   assert.match(wave, /ref: refs\/tags\/\$\{\{ inputs\.tag \}\}\n {10}path: kit/)
 })
+
+test('a release the Release workflow publishes starts one real rollout, in this repo only', () => {
+  const start = read('.github/workflows/rollout-start.yml')
+  const main = read('.github/workflows/rollout.yml')
+  assert.match(start, /^ {2}workflow_run:\n {4}workflows: \[Release\]\n {4}types: \[completed\]$/m)
+  assert.match(start, /if: github\.repository == 'n8watkins\/release-kit' && github\.event\.workflow_run\.conclusion == 'success'/)
+  assert.match(start, /^ {6}actions: write/m)
+  // release.yml is also the reusable workflow adopters call: it must not ask for actions: write.
+  assert.doesNotMatch(read('.github/workflows/release.yml'), /actions: write|rollout/)
+  // The run name carries the tag, so a tag that already rolled out is found.
+  assert.match(main, /^run-name: Rollout \$\{\{ inputs\.tag \|\| github\.event\.release\.tag_name \}\}\$\{\{ inputs\.dry_run && ' \(dry run\)' \|\| '' \}\}$/m)
+
+  // The step's script, run against a stand-in gh.
+  const lines = start.split('\n')
+  const at = lines.findIndex((line) => /^ {8}run: \|$/.test(line))
+  const script = lines.slice(at + 1).filter((line) => line.trim()).map((line) => line.slice(10)).join('\n')
+  const dir = tmp('rollout-start')
+  writeFileSync(join(dir, 'gh'), [
+    '#!/bin/sh',
+    'case "$1 $2" in',
+    '  "api "*) echo "$FAKE_PUBLISHED" ;;',
+    '  "release view") echo "$FAKE_KIND" ;;',
+    '  "run list") printf "%b" "$FAKE_TITLES" ;;',
+    '  "workflow run") echo "$*" >> "$FAKE_LOG" ;;',
+    'esac',
+  ].join('\n'), { mode: 0o755 })
+  const go = (over) => {
+    const log = join(dir, `log-${Math.random()}`)
+    writeFileSync(log, '')
+    const env = { PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'n8watkins/release-kit', RUN_ID: '1', TAG: 'v2.7.0', FAKE_PUBLISHED: '1', FAKE_KIND: 'release', FAKE_TITLES: 'Rollout v2.6.0\\nRollout v2.7.0 (dry run)\\n', FAKE_LOG: log, ...over }
+    const result = attempt(dir, 'sh', ['-ec', script], env)
+    assert.equal(result.status, 0, result.stderr)
+    return { started: readFileSync(log, 'utf8').trim(), notice: result.stdout }
+  }
+  assert.equal(go({}).started, 'workflow run rollout.yml -R n8watkins/release-kit -f tag=v2.7.0 -f dry_run=false')
+  for (const [over, why] of [
+    [{ TAG: 'main' }, /not a release tag/],
+    [{ TAG: 'v2.7.0-rc.1' }, /not a release tag/],
+    [{ FAKE_PUBLISHED: '0' }, /published no release/],
+    [{ FAKE_KIND: 'pre-release' }, /is a pre-release/],
+    [{ FAKE_TITLES: 'Rollout v2.7.0\\n' }, /already has a rollout/],
+  ]) {
+    const { started, notice } = go(over)
+    assert.equal(started, '', JSON.stringify(over))
+    assert.match(notice, why)
+  }
+})

@@ -204,17 +204,22 @@ if (!hadConfig) {
   // A Python project's pyproject.toml ([project] version), and its uv.lock.
   const python = ['pyproject.toml', 'uv.lock']
   const candidates = [...manifests, ...tauri, 'app/package.json', 'app/package-lock.json', ...python]
-  config.versionFiles = candidates.filter((p) => {
+  config.versionFiles = candidates.filter(carriesVersion)
+  done.push(`.release.json (versionFiles: ${config.versionFiles.join(', ') || 'none'})`)
+  function carriesVersion(p) {
     // A subfolder's package files count only beside a Tauri app there.
     if (p.startsWith('app/package') && !existsSync(join(repo, 'app/src-tauri/tauri.conf.json'))) return false
+    // A uv.lock beside a pyproject.toml that carries the version is listed
+    // whenever it is there, so a release bumps both; one apply can't read
+    // gets its own warning below instead of being left out.
+    if (p === 'uv.lock') return existsSync(join(repo, p)) && carriesVersion('pyproject.toml')
     try {
       if (manifests.includes(p) && !('manifest_version' in JSON.parse(read(p)))) return false
       return typeof readVersion(join(repo, p)) === 'string'
     } catch {
       return false
     }
-  })
-  done.push(`.release.json (versionFiles: ${config.versionFiles.join(', ') || 'none'})`)
+  }
 }
 config.versionFiles ??= []
 // Every entry must be well formed, and every version file must say what
