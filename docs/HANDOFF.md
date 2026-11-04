@@ -29,6 +29,17 @@ The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the p
   scribe has its own `dependabot.yml` and got no such pull request; scribe #92 fixes its lock by hand.
   On main, the rollout names the kit to npm and fails a repo whose lock doesn't end up on the tag.
 
+### Dependabot for every dependency (2026-11-04)
+
+- The kit's `dependabot.yml` from 2.0.0 to 2.7.0 had `allow: release-kit`, which Dependabot also applies to security updates: tube-vault (minimatch) and cutelyaskme (glob, minimatch) had every security update fail with "all versions were ignored", and no adopter got version updates for anything but the kit.
+- The fix writes two entries per ecosystem: the kit-only entry in the `release-kit` multi-ecosystem group (unchanged behavior), and a weekly entry for everything else with `*-minor-patch` and `*-major` groups, a cooldown and `ignore: release-kit`.
+- Learned in `n8watkins/release-kit-sandbox` (PRs #3 to #12 there), from the job definitions in the Dependabot Updates logs:
+  - An entry in a multi-ecosystem group updates only what its `patterns` name; its own `groups` and `schedule` are never used (dependabot-core skips ungrouped dependencies in a multi-ecosystem job).
+  - A second entry for the same ecosystem and directory, outside the group, is accepted and gets its own weekly job.
+  - Security jobs take the first npm entry's settings (the kit's, with no allow and no ignore), carry no groups, and open one PR per vulnerable dependency.
+  - Dependabot rejects `cooldown.semver-*-days` for github-actions; the SchemaStore schema doesn't catch it, only Dependabot's `.github/dependabot.yml` check on the default branch does.
+- The sandbox's own `auto-merge.yml` is still the v2.3.3 one without `checks: read`, so its merge-when-green fallback fails with a 403; re-apply the kit there before relying on it.
+
 ### Unreleased on main
 
 - #59: the App key reaches every rollout wave.

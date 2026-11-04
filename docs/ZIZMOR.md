@@ -7,7 +7,7 @@ On a repo on the kit it reports these findings in the files apply writes, all ex
 |---|---|---|
 | `unpinned-uses` | `release.yml`, `commits.yml`, `security.yml`, `direct-push.yml`, `auto-merge.yml` (and `release-train.yml`) | In package and reusable mode they call the kit's workflows at a version tag, like `n8watkins/release-kit/.github/workflows/release.yml@v2.5.2`, and zizmor wants a commit SHA. |
 | `dangerous-triggers` | `auto-merge.yml` | The merge-when-green fallback runs on `workflow_run`. |
-| `dependabot-cooldown` (a warning) | `.github/dependabot.yml`, package mode | The kit's Dependabot entries exclude the kit from the cooldown on purpose: with one, Dependabot skips the newest tag and can propose an older one. They allow no other dependency, so nothing else goes without a cooldown. |
+| `dependabot-cooldown` (a warning) | `.github/dependabot.yml`, package mode | The kit's Dependabot entries exclude the kit from the cooldown on purpose: with one, Dependabot skips the newest tag and can propose an older one. Every other dependency is in entries with a cooldown (3 days, and 7 for an npm major). |
 
 Vendored mode copies the kit's full workflows into the repo, so zizmor audits them like the repo's own; of the findings above, the `auto-merge.yml` one applies there too.
 

@@ -10,6 +10,7 @@ The kit's reusable `auto-merge.yml` merges them on their own, within a strict po
 - **Who counts as an update bot:** `dependabot[bot]`, plus any author listed in the `bots` input, whose pull requests must also come from a `release-kit/` branch; the `auto-merge.yml` apply writes lists the rollout bot, `release-kit-bot-n8watkins[bot]`.
 - **How the kind is read:** the release-kit pin in `package.json` on both sides of the pull request, and the `update-type` of each dependency in Dependabot's `updated-dependencies` metadata in its commit messages.
   A grouped pull request takes the biggest change in it, so a group with one major update waits for a person.
+  The `dependabot.yml` apply writes keeps majors in groups of their own (`npm-major`, `actions-major`), so the weekly patch and minor groups (`npm-minor-patch`, `actions-minor-patch`) still merge on their own ([UPGRADES.md](UPGRADES.md#everything-else-dependabot-updates)).
 - **When `update-type` is missing:** Dependabot sometimes leaves it out (a multi-ecosystem group pull request did), so the policy reads the old and new version Dependabot names instead and compares them with semver.
   It takes them from the commit messages first, then the pull request description: `Bumps [x](https://...) from A to B` for one dependency, and "Updates x from A to B" lines (the name in backticks) or the package table for each dependency in a group.
   A GitHub Action pinned to a commit SHA counts only when a version is written next to the SHA.

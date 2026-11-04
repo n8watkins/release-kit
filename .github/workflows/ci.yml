@@ -1,5 +1,6 @@
 # The kit's own tests: unit tests, end-to-end runs against throwaway repos,
-# and actionlint over every workflow the kit ships or writes.
+# actionlint over every workflow the kit ships or writes, and check-jsonschema
+# over the dependabot.yml apply writes.
 name: CI
 
 on:
@@ -38,6 +39,11 @@ jobs:
           echo "$SHA256  actionlint.tar.gz" | sha256sum --check
           tar xzf actionlint.tar.gz actionlint
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      # Validates the dependabot.yml apply writes against SchemaStore's Dependabot schema.
+      - name: Install check-jsonschema
+        env:
+          VERSION: 0.38.2
+        run: pipx install "check-jsonschema==$VERSION"
       - name: Use npm ${{ matrix.npm }}
         if: matrix.npm != 'bundled'
         env:

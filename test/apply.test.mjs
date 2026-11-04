@@ -254,8 +254,8 @@ test('package mode (the default): the kit is a dev dependency, run from node_mod
   const commits = readFileSync(join(repo, '.github/workflows/commits.yml'), 'utf8')
   assert.match(commits, new RegExp(`uses: n8watkins/release-kit/\\.github/workflows/commits\\.yml@v${KIT_VERSION.replaceAll('.', '\\.')}$`, 'm'))
   const dependabot = readFileSync(join(repo, '.github/dependabot.yml'), 'utf8')
-  assert.match(dependabot, /package-ecosystem: npm[\s\S]*dependency-name: release-kit/)
-  assert.match(dependabot, /package-ecosystem: github-actions[\s\S]*dependency-name: n8watkins\/release-kit\*/)
+  assert.match(dependabot, /package-ecosystem: npm\n {4}directory: \/\n {4}patterns: \["release-kit"\]/)
+  assert.match(dependabot, /package-ecosystem: github-actions\n {4}directory: \/\n {4}patterns: \["n8watkins\/release-kit\*"\]/)
   assert.match(readFileSync(join(repo, 'RELEASING.md'), 'utf8'), /npx release-kit protect/)
 
   // Before npm install the hook lets a commit through with a note; after it, it checks.
@@ -399,6 +399,9 @@ test('commits.yml checks pushes to the branches releases are cut from, and check
   assert.match(workflow(), /^ {4}branches: \[main, master, review\/app-v0\.3\.81, 'hot\\\*fix''s'\]$/m, 'the vendored copy too')
 })
 
+/** The dependabot.yml entries under updates:, as their text. */
+const dependabotEntries = (text) => text.split(/^updates:$/m)[1].split(/\n(?= {2}- package-ecosystem:)/).filter((e) => e.trim())
+
 test('package mode groups a kit release into one Dependabot PR, and upgrades the dependabot.yml an older kit wrote', async () => {
   const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
   const repo = makeRepo(tmp('dependabot'))
@@ -406,7 +409,7 @@ test('package mode groups a kit release into one Dependabot PR, and upgrades the
   run(repo, 'mkdir', ['-p', '.github'])
   // What kit 2.1.0 wrote: two ecosystems, two PRs per release.
   writeFileSync(path, '# release-kit: a new kit release arrives as update PRs (the dev dependency and the workflow pins).\nversion: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n')
-  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml \(one grouped PR per kit release\)/)
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml \(one grouped PR per kit release, weekly grouped updates and security updates for every other dependency\)/)
   const grouped = readFileSync(path, 'utf8')
   assert.match(grouped, /^multi-ecosystem-groups:\n {2}release-kit:\n {4}schedule:\n {6}interval: daily$/m)
   assert.equal(grouped.match(/^ {4}multi-ecosystem-group: release-kit$/gm).length, 2)
@@ -418,8 +421,7 @@ test('package mode groups a kit release into one Dependabot PR, and upgrades the
   // Dependabot rejects the whole file when an update in a multi-ecosystem group sets commit-message:
   // "commit-message should only be set on the associated multi-ecosystem group".
   assert.match(grouped, /^ {2}release-kit:\n {4}schedule:\n {6}interval: daily\n(?: {4}#.*\n)? {4}commit-message:\n {6}prefix: build\n {6}include: scope\nupdates:/m)
-  const entries = grouped.split(/^updates:$/m)[1]
-  assert.doesNotMatch(entries, /commit-message|schedule:/)
+  for (const entry of dependabotEntries(grouped).filter((e) => /multi-ecosystem-group:/.test(e))) assert.doesNotMatch(entry, /commit-message|schedule:|groups:/)
   const again = quiet(KIT, 'node', ['apply.mjs', repo])
   assert.doesNotMatch(again, /\.github\/dependabot\.yml/, 're-applying changes nothing')
 
@@ -428,7 +430,62 @@ test('package mode groups a kit release into one Dependabot PR, and upgrades the
   const own = quiet(KIT, 'node', ['apply.mjs', repo])
   assert.match(own, /is the repo's own, so kit releases arrive as separate npm and github-actions PRs/)
   assert.match(own, /doesn't exclude release-kit from Dependabot's default 3-day cooldown/)
+  assert.doesNotMatch(own, /allow list/)
   assert.doesNotMatch(readFileSync(path, 'utf8'), /multi-ecosystem/)
+})
+
+// tube-vault and cutelyaskme, 2026-11-04: the kit's dependabot.yml from 2.0.0
+// to 2.7.0 had allow: release-kit, and Dependabot applies allow to security
+// updates too, so every security update ended "all versions were ignored" for
+// minimatch and glob, and no other dependency got a version update either.
+test('the dependabot.yml apply writes keeps every dependency current, security updates included', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('dependabot-all'))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  const text = readFileSync(join(repo, '.github/dependabot.yml'), 'utf8')
+  assert.doesNotMatch(text, /^\s+-?\s*allow:/m, 'no allow list: Dependabot would apply it to security updates')
+  const entries = dependabotEntries(text)
+  assert.equal(entries.length, 4)
+  for (const [ecosystem, kit, prefix] of [['npm', 'release-kit', 'npm'], ['github-actions', 'n8watkins/release-kit*', 'actions']]) {
+    const mine = entries.filter((e) => e.includes(`package-ecosystem: ${ecosystem}\n`))
+    assert.equal(mine.length, 2, `${ecosystem}: one entry for the kit, one for everything else`)
+    const [grouped, rest] = [mine.find((e) => /multi-ecosystem-group:/.test(e)), mine.find((e) => !/multi-ecosystem-group:/.test(e))]
+    // An entry in a multi-ecosystem group updates only what its patterns name.
+    assert.match(grouped, new RegExp(`\\n {4}patterns: \\["${kit.replace('*', '\\*')}"\\]\\n`))
+    // Everything else: weekly, the kit ignored (the grouped entry updates it), a cooldown, and two groups.
+    assert.match(rest, /\n {4}schedule:\n {6}interval: weekly\n/)
+    assert.match(rest, new RegExp(`\\n {4}ignore:\\n {6}- dependency-name: ${kit.replace('*', '\\*')}\\n(?: {4}#.*\\n)? {4}cooldown:`))
+    assert.equal(rest.match(/dependency-name:/g).length, 1, 'the kit is the only dependency ignored')
+    // Dependabot rejects semver-major-days for github-actions ("not supported for the package ecosystem").
+    assert.match(rest, ecosystem === 'npm' ? /\n {4}cooldown:\n {6}default-days: 3\n {6}semver-major-days: 7\n {4}commit-message:/ : /\n {4}cooldown:\n {6}default-days: 3\n {4}commit-message:/)
+    assert.match(rest, /\n {4}commit-message:\n {6}prefix: build\n {6}include: scope\n/)
+    assert.match(rest, new RegExp(`\\n {4}groups:\\n {6}${prefix}-minor-patch:\\n {8}update-types: \\[minor, patch\\]\\n {6}${prefix}-major:\\n {8}update-types: \\[major\\]\\n?$`))
+    // No group applies to security updates: each one arrives as its own pull request.
+    assert.doesNotMatch(rest, /applies-to/)
+  }
+  // The CLI's check has no complaint about the file apply writes.
+  const check = spawnSync('node', [join(KIT, 'bin/release-kit.mjs'), 'check'], { cwd: repo, encoding: 'utf8', env: { ...process.env, RELEASE_KIT_OFFLINE: '1' } }).stderr
+  assert.doesNotMatch(check, /dependabot\.yml/)
+
+  // A repo's own dependabot.yml with an allow list hears why that blocks security updates.
+  writeFileSync(join(repo, '.github/dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n    schedule:\n      interval: weekly\n    allow:\n      - dependency-type: production\n  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n')
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml is the repo's own and has an allow list: Dependabot applies it to security updates too/)
+})
+
+// check-jsonschema (https://github.com/python-jsonschema/check-jsonschema)
+// validates the file against SchemaStore's Dependabot schema, when it is
+// installed (CI installs it). Dependabot's own check runs only once the file
+// is on a repo's default branch.
+const checkJsonschema = spawnSync('check-jsonschema', ['--version']).status === 0
+test('the dependabot.yml apply writes is valid YAML that matches the Dependabot schema', { skip: !checkJsonschema && 'check-jsonschema is not installed' }, async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('dependabot-schema'))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  const valid = spawnSync('check-jsonschema', ['--builtin-schema', 'vendor.dependabot', '.github/dependabot.yml'], { cwd: repo, encoding: 'utf8' })
+  assert.equal(valid.status, 0, valid.stdout + valid.stderr)
+  // And it catches a mistake, so a pass means something.
+  writeFileSync(join(repo, '.github/dependabot.yml'), readFileSync(join(repo, '.github/dependabot.yml'), 'utf8').replace('    groups:\n', '    group:\n'))
+  assert.notEqual(spawnSync('check-jsonschema', ['--builtin-schema', 'vendor.dependabot', '.github/dependabot.yml'], { cwd: repo, encoding: 'utf8' }).status, 0)
 })
 
 test('the Release and train jobs run only in the upstream repo, named from .release.json or the remotes, on every rerun', async () => {
@@ -493,6 +550,11 @@ test('check warns about files an older apply wrote without the fork guard or the
   assert.match(stale, /dependabot\.yml lets Dependabot's cooldown propose older kit versions/)
   writeFileSync(join(repo, '.github/dependabot.yml'), '# release-kit: one PR.\nversion: 2\nupdates:\n  - package-ecosystem: npm\n    multi-ecosystem-group: release-kit\n    cooldown:\n      exclude: ["release-kit"]\n    commit-message:\n      prefix: build\n')
   assert.match(check(), /dependabot\.yml is rejected by Dependabot \(commit-message belongs on the multi-ecosystem group\)/)
+  // What kit 2.3.3 to 2.7.0 wrote: only the kit allowed, which blocks security updates.
+  writeFileSync(join(repo, '.github/dependabot.yml'), '# release-kit: one PR.\nversion: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n    patterns: ["release-kit"]\n    allow:\n      - dependency-name: release-kit\n    multi-ecosystem-group: release-kit\n    cooldown:\n      exclude: ["release-kit"]\n')
+  const allowed = check()
+  assert.match(allowed, /dependabot\.yml allows only the kit, so Dependabot opens no security updates and no updates for any other dependency: rerun npx release-kit apply \./)
+  assert.doesNotMatch(allowed, /rejected by Dependabot|cooldown/)
   assert.doesNotMatch(stale, /release-train\.yml has no fork guard/)
   quiet(KIT, 'node', ['apply.mjs', repo])
   assert.doesNotMatch(check(), /fork guard|cooldown/)
