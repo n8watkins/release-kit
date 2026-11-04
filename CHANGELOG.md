@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.7.1 - 2026-11-04
+
+### Fixed
+
+- Dependabot opens security updates and keeps every dependency current, not only the kit ([#66](https://github.com/n8watkins/release-kit/pull/66))
+
 ## 2.7.0 - 2026-11-04
 
 ### Fixed
