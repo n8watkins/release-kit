@@ -90,7 +90,14 @@ On every published release (pre-releases are skipped), [`.github/workflows/rollo
 - **Who:** every repo in [adopters.json](../adopters.json) with `"enabled": true`.
 - **In waves:** the canary repo, then the public repos, then the private ones.
   A wave starts only when every repo in the waves before it succeeded, so a red canary stops the rollout.
-- **With your approval:** each wave waits in the protected `rollout` environment for one click, up to three per release.
+- **Gated on the canary, with no clicks, for a patch or minor release:** after the canary wave, the "Canary merged" job waits up to an hour for the canary's update pull request to pass its checks and merge (it checks that the canary's branch pins the new tag).
+  Only then do the public and private waves start.
+  A failed check on that pull request, the pull request closed without merging, or the hour running out stops the rollout.
+  On a private canary the App can't read checks, so only the merge or the timeout decides there.
+- **With your approval for a major release:** each wave first waits for one click in the `rollout-major` environment, up to three per release.
+  Its update pull requests wait for you to merge them anyway, so there is no merge gate: merge the canary's, then approve the next wave.
+- **Failures come to you as an issue:** when a job in a real rollout fails, the "Report a failure" job opens an issue labeled `release-kit: rollout` in release-kit, or comments on the open one, naming each failed job (a wave's job is named for its repo) with a link to its log.
+  Close it once the rollout is through.
 - **Per repo:** apply from the kit at the tag, the lock file updated, and one pull request, `ci: update release-kit to vX.Y.Z` from the branch `release-kit/update`.
   Its description lists what apply added, changed and removed, anything it left for a person, how it merges, and the release notes.
   A rerun updates the same pull request.
@@ -108,7 +115,7 @@ Each pull request shows up in the run summary instead.
   Stored as a secret, it is a standing key to all of them.
 - **The App's tokens are short-lived and scoped to one repo.**
   Each job mints its own for that one adopter, with only contents, pull requests and workflows access, read-only in a dry run, and it expires within the hour.
-  The App's private key sits in the `rollout` environment, behind your approval.
+  The App's private key sits in the `rollout` environment, which only `main` and `v*` tags may use, so no branch or pull request can reach it.
 - **The pull requests are the bot's, not yours.**
   The auto-merge policy merges only pull requests from update bots, so one opened with your token would never merge on its own.
 
@@ -130,8 +137,8 @@ A reusable rollout for your own repos, with your own App and a configured bot id
 | Version pins | Dependabot's pull request | Dependabot's pull request, and the bot's |
 | New or changed files | You run `npx release-kit apply .` in each repo | The bot's pull request, one per repo |
 | Merging | `auto-merge.yml`: patch and minor on their own, major waits | The same policy |
-| Your part | Merge majors, run apply when a release adds files | Approve each wave, merge majors |
-| Setup | Nothing beyond apply | The App, its installs and the `rollout` environment |
+| Your part | Merge majors, run apply when a release adds files | Approve each wave of a major and merge its pull requests; read a `release-kit: rollout` issue if one opens |
+| Setup | Nothing beyond apply | The App, its installs and the `rollout` and `rollout-major` environments |
 | Available to | Anyone | Repos in release-kit's `adopters.json` |
 
 ## Setting up the App
@@ -143,7 +150,8 @@ The steps stay here as the record of the setup.
 
 1. Install the App on the repo: the App's settings, Install App, the account, then add the repo under "Only select repositories".
 2. In `adopters.json`, add the repo (or set `"enabled": true` and remove its `reason`), with its branch, visibility, wave and merge policy.
-3. Check it with a dry run of Rollout for that repo.
+3. Check it with a dry run of Rollout for that repo: name it under "repos", with dry run on.
+   A dry run that names a repo checks it even while it is `"enabled": false`, so you can check the install first and enable it after; the "Mint a token" step fails on a repo the App isn't installed on.
 
 ### The first setup
 
@@ -156,8 +164,10 @@ The steps stay here as the record of the setup.
 2. On the App's page, note the **App ID**, then "Generate a private key" and keep the downloaded `.pem` file until step 4.
 3. "Install App", choose "Only select repositories", and pick the adopters: n8builds-web, n8builds-admin, dev-portfolio, open-ping, scribe, voicedock, portfolio-rank, tl-dw.
 4. In release-kit, Settings, Environments, create `rollout`:
-   - Required reviewers: yourself, so every rollout waits for one click.
+   - No required reviewers: a patch or minor release gates itself on the canary (until v2.8.0 this environment required your approval).
    - Deployment branches and tags: `main` and the tag pattern `v*` only.
    - Environment variable `RELEASE_KIT_BOT_APP_ID` = the App ID; environment secret `RELEASE_KIT_BOT_KEY` = the full contents of the `.pem` file.
    Then delete the `.pem` file from the computer.
-5. Rotate the key yearly from the App's page (generate a new one, update the secret, delete the old one).
+5. Create `rollout-major` too: required reviewers yourself, deployment branches and tags `main` and `v*`, and no variables or secrets.
+   Each wave of a major release waits there for your click.
+6. Rotate the key yearly from the App's page (generate a new one, update the secret, delete the old one).

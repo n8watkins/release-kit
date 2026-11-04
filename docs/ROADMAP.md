@@ -151,7 +151,9 @@ A private repo should skip work that costs minutes without protecting anything.
 Where the build differs from the design:
 
 - apply runs from the kit checked out at the tag (`node kit/apply.mjs`), not through `npx release-kit@<tag>`: the same code, without npm fetching a git dependency, which npm 12 refuses without `--allow-git`.
-- Each wave is one job per repo in the `rollout` environment, so the owner approves each wave once (three clicks for a full rollout); that is also the pause to look at the canary's pull request.
+- Each wave is one job per repo in the `rollout` environment.
+  Until v2.8.0 the environment required the owner's approval for each wave (three clicks for a full rollout).
+  Since then a patch or minor release gates itself: the public and private waves wait for the canary's update pull request to pass its checks and merge, a failure opens a `release-kit: rollout` issue, and only a major release waits for a click in `rollout-major` before each wave.
 - A later wave waits for every repo in the earlier waves, not only the canary: a red public repo also holds back the private one.
 - `adopters.json` also lists each repo's visibility, a `note` for the pull request, and the repos the App isn't installed on, with `"enabled": false` and the reason.
 - apply writes the bot's login (`release-kit-bot-n8watkins[bot]`) into the `bots` input of the `auto-merge.yml` it writes, so the bot's update pull requests merge like Dependabot's.

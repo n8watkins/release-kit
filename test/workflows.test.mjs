@@ -43,14 +43,14 @@ test('workflows read by default and grant write only to the jobs that need it', 
     const text = read(file)
     assert.match(text, /^permissions:\n {2}contents: read\n\n/m, file)
     for (const [, block] of text.matchAll(/^ {4}permissions:\n((?: {6}.*\n)+)/gm)) {
-      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(?:(contents|actions|pull-requests|issues): write|(contents|pull-requests|checks|statuses): read)(?: #.*)?$/, `${file}: ${line}`)
+      for (const line of block.trim().split('\n')) assert.match(line.trim(), /^(?:(contents|actions|pull-requests|issues): write|(contents|pull-requests|checks|statuses|actions): read)(?: #.*)?$/, `${file}: ${line}`)
     }
   }
   assert.doesNotMatch(read('template/.github/workflows/commits.yml'), /: write/)
   // Only the auto-merge policy touches pull requests.
   for (const file of files) if (!/auto-merge\.yml$/.test(file)) assert.doesNotMatch(read(file), /pull-requests: write/, file)
-  // Only the Direct push alarm opens issues.
-  for (const file of files) if (!/direct-push\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
+  // Only the Direct push alarm and the rollout's failure report open issues.
+  for (const file of files) if (!/(direct-push|\/rollout)\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
 })
 
 test('the auto-merge callers grant every permission the reusable job asks for', () => {

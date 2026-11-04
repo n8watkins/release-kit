@@ -1,8 +1,10 @@
 # One wave of the rollout bot (rollout.yml): for each adopter in the wave, mint
 # a token for that one repo from the "release-kit bot" GitHub App, run the
 # kit's apply at the tag, update the lock file, and open or update the pull
-# request from release-kit/update (scripts/rollout.mjs). Runs in the protected
-# `rollout` environment, which holds the App's ID and private key.
+# request from release-kit/update (scripts/rollout.mjs). Runs in the `rollout`
+# environment, which holds the App's ID and private key and only main and v*
+# tags may use. For a major release, the wave first waits for the owner's
+# approval in `rollout-major`, which holds no secrets.
 name: Rollout wave
 
 on:
@@ -20,13 +22,32 @@ on:
         description: "Show each pull request instead of pushing"
         type: boolean
         default: true
+      major:
+        description: "A major release: wait for the owner's approval in rollout-major first"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  approve:
+    name: Approve the major release
+    if: inputs.major
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: rollout-major
+    steps:
+      - name: Approved
+        env:
+          TAG: ${{ inputs.tag }}
+        run: echo "The owner approved this wave of the major release $TAG."
+
   update:
     name: ${{ matrix.adopter.name }}
+    needs: approve
+    # Skipped approval (a patch or minor) lets the wave run; a rejected one doesn't.
+    if: ${{ !cancelled() && (needs.approve.result == 'success' || needs.approve.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: rollout

@@ -2,9 +2,18 @@
 # every adopter listed in adopters.json and open one pull request each, from
 # the release-kit/update branch, as the "release-kit bot" GitHub App.
 # Waves run in order (canary, public, private), and a wave starts only when the
-# one before it succeeded. Every wave runs in the protected `rollout`
-# environment, so each waits for the owner's approval; a dry run does too,
-# because it mints the App's tokens to read the repos.
+# one before it succeeded.
+#
+# A patch or minor release needs no one: after the canary wave, the gate waits
+# (up to an hour) for the canary's update pull request to pass CI and merge,
+# and only then do the public and private waves start. A major release waits
+# for the owner's approval in the `rollout-major` environment before each wave
+# instead, since its update pull requests wait for a person anyway.
+# Any failure stops the waves after it, and the report job opens (or comments
+# on) an issue labeled "release-kit: rollout" naming the failed jobs.
+#
+# The App's key is in the `rollout` environment, which only main and v* tags
+# may use; `rollout-major` holds no secrets, only the required reviewer.
 #
 # The Release workflow publishes with its own token, which starts no
 # "release: published" run; rollout-start.yml starts this workflow instead.
@@ -53,6 +62,7 @@ jobs:
       canary: ${{ steps.plan.outputs.canary }}
       public: ${{ steps.plan.outputs.public }}
       private: ${{ steps.plan.outputs.private }}
+      major: ${{ steps.plan.outputs.major }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,7 +91,11 @@ jobs:
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           REPOS: ${{ inputs.repos || '' }}
-        run: node scripts/rollout.mjs plan --tag "$TAG" --repos "$REPOS"
+          DRY_RUN: ${{ steps.tag.outputs.dry-run }}
+        run: |
+          set -- --tag "$TAG" --repos "$REPOS"
+          if [ "$DRY_RUN" = "true" ]; then set -- "$@" --dry-run; fi
+          node scripts/rollout.mjs plan "$@"
 
   canary:
     name: Canary
@@ -95,14 +109,60 @@ jobs:
       adopters: ${{ needs.plan.outputs.canary }}
       tag: ${{ needs.plan.outputs.tag }}
       dry-run: ${{ needs.plan.outputs.dry-run == 'true' }}
+      major: ${{ needs.plan.outputs.major == 'true' }}
+
+  # The automatic gate for a patch or minor release: the canary's update pull
+  # request must pass its checks and merge before any other repo gets one.
+  # A dry run opens nothing to wait for, and a major waits for the owner.
+  canary-merged:
+    name: Canary merged / ${{ matrix.adopter.name }}
+    needs: [plan, canary]
+    if: >-
+      !cancelled() && needs.canary.result == 'success'
+      && needs.plan.outputs.dry-run != 'true' && needs.plan.outputs.major != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    environment: rollout
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        adopter: ${{ fromJSON(needs.plan.outputs.canary) }}
+    steps:
+      # Read-only, for the one canary repo: its pin, pull request and checks.
+      - name: Mint a token for ${{ matrix.adopter.repo }}
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_KIT_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_KIT_BOT_KEY }}
+          owner: ${{ matrix.adopter.owner }}
+          repositories: ${{ matrix.adopter.name }}
+          permission-contents: read
+          permission-pull-requests: read
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Wait for the update to merge
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ADOPTER: ${{ toJSON(matrix.adopter) }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: node scripts/rollout.mjs wait-merge --adopter "$ADOPTER" --tag "$TAG" --timeout-minutes 60
 
   public:
     name: Public
-    needs: [plan, canary]
-    # A failed canary stops the rollout; a skipped one (none picked) doesn't.
+    needs: [plan, canary, canary-merged]
+    # A failed canary, or one whose update didn't merge, stops the rollout; a
+    # skipped one (none picked, a dry run, or a major) doesn't.
     if: >-
       !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.public != '[]'
       && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      && (needs.canary-merged.result == 'success' || needs.canary-merged.result == 'skipped')
     uses: ./.github/workflows/rollout-wave.yml
     # The wave reads the App key from the `rollout` environment; a called
     # workflow sees no secrets unless the caller passes them on.
@@ -111,13 +171,15 @@ jobs:
       adopters: ${{ needs.plan.outputs.public }}
       tag: ${{ needs.plan.outputs.tag }}
       dry-run: ${{ needs.plan.outputs.dry-run == 'true' }}
+      major: ${{ needs.plan.outputs.major == 'true' }}
 
   private:
     name: Private
-    needs: [plan, canary, public]
+    needs: [plan, canary, canary-merged, public]
     if: >-
       !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.private != '[]'
       && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+      && (needs.canary-merged.result == 'success' || needs.canary-merged.result == 'skipped')
       && (needs.public.result == 'success' || needs.public.result == 'skipped')
     uses: ./.github/workflows/rollout-wave.yml
     # The wave reads the App key from the `rollout` environment; a called
@@ -127,3 +189,29 @@ jobs:
       adopters: ${{ needs.plan.outputs.private }}
       tag: ${{ needs.plan.outputs.tag }}
       dry-run: ${{ needs.plan.outputs.dry-run == 'true' }}
+      major: ${{ needs.plan.outputs.major == 'true' }}
+
+  # Any failure, in a real rollout, reaches the owner as an issue here.
+  report:
+    name: Report a failure
+    needs: [plan, canary, canary-merged, public, private]
+    if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # this run's jobs
+      issues: write # the "release-kit: rollout" issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag || inputs.tag || github.event.release.tag_name }}
+          RUN_ID: ${{ github.run_id }}
+        run: node scripts/rollout.mjs report --tag "$TAG" --run-id "$RUN_ID"

@@ -4,18 +4,29 @@
 // runs it; it is not shipped to adopters.
 //
 //   node scripts/rollout.mjs plan --tag vX.Y.Z [--repos a,b] [--adopters adopters.json]
-//       check adopters.json and print the waves (canary, public, private) as
-//       JSON; in GitHub Actions, also as step outputs for the wave jobs
+//       [--tags v1.0.0,v1.1.0] [--dry-run]
+//       check adopters.json and print the waves (canary, public, private) and
+//       whether the tag is a major release (against --tags, or the kit repo's
+//       tags) as JSON; in GitHub Actions, also as step outputs for the jobs
 //   node scripts/rollout.mjs update --adopter '<json>' --tag vX.Y.Z --kit <dir>
 //       --target <dir> [--notes <file>] [--dry-run]
 //       in one adopter's checkout: run the kit's apply (from <dir>, the kit at
 //       the tag), update the lock file, and open or update the pull request
 //       from release-kit/update (GH_TOKEN: the App's token for that repo);
 //       --dry-run prints the pull request instead of pushing anything
+//   node scripts/rollout.mjs wait-merge --adopter '<json>' --tag vX.Y.Z
+//       [--timeout-minutes 60] [--interval-seconds 30]
+//       the gate after the canary: wait until the adopter's branch pins the
+//       tag (its update pull request merged), and fail as soon as that pull
+//       request is closed unmerged or a check on it fails, or at the timeout
+//   node scripts/rollout.mjs report --tag vX.Y.Z --run-id <id>
+//       after a failed rollout: open or comment on the issue labeled
+//       "release-kit: rollout" in release-kit, naming each failed job
 import { execFileSync, spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checksState, kitVersion } from './release-kit/automerge.mjs'
 
 export const WAVES = ['canary', 'public', 'private']
 export const MERGE_POLICIES = ['auto-merge', 'merge-when-green', 'person']
@@ -23,6 +34,7 @@ export const BRANCH = 'release-kit/update'
 const KIT_REPO = 'n8watkins/release-kit'
 const SLUG = /^[\w.-]+\/[\w.-]+$/
 const TAG = /^v\d+\.\d+\.\d+$/
+export const ISSUE_LABEL = 'release-kit: rollout'
 // GitHub refuses a pull request description longer than 65536 characters.
 const BODY_LIMIT = 60000
 
@@ -72,9 +84,11 @@ export function parseAdopters(text) {
 /**
  * The waves for one rollout, in order: the enabled adopters, narrowed to
  * `repos` (names or owner/name; empty means all). Naming a disabled adopter
- * skips it with its reason; naming one that isn't listed is an error.
+ * skips it with its reason, except in a dry run, which checks it read-only (a
+ * repo the App isn't installed on yet fails there, at the token); naming one
+ * that isn't listed is an error.
  */
-export function planWaves(adopters, repos = []) {
+export function planWaves(adopters, repos = [], { dryRun = false } = {}) {
   const wanted = repos.map((r) => r.trim().toLowerCase()).filter(Boolean)
   const matches = (a, r) => a.repo.toLowerCase() === r || a.name.toLowerCase() === r
   const unknown = wanted.filter((r) => !adopters.some((a) => matches(a, r)))
@@ -83,7 +97,7 @@ export function planWaves(adopters, repos = []) {
   const plan = Object.fromEntries(WAVES.map((w) => [w, []]))
   plan.skipped = []
   for (const a of picked) {
-    if (!a.enabled) {
+    if (!a.enabled && !(dryRun && wanted.length)) {
       plan.skipped.push({ repo: a.repo, reason: a.reason })
       continue
     }
@@ -143,6 +157,62 @@ export function prBody({ tag, adopter, files, notes = [], releaseNotes = '', run
   return `${header}\n\n## Release notes for ${tag}\n\n${notesText}\n`
 }
 
+/**
+ * Whether `tag` starts a new major version: its major differs from the one of
+ * the highest release tag below it (or there is none). A major rollout waits
+ * for the owner in the `rollout-major` environment; a patch or minor one
+ * gates itself on the canary.
+ */
+export function isMajorRelease(tag, tags = []) {
+  const parse = (t) => (TAG.test(t) ? t.slice(1).split('.').map(Number) : null)
+  const me = parse(tag)
+  if (!me) throw new Error(`"${tag}" is not a release tag like v2.6.0`)
+  const below = tags.map(parse).filter((v) => v && (v[0] - me[0] || v[1] - me[1] || v[2] - me[2]) < 0)
+  if (!below.length) return true
+  below.sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2])
+  return below[0][0] !== me[0]
+}
+
+/**
+ * Where the canary's update stands, for the gate after the canary wave.
+ *   pin     the release-kit version the adopter's branch pins now (or null)
+ *   pr      the newest update pull request for the tag ({ number, state,
+ *           merged, url }), or null
+ *   checks  'green' | 'pending' | 'red' | null (unreadable) for its head commit
+ *   failed  the names of its failed checks
+ * Returns { state: 'merged' | 'pending' | 'failed', why }.
+ */
+export function mergeState({ tag, adopter, pin, pr, checks, failed = [] }) {
+  const version = tag.replace(/^v/, '')
+  if (pin === version) return { state: 'merged', why: `${adopter.branch} pins release-kit ${tag}${pr?.merged ? ` (${pr.url} merged)` : ''}` }
+  if (!pr) return { state: 'failed', why: `no update pull request for ${tag}, and ${adopter.branch} pins ${pin ? `release-kit ${pin}` : 'no release-kit version'}` }
+  if (pr.merged) return { state: 'pending', why: `${pr.url} merged; waiting for ${adopter.branch} to pin ${tag}` }
+  if (pr.state !== 'open') return { state: 'failed', why: `${pr.url} was closed without merging` }
+  if (checks === 'red') return { state: 'failed', why: `a check failed on ${pr.url}${failed.length ? `: ${failed.join(', ')}` : ''}` }
+  return { state: 'pending', why: `${pr.url} is open, checks ${checks ?? 'unreadable'}` }
+}
+
+/**
+ * The issue text for a failed rollout: which jobs failed (a wave's job is
+ * named for its adopter), with links, and what to do next.
+ *   jobs  the run's jobs ({ name, conclusion, html_url })
+ */
+export function failureReport({ tag, runUrl, jobs }) {
+  const failed = jobs.filter((j) => ['failure', 'timed_out', 'cancelled', 'action_required'].includes(j.conclusion))
+  const lines = failed.length
+    ? failed.map((j) => `- **${j.name}**: ${j.conclusion.replace('_', ' ')}, [log](${j.html_url})`)
+    : ['- No job failed outright: open the run to see what stopped it.']
+  return [
+    `The rollout of ${tag} stopped: [the run](${runUrl}).`,
+    '',
+    ...lines,
+    '',
+    'The waves after a failure did not run, so those adopters are still on the previous kit.',
+    `Fix the cause (the adopter's update pull request, from \`${BRANCH}\`, or the kit itself), then run Rollout again for ${tag} with dry run off, or release a fix.`,
+    'Close this issue once the rollout is through.',
+  ].join('\n')
+}
+
 // --- the command line -------------------------------------------------------
 
 function args(argv) {
@@ -170,13 +240,110 @@ function plan(opts) {
   if (!TAG.test(opts.tag ?? '')) throw new Error(`--tag must be a release tag like v2.6.0, not "${opts.tag ?? ''}"`)
   const file = opts.adopters ?? fileURLToPath(new URL('../adopters.json', import.meta.url))
   const { adopters } = parseAdopters(readFileSync(file, 'utf8'))
-  const waves = planWaves(adopters, (opts.repos ?? '').split(','))
+  const dryRun = Boolean(opts['dry-run'])
+  const waves = planWaves(adopters, (opts.repos ?? '').split(','), { dryRun })
+  // The release tags, to tell a major from a patch or minor.
+  const tags = opts.tags !== undefined
+    ? opts.tags.split(',').map((t) => t.trim()).filter(Boolean)
+    : execFileSync('git', ['ls-remote', '--tags', '--refs', `https://github.com/${process.env.GITHUB_REPOSITORY || KIT_REPO}.git`], { encoding: 'utf8' })
+      .split('\n').map((line) => line.split('refs/tags/')[1]).filter(Boolean)
+  waves.major = isMajorRelease(opts.tag, tags)
   for (const wave of WAVES) output(wave, JSON.stringify(waves[wave]))
-  const lines = [`## Rollout of ${opts.tag}`, '']
+  output('major', String(waves.major))
+  const lines = [`## Rollout of ${opts.tag}${dryRun ? ' (dry run)' : ''}`, '']
+  lines.push(waves.major
+    ? `A major release: each wave waits for the owner's approval in the \`rollout-major\` environment.`
+    : 'A patch or minor release: no approval; the public and private waves start once the canary\'s update pull request has merged.')
+  lines.push('')
   for (const wave of WAVES) lines.push(`- **${wave}**: ${waves[wave].map((a) => a.repo).join(', ') || 'none'}`)
   for (const s of waves.skipped) lines.push(`- skipped ${s.repo}: ${s.reason}`)
   summary(lines.join('\n'))
   console.log(JSON.stringify(waves, null, 2))
+}
+
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+/** gh api, parsed; null when the call fails (a 404, or a token that may not read it). */
+function ghApi(path) {
+  try {
+    return JSON.parse(execFileSync('gh', ['api', '-H', 'Accept: application/vnd.github+json', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 ** 2 }))
+  } catch {
+    return null
+  }
+}
+
+/** One look at the adopter: the pin on its branch, its update pull request, and that pull request's checks. */
+function lookAtAdopter(adopter, tag) {
+  const manifest = ghApi(`repos/${adopter.repo}/contents/package.json?ref=${encodeURIComponent(adopter.branch)}`)
+  let pin = null
+  try {
+    const pkg = JSON.parse(Buffer.from(manifest?.content ?? '', 'base64').toString('utf8') || '{}')
+    pin = kitVersion(pkg.devDependencies?.['release-kit'] ?? pkg.dependencies?.['release-kit'])
+  } catch {}
+  const pulls = ghApi(`repos/${adopter.repo}/pulls?state=all&head=${encodeURIComponent(`${adopter.owner}:${BRANCH}`)}&base=${encodeURIComponent(adopter.branch)}&sort=created&direction=desc&per_page=20`) ?? []
+  const raw = pulls.find((p) => p.title === prTitle(tag))
+  const pr = raw ? { number: raw.number, state: raw.state, merged: Boolean(raw.merged_at), url: raw.html_url, sha: raw.head.sha } : null
+  let checks = null
+  let failed = []
+  if (pr && pr.state === 'open') {
+    // Reading checks needs no App permission on a public repo; on a private one
+    // it may be refused, and then only the merge or the timeout decides.
+    const runs = ghApi(`repos/${adopter.repo}/commits/${pr.sha}/check-runs?per_page=100`)?.check_runs
+    const statuses = ghApi(`repos/${adopter.repo}/commits/${pr.sha}/status`)
+    if (runs) {
+      checks = checksState(runs, statuses ?? undefined)
+      failed = runs.filter((r) => r.status === 'completed' && !['success', 'neutral', 'skipped'].includes(r.conclusion)).map((r) => r.name)
+    }
+  }
+  return { pin, pr, checks, failed }
+}
+
+function waitMerge(opts) {
+  const adopter = JSON.parse(opts.adopter ?? 'null')
+  if (!adopter || !SLUG.test(adopter.repo ?? '')) throw new Error('--adopter must be one adopter from the plan, as JSON')
+  if (!TAG.test(opts.tag ?? '')) throw new Error(`--tag must be a release tag like v2.6.0, not "${opts.tag ?? ''}"`)
+  const timeout = Number(opts['timeout-minutes'] ?? 60) * 60_000
+  const interval = Number(opts['interval-seconds'] ?? 30) * 1000
+  const deadline = Date.now() + timeout
+  let last = ''
+  for (;;) {
+    const result = mergeState({ tag: opts.tag, adopter, ...lookAtAdopter(adopter, opts.tag) })
+    if (result.why !== last) console.log(`${adopter.repo}: ${result.why}`)
+    last = result.why
+    if (result.state === 'merged') {
+      summary(`### Canary ${adopter.repo}\n\nMerged: ${result.why}. The next waves start.`)
+      return
+    }
+    if (result.state === 'failed') throw new Error(`${adopter.repo}: ${result.why}`)
+    if (Date.now() + interval > deadline) throw new Error(`${adopter.repo}: not merged after ${opts['timeout-minutes'] ?? 60} minutes (${result.why})`)
+    pause(interval)
+  }
+}
+
+function report(opts) {
+  if (!TAG.test(opts.tag ?? '')) throw new Error(`--tag must be a release tag like v2.6.0, not "${opts.tag ?? ''}"`)
+  const repo = process.env.GITHUB_REPOSITORY || KIT_REPO
+  const runId = opts['run-id']
+  if (!/^\d+$/.test(runId ?? '')) throw new Error('--run-id must be the rollout run\'s id')
+  const gh = (...list) => execFileSync('gh', list, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'] })
+  const jobs = JSON.parse(gh('api', '--paginate', '--slurp', `repos/${repo}/actions/runs/${runId}/jobs?per_page=100`)).flatMap((page) => page.jobs)
+  const runUrl = `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${runId}`
+  const body = failureReport({ tag: opts.tag, runUrl, jobs })
+  console.log(body)
+  const title = `Rollout of ${opts.tag} stopped`
+  // The label may not exist yet; creating it twice is harmless.
+  try {
+    gh('label', 'create', ISSUE_LABEL, '-R', repo, '--color', 'B60205', '--description', 'A kit rollout that stopped and needs a look')
+  } catch {}
+  const open = JSON.parse(gh('issue', 'list', '-R', repo, '--label', ISSUE_LABEL, '--state', 'open', '--json', 'number,title', '--limit', '50'))
+  const same = open.find((i) => i.title === title) ?? open[0]
+  if (same) {
+    gh('issue', 'comment', String(same.number), '-R', repo, '--body', `**${title}**\n\n${body}`)
+    console.log(`commented on #${same.number}`)
+  } else {
+    console.log(gh('issue', 'create', '-R', repo, '--title', title, '--label', ISSUE_LABEL, '--body', body).trim())
+  }
+  summary(`## Rollout of ${opts.tag} stopped\n\n${body}`)
 }
 
 /**
@@ -287,7 +454,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const command = opts._[0]
     if (command === 'plan') plan(opts)
     else if (command === 'update') update(opts)
-    else throw new Error('usage: node scripts/rollout.mjs plan --tag vX.Y.Z [--repos a,b] | update --adopter <json> --tag vX.Y.Z --kit <dir> --target <dir> [--notes <file>] [--bot <login>] [--dry-run]')
+    else if (command === 'wait-merge') waitMerge(opts)
+    else if (command === 'report') report(opts)
+    else throw new Error('usage: node scripts/rollout.mjs plan --tag vX.Y.Z [--repos a,b] [--tags v1,v2] [--dry-run] | update --adopter <json> --tag vX.Y.Z --kit <dir> --target <dir> [--notes <file>] [--bot <login>] [--dry-run] | wait-merge --adopter <json> --tag vX.Y.Z [--timeout-minutes 60] [--interval-seconds 30] | report --tag vX.Y.Z --run-id <id>')
   } catch (error) {
     console.error(`rollout: ${error.message}`)
     process.exit(1)

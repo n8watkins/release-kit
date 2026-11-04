@@ -134,12 +134,17 @@ On every published release, `.github/workflows/rollout.yml` in release-kit runs 
 - **Who gets it:** the repos in [adopters.json](adopters.json) with `"enabled": true`, each with the branch to target, its visibility, its wave and how its pull requests merge (`auto-merge`, `merge-when-green` or `person`).
   A repo the bot's GitHub App isn't installed on stays listed with `"enabled": false` and the reason.
 - **In waves:** the canary repo first, then the public repos, then the private ones; a wave starts only when the one before it succeeded, so a red canary stops the rollout.
-- **With the owner's approval:** every wave runs in the protected `rollout` environment, which holds the App's ID and key and waits for one click per wave.
+- **No clicks for a patch or minor release:** after the canary wave, a gate waits up to an hour for the canary's update pull request to pass its checks and merge, and only then do the other waves start.
+  A failed check, a pull request closed without merging, or the timeout stops the rollout.
+- **The owner's approval for a major release:** each wave first waits for one click in the `rollout-major` environment, since a major update waits for a person to merge it anyway.
+- **Failures reach the owner:** when anything in a real rollout fails, a last job opens an issue labeled `release-kit: rollout` in release-kit (or comments on the open one), naming each failed job, which names its repo, with a link to its log.
+- **The key stays put:** the App's ID and key live in the `rollout` environment, which only `main` and `v*` tags may use; `rollout-major` holds only the required reviewer.
 - **Per repo:** a token scoped to that one repo (`actions/create-github-app-token`, pinned by SHA), apply from the kit checked out at the tag (`apply.mjs --json`), `npm install --package-lock-only --ignore-scripts` for the new pin (with `allow-git=root`, so npm 12 accepts the kit as a git dependency), and the pull request: what apply added, changed and removed, the notes it left for a person, how the pull request merges, and the release notes.
   A repo with its own `dependabot.yml` keeps it; apply's notes in the pull request say what to add.
   A rerun updates the same pull request.
 - **Merging:** pull requests opened with an App token run CI like any other, and the `auto-merge.yml` apply writes lists the bot (`release-kit-bot-n8watkins[bot]`) next to Dependabot, so its update merges under the same policy.
 - **By hand:** Actions, Rollout, "Run workflow" takes a tag, an optional list of repos and a dry-run switch (on by default), which shows each pull request in the run summary and pushes nothing.
+  A dry run that names a disabled adopter checks it too, which shows whether the App is installed there.
 
 Whether a repo needs it, and the App's setup steps, are in [docs/UPGRADES.md](docs/UPGRADES.md).
 Its design is in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along with npm publishing, signed releases, pre-releases and the other planned work.
