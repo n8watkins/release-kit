@@ -225,6 +225,37 @@ test('uv.lock: no entry for the project itself is an error naming the file and t
   assert.throws(() => readVersion(join(dir, 'uv.lock')), /uv\.lock has no entry for the project "DevGuard"/)
 })
 
+// devguard's lock after its project was renamed agent-devguard, before the next uv lock.
+const STALE_UV_LOCK = UV_LOCK.replace('name = "devguard"\nversion = "0.1.0"\nsource = { editable = "." }', 'name = "devguard-old"\nversion = "0.1.0"\nsource = { editable = "." }')
+
+test('uv.lock: an entry still named as before a rename is found by its source "."', () => {
+  const dir = write(tmp('uv-stale'), { 'pyproject.toml': PYPROJECT, 'uv.lock': STALE_UV_LOCK })
+  const path = join(dir, 'uv.lock')
+  assert.equal(readVersion(path), '0.1.0')
+  setVersion(path, '0.2.0')
+  const own = 'name = "devguard-old"\nversion = "0.1.0"'
+  assert.equal(readFileSync(path, 'utf8'), STALE_UV_LOCK.replace(own, own.replace('0.1.0', '0.2.0')))
+})
+
+test('uv.lock: with no entry by name and several with source ".", it says it cannot tell which', () => {
+  const lock = `${STALE_UV_LOCK}\n[[package]]\nname = "other"\nversion = "0.1.0"\nsource = { virtual = "." }\n`
+  const dir = write(tmp('uv-ambiguous'), { 'pyproject.toml': PYPROJECT, 'uv.lock': lock })
+  assert.throws(() => readVersion(join(dir, 'uv.lock')), /uv\.lock has no entry for the project "DevGuard" and 2 entries have source editable or virtual "\.", so it can't tell which is the project: run uv lock/)
+})
+
+test('apply lists a uv.lock beside pyproject.toml by its presence, and warns when it cannot read it', () => {
+  for (const [name, lock, warning] of [['stale', STALE_UV_LOCK, null], ['unreadable', 'version = 1\n', /uv\.lock has no entry for the project "DevGuard"/]]) {
+    const repo = makeRepo(tmp(`python-${name}`), { version: '0.1.0' })
+    write(repo, { 'pyproject.toml': PYPROJECT, 'uv.lock': lock })
+    run(repo, 'git', ['add', '-A'])
+    run(repo, 'git', ['commit', '-q', '-m', 'chore: the app'])
+    const applied = run(KIT, 'node', ['apply.mjs', repo, '--vendored'])
+    assert.deepEqual(JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')).versionFiles, ['pyproject.toml', 'uv.lock'], name)
+    assert.doesNotMatch(applied, /the uv\.lock beside it isn't/, name)
+    if (warning) assert.match(applied, warning, name)
+  }
+})
+
 const INIT_PY = '"""devguard."""\n\n__version__ = "0.1.0"\n__all__ = ["main"]\n'
 const PASS_ENV = 'const NAME = "pass-env";\r\nconst VERSION = "0.1.0";\r\nconsole.log(NAME, VERSION);\r\n'
 
