@@ -5,7 +5,15 @@
 # one before it succeeded. Every wave runs in the protected `rollout`
 # environment, so each waits for the owner's approval; a dry run does too,
 # because it mints the App's tokens to read the repos.
+#
+# The Release workflow publishes with its own token, which starts no
+# "release: published" run; rollout-start.yml starts this workflow instead.
+# A release a person publishes starts it here. The concurrency group queues a
+# second run behind the first, but doesn't drop it: rollout-start.yml skips a
+# tag that already rolled out.
 name: Rollout
+# The tag in the name lets rollout-start.yml see that a tag already rolled out.
+run-name: Rollout ${{ inputs.tag || github.event.release.tag_name }}${{ inputs.dry_run && ' (dry run)' || '' }}
 
 on:
   release:

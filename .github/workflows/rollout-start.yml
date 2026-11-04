@@ -1,0 +1,65 @@
+# Starts the rollout bot (rollout.yml) once the Release workflow has published
+# a release-kit release.
+#
+# rollout.yml listens for "release: published", but the Release workflow
+# publishes with the workflow's own token, and GitHub starts no workflow from
+# an event that token caused. A workflow_dispatch from that token is allowed,
+# so this starts the rollout by hand, for real (dry_run=false). Each wave still
+# waits for the owner's approval in the `rollout` environment.
+#
+# Why not a step at the end of release.yml: that file is also the reusable
+# workflow adopters call, and a called job may not ask for more permissions
+# (actions: write) than the caller grants, even when the job is skipped.
+#
+# A release a person publishes still starts rollout.yml through its release
+# event. Either way, a tag that already had a real rollout gets no second one:
+# rollout.yml's run name carries the tag, and this skips a tag it finds there.
+name: Start rollout
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    name: Start the rollout
+    # Only release-kit rolls itself out, and only after a run that succeeded.
+    if: github.repository == 'n8watkins/release-kit' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # the release
+      actions: write # start rollout.yml
+    steps:
+      - name: Start the rollout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The tag the Release run was for: a tag push, or "Run workflow" on the tag.
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eqx 'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'; then
+            echo "::notice::The Release run was on \"$TAG\", not a release tag; start Rollout by hand if it published one."
+            exit 0
+          fi
+          # A baseline tag verifies but publishes nothing.
+          published=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" --jq '[.jobs[] | select(.name == "Publish the GitHub Release" and .conclusion == "success")] | length')
+          if [ "$published" = "0" ]; then
+            echo "::notice::The Release run for $TAG published no release; nothing to roll out."
+            exit 0
+          fi
+          kind=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq 'if .isDraft then "draft" elif .isPrerelease then "pre-release" else "release" end')
+          if [ "$kind" != "release" ]; then
+            echo "::notice::$TAG is a $kind; only a published release rolls out."
+            exit 0
+          fi
+          if gh run list -R "$GITHUB_REPOSITORY" --workflow rollout.yml --limit 200 --json displayTitle --jq '.[].displayTitle' | grep -Fqx "Rollout $TAG"; then
+            echo "::notice::$TAG already has a rollout; start another by hand if you want one."
+            exit 0
+          fi
+          gh workflow run rollout.yml -R "$GITHUB_REPOSITORY" -f tag="$TAG" -f dry_run=false
+          echo "::notice::Started the rollout of $TAG; each wave waits for approval in the rollout environment."
