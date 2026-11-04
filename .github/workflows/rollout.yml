@@ -80,6 +80,9 @@ jobs:
     needs: plan
     if: needs.plan.outputs.canary != '[]'
     uses: ./.github/workflows/rollout-wave.yml
+    # The wave reads the App key from the `rollout` environment; a called
+    # workflow sees no secrets unless the caller passes them on.
+    secrets: inherit
     with:
       adopters: ${{ needs.plan.outputs.canary }}
       tag: ${{ needs.plan.outputs.tag }}
@@ -93,6 +96,9 @@ jobs:
       !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.public != '[]'
       && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
     uses: ./.github/workflows/rollout-wave.yml
+    # The wave reads the App key from the `rollout` environment; a called
+    # workflow sees no secrets unless the caller passes them on.
+    secrets: inherit
     with:
       adopters: ${{ needs.plan.outputs.public }}
       tag: ${{ needs.plan.outputs.tag }}
@@ -106,6 +112,9 @@ jobs:
       && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
       && (needs.public.result == 'success' || needs.public.result == 'skipped')
     uses: ./.github/workflows/rollout-wave.yml
+    # The wave reads the App key from the `rollout` environment; a called
+    # workflow sees no secrets unless the caller passes them on.
+    secrets: inherit
     with:
       adopters: ${{ needs.plan.outputs.private }}
       tag: ${{ needs.plan.outputs.tag }}

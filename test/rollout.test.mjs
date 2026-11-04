@@ -184,6 +184,8 @@ test('the rollout workflow runs the waves in order, each in the protected enviro
   assert.match(main, /needs\.canary\.result == 'success' \|\| needs\.canary\.result == 'skipped'/)
   assert.match(main, /needs\.public\.result == 'success' \|\| needs\.public\.result == 'skipped'/)
   assert.equal(main.match(/uses: \.\/\.github\/workflows\/rollout-wave\.yml/g).length, 3)
+  // Every wave call passes the secrets on: without them the App key is empty and every wave fails.
+  assert.equal(main.match(/uses: \.\/\.github\/workflows\/rollout-wave\.yml\n(?: {4}#.*\n)* {4}secrets: inherit\n/g).length, 3)
   // Each job: the environment, a token for its one repo, read-only in a dry run.
   assert.match(wave, /^ {4}environment: rollout$/m)
   assert.match(wave, /uses: actions\/create-github-app-token@[0-9a-f]{40} # v\d/)
