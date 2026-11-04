@@ -36,6 +36,7 @@ Without it, `release:check` and CI tell you when a release added or changed a fi
    ```
 
    `npx release-kit` runs the installed kit, which is now the new version, so apply writes what that version ships.
+   It also moves the version tag in the repo's own workflows that call one of the kit's (a `ci.yml` calling `changes.yml`, say), as Dependabot's kit update does; a pin to a commit SHA stays.
    Commit the result through a pull request.
 4. **`npm run release:check` warns when a repo is behind.**
    In package mode it starts with `release-kit check`, which warns (and never fails) when:
