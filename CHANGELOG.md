@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.8.0 - 2026-11-04
+
+### New
+
+- Patch and minor kit releases roll out with no clicks, gated on the canary's update merging ([#69](https://github.com/n8watkins/release-kit/pull/69))
+
+### Fixed
+
+- An update whose required checks passed before auto-merge ran now merges instead of failing ([#68](https://github.com/n8watkins/release-kit/pull/68))
+
 ## 2.7.1 - 2026-11-04
 
 ### Fixed
