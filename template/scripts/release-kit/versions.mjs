@@ -6,8 +6,9 @@
 //   - Cargo.toml: the `version` of its [package] table;
 //   - Cargo.lock: the version of the package named in the Cargo.toml beside it;
 //   - pyproject.toml: the `version` of its [project] table (PEP 621);
-//   - uv.lock: the version of the project itself (its [[package]] named like
-//     the pyproject.toml beside it, with source editable or virtual ".");
+//   - uv.lock: the version of the project itself (its [[package]] with source
+//     editable or virtual ".", named like the pyproject.toml beside it, or
+//     the only such entry when the lock still has an old name);
 // or { "path": "...", "pattern": "..." } for any other file: a regular
 // expression with exactly one capture group, the version, that matches the
 // file exactly once (^ and $ match at each line).
@@ -114,19 +115,26 @@ function cargoLockEntry(text, path, name) {
 // PEP 503: names compare lowercased, with runs of -, _ and . as one -.
 const normalize = (name) => name.toLowerCase().replace(/[-_.]+/g, '-')
 
-/** The project's own `[[package]]` entry in a uv.lock: named like the project, with source editable or virtual ".". */
+/**
+ * The project's own `[[package]]` entry in a uv.lock: the one with source
+ * editable or virtual ".", named like the project. When none has the
+ * project's name (a lock written before the project was renamed, until the
+ * next `uv lock`), the one entry with source "." is it.
+ */
 function uvLockEntry(text, path, name) {
   const headers = [...text.matchAll(/^\[\[package\]\][ \t]*\r?$/gm)].map((m) => m.index)
-  for (const start of headers) {
-    const block = text.slice(start, tableEnd(text, start))
-    const named = /^name[ \t]*=[ \t]*"([^"]*)"/m.exec(block)
-    if (!named || normalize(named[1]) !== normalize(name)) continue
-    if (!/^source[ \t]*=[ \t]*\{[^}\r\n]*\b(editable|virtual)[ \t]*=[ \t]*"\."/m.test(block)) continue
-    const match = VERSION_LINE.exec(block)
-    if (!match) throw new Error(`${path}: the entry for "${name}" has no version`)
-    return { index: start + match.index + match[1].length, version: match[3] }
+  const own = headers
+    .map((start) => ({ start, block: text.slice(start, tableEnd(text, start)) }))
+    .filter(({ block }) => /^source[ \t]*=[ \t]*\{[^}\r\n]*\b(editable|virtual)[ \t]*=[ \t]*"\."/m.test(block))
+  const named = own.filter(({ block }) => normalize(/^name[ \t]*=[ \t]*"([^"]*)"/m.exec(block)?.[1] ?? '') === normalize(name))
+  const entry = named[0] ?? (own.length === 1 ? own[0] : null)
+  if (!entry) {
+    const why = own.length ? `and ${own.length} entries have source editable or virtual ".", so it can't tell which is the project` : '(a [[package]] with source editable or virtual ".")'
+    throw new Error(`${path} has no entry for the project "${name}" ${why}: run uv lock to update it`)
   }
-  throw new Error(`${path} has no entry for the project "${name}" (a [[package]] with source editable or virtual ".")`)
+  const match = VERSION_LINE.exec(entry.block)
+  if (!match) throw new Error(`${path}: the entry for "${name}" has no version`)
+  return { index: entry.start + match.index + match[1].length, version: match[3] }
 }
 
 /** The single match of a pattern entry in `text`, with where its version starts. */
