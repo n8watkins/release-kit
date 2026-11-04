@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.1 - 2026-11-04
+
+### Fixed
+
+- Apply moves the kit version in a repo's own workflows that call the kit's ([#71](https://github.com/n8watkins/release-kit/pull/71))
+- The canary gate waits for the bot's open update even when Dependabot moved the pin first ([#72](https://github.com/n8watkins/release-kit/pull/72))
+
 ## 2.8.0 - 2026-11-04
 
 ### New
