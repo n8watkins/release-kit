@@ -364,6 +364,23 @@ if (packaged) {
 }
 if (reusable) done.push(`workflows call ${KIT_REPO}@${kitRef}`)
 
+// The repo's own workflows that call one of the kit's (a ci.yml calling
+// changes.yml, say) move to the same version, as Dependabot's kit update would:
+// otherwise verify flags them after every update that apply or the rollout bot
+// makes. Only the version tag changes; a pin to a commit SHA stays.
+if (reusable && /^v\d+\.\d+\.\d+$/.test(kitRef) && exists('.github/workflows')) {
+  const pin = new RegExp(`(${KIT_REPO.replace(/[.]/g, '\\.')}/\\.github/workflows/[\\w.-]+\\.ya?ml)@v\\d+\\.\\d+\\.\\d+\\b`, 'g')
+  for (const name of readdirSync(join(repo, '.github/workflows')).sort()) {
+    const path = `.github/workflows/${name}`
+    if (!/\.ya?ml$/.test(name) || ownedByKit(path)) continue
+    const text = read(path)
+    const next = text.replace(pin, `$1@${kitRef}`)
+    if (next === text) continue
+    write(path, next)
+    done.push(`${path}: calls the kit at ${kitRef}`)
+  }
+}
+
 // Update pull requests merge on their own once CI passes (docs/AUTO_MERGE.md):
 // through GitHub's auto-merge where the branch requires checks, else (a private
 // repo on GitHub Free) through the merge-when-green fallback.

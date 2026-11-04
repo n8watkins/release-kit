@@ -646,3 +646,37 @@ test('visibility: a private repo scans weekly only, every repo gets auto-merge, 
   quiet(KIT, 'node', ['apply.mjs', repo], { RELEASE_KIT_OFFLINE: '1' })
   assert.ok(!existsSync(join(repo, '.github/workflows/auto-merge.yml')))
 })
+
+test("the repo's own workflows that call the kit move to the installed version, so verify doesn't flag them after an update (tube-vault, cutelyaskme)", async () => {
+  const { KIT_VERSION, makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('apply-own-pins'))
+  mkdirSync(join(repo, '.github/workflows'), { recursive: true })
+  const ci = [
+    'name: CI',
+    'on: pull_request',
+    'jobs:',
+    '  changes:',
+    '    uses: n8watkins/release-kit/.github/workflows/changes.yml@v2.6.0',
+    '  pinned:',
+    '    uses: n8watkins/release-kit/.github/workflows/changes.yml@0123456789abcdef0123456789abcdef01234567 # v2.6.0',
+    '  other:',
+    '    uses: someone/else/.github/workflows/changes.yml@v2.6.0',
+    '',
+  ].join('\n')
+  writeFileSync(join(repo, '.github/workflows/ci.yml'), ci)
+  // --check counts it as a file apply would change, and writes nothing.
+  const check = JSON.parse(attempt(KIT, 'node', ['apply.mjs', repo, '--check', '--json']).stdout)
+  assert.ok(check.files.changed.includes('.github/workflows/ci.yml'))
+  assert.equal(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'), ci)
+  const report = JSON.parse(quiet(KIT, 'node', ['apply.mjs', repo, '--json']))
+  const after = readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8')
+  assert.equal(after, ci.replace('changes.yml@v2.6.0\n', `changes.yml@v${KIT_VERSION}\n`))
+  assert.ok(report.files.changed.includes('.github/workflows/ci.yml'))
+  assert.ok(report.done.includes(`.github/workflows/ci.yml: calls the kit at v${KIT_VERSION}`))
+  // Vendored mode calls no reusable workflow, so it leaves the pins alone.
+  const vendored = makeRepo(tmp('apply-own-pins-vendored'))
+  mkdirSync(join(vendored, '.github/workflows'), { recursive: true })
+  writeFileSync(join(vendored, '.github/workflows/ci.yml'), ci)
+  quiet(KIT, 'node', ['apply.mjs', vendored, '--vendored'])
+  assert.equal(readFileSync(join(vendored, '.github/workflows/ci.yml'), 'utf8'), ci)
+})
