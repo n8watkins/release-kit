@@ -95,7 +95,8 @@ Pushing the tag runs `.github/workflows/release.yml`:
 3. `npm run release:artifacts`, if defined, writes shippable files into `release-artifacts/`; they get SHA-256 checksums.
 4. The GitHub Release is created with the generated notes and the files, and the uploaded files are re-downloaded and checked.
 
-In release-kit itself, a published release then starts the rollout bot: [`rollout-start.yml`](.github/workflows/rollout-start.yml) runs `.github/workflows/rollout.yml` for the tag, for real, and each wave waits for the owner's approval in the `rollout` environment ([docs/UPGRADES.md](docs/UPGRADES.md#with-the-app)).
+In release-kit itself, a published release then starts the rollout bot: [`rollout-start.yml`](.github/workflows/rollout-start.yml) runs `.github/workflows/rollout.yml` for the tag, for real ([docs/UPGRADES.md](docs/UPGRADES.md#with-the-app)).
+A patch or minor release rolls out with no clicks, gated on the canary's update pull request merging; a major release waits for the owner's approval in the `rollout-major` environment before each wave; a failure opens a `release-kit: rollout` issue.
 It skips a baseline, a pre-release, and a tag that already had a real rollout.
 
 If a Release run fails after the tag is pushed (a flaky check, an outage), fix the cause and retry; the workflow is safe to run again:

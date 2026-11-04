@@ -4,8 +4,9 @@
 # rollout.yml listens for "release: published", but the Release workflow
 # publishes with the workflow's own token, and GitHub starts no workflow from
 # an event that token caused. A workflow_dispatch from that token is allowed,
-# so this starts the rollout by hand, for real (dry_run=false). Each wave still
-# waits for the owner's approval in the `rollout` environment.
+# so this starts the rollout by hand, for real (dry_run=false). A patch or minor
+# release then rolls out on its own, gated on the canary; a major one waits for
+# the owner's approval in the `rollout-major` environment before each wave.
 #
 # Why not a step at the end of release.yml: that file is also the reusable
 # workflow adopters call, and a called job may not ask for more permissions
@@ -62,4 +63,4 @@ jobs:
             exit 0
           fi
           gh workflow run rollout.yml -R "$GITHUB_REPOSITORY" -f tag="$TAG" -f dry_run=false
-          echo "::notice::Started the rollout of $TAG; each wave waits for approval in the rollout environment."
+          echo "::notice::Started the rollout of $TAG; see its run for the waves (a major release waits for approval in rollout-major)."

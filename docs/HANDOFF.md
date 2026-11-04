@@ -40,6 +40,15 @@ The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the p
   - Dependabot rejects `cooldown.semver-*-days` for github-actions; the SchemaStore schema doesn't catch it, only Dependabot's `.github/dependabot.yml` check on the default branch does.
 - The sandbox's own `auto-merge.yml` is still the v2.3.3 one without `checks: read`, so its merge-when-green fallback fails with a 403; re-apply the kit there before relying on it.
 
+### Rollouts gate themselves (2026-11-04)
+
+- The owner asked for routine releases to need no clicks.
+  `rollout.yml` now runs canary, then "Canary merged" (`scripts/rollout.mjs wait-merge`: up to an hour for the canary's branch to pin the tag; a red check or a pull request closed unmerged fails it at once), then public, then private.
+- A major release (its major differs from the highest earlier tag, `isMajorRelease`) skips that gate and instead waits before each wave for a click in the `rollout-major` environment, which holds no secrets; the waves still run in `rollout` for the App key.
+- Any failure in a real rollout runs "Report a failure", which opens or comments on an issue labeled `release-kit: rollout` in release-kit.
+- A dry run that names a disabled adopter now checks it, which shows whether the App is installed there.
+- The `rollout` environment's required reviewer comes off only after this is released; `rollout-major` keeps the owner as required reviewer.
+
 ### Unreleased on main
 
 - #59: the App key reaches every rollout wave.
@@ -60,6 +69,6 @@ The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the p
 
 ### Next
 
-1. Cut the next release when the owner asks; its rollout is the first with the lock fix, and needs the owner's approval for each wave.
+1. Watch the first rollout without approvals (the release after the gate) and close any `release-kit: rollout` issue it opens once handled.
 2. Install the App on the disabled adopters and enable them in `adopters.json`, then drop the kit's Dependabot entries (open problem 2).
 3. Fix open problem 1, then re-run `apply` in tl-dw and voicedock.

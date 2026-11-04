@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BRANCH, filesFromStatus, linkReleaseNotes, parseAdopters, planWaves, prBody, prTitle, updateLock } from '../scripts/rollout.mjs'
+import { BRANCH, ISSUE_LABEL, failureReport, filesFromStatus, isMajorRelease, linkReleaseNotes, mergeState, parseAdopters, planWaves, prBody, prTitle, updateLock } from '../scripts/rollout.mjs'
 import { KIT, attempt, makeRepo, run, tmp } from './helpers.mjs'
 import { execFileSync } from 'node:child_process'
 
@@ -75,6 +75,95 @@ test('waves run canary, public, private, and skip disabled adopters with their r
   assert.deepEqual([some.canary, some.public.map((a) => a.repo), some.private], [[], ['acme/web'], []])
   assert.deepEqual(some.skipped.map((s) => s.repo), ['acme/later'])
   assert.throws(() => planWaves(adopters, ['web', 'ghost']), /not in adopters\.json: ghost/)
+  // A dry run that names a disabled adopter checks it (read-only), to see whether the App is installed there.
+  const check = planWaves(adopters, ['later'], { dryRun: true })
+  assert.deepEqual([check.public.map((a) => a.repo), check.skipped], [['acme/later'], []])
+  // Without names, a dry run still covers only the enabled ones.
+  assert.deepEqual(planWaves(adopters, [], { dryRun: true }).skipped.map((s) => s.repo), ['acme/later'])
+})
+
+test('a release is a major when its major differs from the highest release below it', () => {
+  const tags = ['v1.0.0', 'v1.4.2', 'v2.0.0', 'v2.7.0', 'v2.7.1', 'v2.8.0-rc.1', 'baseline', 'v3.0.0']
+  assert.equal(isMajorRelease('v2.7.2', tags), false)
+  assert.equal(isMajorRelease('v2.8.0', tags), false)
+  assert.equal(isMajorRelease('v3.0.0', tags), true)
+  assert.equal(isMajorRelease('v2.0.0', tags), true)
+  // A later tag doesn't count, and the first release ever is a major.
+  assert.equal(isMajorRelease('v1.4.2', tags), false)
+  assert.equal(isMajorRelease('v1.0.0', tags), true)
+  assert.equal(isMajorRelease('v0.1.0', []), true)
+  assert.throws(() => isMajorRelease('main', tags), /not a release tag/)
+})
+
+test('the canary gate passes once the branch pins the tag, and fails on a closed pull request, a red check or no pull request', () => {
+  const base = { tag: 'v2.7.2', adopter: { repo: 'acme/canary', branch: 'main' } }
+  const pr = (over = {}) => ({ number: 7, state: 'open', merged: false, url: 'https://github.com/acme/canary/pull/7', ...over })
+  // Merged: the branch pins the tag, with or without a pull request (apply had nothing to change).
+  assert.equal(mergeState({ ...base, pin: '2.7.2', pr: pr({ state: 'closed', merged: true }) }).state, 'merged')
+  assert.equal(mergeState({ ...base, pin: '2.7.2', pr: null }).state, 'merged')
+  // Still going: open and checks running, green but not merged yet, or unreadable checks.
+  for (const checks of ['pending', 'green', null]) assert.equal(mergeState({ ...base, pin: '2.7.1', pr: pr(), checks }).state, 'pending', String(checks))
+  // Merged a moment ago, the branch not read yet.
+  assert.equal(mergeState({ ...base, pin: '2.7.1', pr: pr({ state: 'closed', merged: true }) }).state, 'pending')
+  // Stops the rollout.
+  const red = mergeState({ ...base, pin: '2.7.1', pr: pr(), checks: 'red', failed: ['CI result', 'osv / osv'] })
+  assert.deepEqual([red.state, red.why], ['failed', 'a check failed on https://github.com/acme/canary/pull/7: CI result, osv / osv'])
+  assert.match(mergeState({ ...base, pin: '2.7.1', pr: pr({ state: 'closed' }) }).why, /closed without merging/)
+  assert.equal(mergeState({ ...base, pin: '2.7.1', pr: pr({ state: 'closed' }) }).state, 'failed')
+  assert.match(mergeState({ ...base, pin: '2.7.1', pr: null }).why, /no update pull request for v2\.7\.2, and main pins release-kit 2\.7\.1/)
+  assert.match(mergeState({ ...base, pin: null, pr: null }).why, /pins no release-kit version/)
+})
+
+test('wait-merge reads the canary through gh: passes on the pin, stops on a red check, and times out', () => {
+  const dir = tmp('rollout-wait')
+  writeFileSync(join(dir, 'gh'), [
+    '#!/bin/sh',
+    'case "$*" in',
+    '  *contents/package.json*) echo "$FAKE_PKG" ;;',
+    '  *pulls\\?*) echo "$FAKE_PULLS" ;;',
+    '  *check-runs*) echo "$FAKE_RUNS" ;;',
+    '  */status) echo \'{"state":"success","total_count":0}\' ;;',
+    '  *) exit 1 ;;',
+    'esac',
+  ].join('\n'), { mode: 0o755 })
+  const pkg = (v) => JSON.stringify({ content: Buffer.from(JSON.stringify({ devDependencies: { 'release-kit': `github:n8watkins/release-kit#v${v}` } })).toString('base64') })
+  const pulls = JSON.stringify([
+    { number: 3, title: prTitle('v2.7.1'), state: 'closed', merged_at: '2026-11-01T00:00:00Z', html_url: 'https://github.com/acme/canary/pull/3', head: { sha: 'a'.repeat(40) } },
+    { number: 4, title: prTitle('v2.7.2'), state: 'open', merged_at: null, html_url: 'https://github.com/acme/canary/pull/4', head: { sha: 'b'.repeat(40) } },
+  ])
+  const runs = (conclusion) => JSON.stringify({ check_runs: [{ name: 'CI result', status: 'completed', conclusion }, { name: 'auto-merge / Auto-merge', status: 'completed', conclusion: 'success' }] })
+  const go = (over) => attempt(KIT, 'node', ['scripts/rollout.mjs', 'wait-merge', '--adopter', JSON.stringify({ repo: 'acme/canary', owner: 'acme', name: 'canary', branch: 'main' }), '--tag', 'v2.7.2', '--timeout-minutes', '0', '--interval-seconds', '0'],
+    { PATH: `${dir}:${process.env.PATH}`, FAKE_PKG: pkg('2.7.1'), FAKE_PULLS: pulls, FAKE_RUNS: runs('success'), ...over })
+  const merged = go({ FAKE_PKG: pkg('2.7.2') })
+  assert.equal(merged.status, 0, merged.stderr)
+  assert.match(merged.stdout, /acme\/canary: main pins release-kit v2\.7\.2/)
+  const red = go({ FAKE_RUNS: runs('failure') })
+  assert.equal(red.status, 1)
+  assert.match(red.stderr, /acme\/canary: a check failed on https:\/\/github\.com\/acme\/canary\/pull\/4: CI result/)
+  const slow = go({})
+  assert.equal(slow.status, 1)
+  assert.match(slow.stderr, /not merged after 0 minutes \(https:\/\/github\.com\/acme\/canary\/pull\/4 is open, checks green\)/)
+})
+
+test('a failed rollout reports each failed job, with its log, in the rollout issue', () => {
+  const body = failureReport({
+    tag: 'v2.7.2',
+    runUrl: 'https://github.com/n8watkins/release-kit/actions/runs/1',
+    jobs: [
+      { name: 'Plan the waves', conclusion: 'success', html_url: 'u0' },
+      { name: 'Canary / portfolio-rank', conclusion: 'success', html_url: 'u1' },
+      { name: 'Canary merged / portfolio-rank', conclusion: 'failure', html_url: 'u2' },
+      { name: 'Public / scribe', conclusion: 'timed_out', html_url: 'u3' },
+      { name: 'Private', conclusion: 'skipped', html_url: 'u4' },
+      { name: 'Report a failure', conclusion: null, html_url: 'u5' },
+    ],
+  })
+  assert.match(body, /^The rollout of v2\.7\.2 stopped: \[the run\]\(https:\/\/github\.com\/n8watkins\/release-kit\/actions\/runs\/1\)\./)
+  assert.match(body, /^- \*\*Canary merged \/ portfolio-rank\*\*: failure, \[log\]\(u2\)$/m)
+  assert.match(body, /^- \*\*Public \/ scribe\*\*: timed out, \[log\]\(u3\)$/m)
+  assert.doesNotMatch(body, /portfolio-rank\*\*: success|Private|Plan the waves/)
+  assert.match(failureReport({ tag: 'v2.7.2', runUrl: 'r', jobs: [] }), /No job failed outright/)
+  assert.equal(ISSUE_LABEL, 'release-kit: rollout')
 })
 
 test('plan prints the waves and writes them as step outputs', () => {
@@ -83,12 +172,17 @@ test('plan prints the waves and writes them as step outputs', () => {
   writeFileSync(join(dir, 'out'), '')
   writeFileSync(join(dir, 'summary'), '')
   const env = { GITHUB_OUTPUT: join(dir, 'out'), GITHUB_STEP_SUMMARY: join(dir, 'summary') }
-  run(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'v9.9.9', '--adopters', join(dir, 'adopters.json')], env)
+  run(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'v9.9.9', '--tags', 'v9.0.0,v9.9.8', '--adopters', join(dir, 'adopters.json')], env)
   const out = Object.fromEntries(readFileSync(join(dir, 'out'), 'utf8').trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), JSON.parse(l.slice(l.indexOf('=') + 1))]))
   assert.deepEqual(out.canary.map((a) => a.repo), ['acme/app'])
   assert.deepEqual(out.public.map((a) => a.repo), ['acme/web'])
   assert.deepEqual(out.private, [])
+  assert.equal(out.major, false)
   assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /\*\*canary\*\*: acme\/app/)
+  assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /no approval; the public and private waves start once the canary's update pull request has merged/)
+  writeFileSync(join(dir, 'out'), '')
+  run(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'v10.0.0', '--tags', 'v9.9.9', '--adopters', join(dir, 'adopters.json')], env)
+  assert.match(readFileSync(join(dir, 'out'), 'utf8'), /^major=true$/m)
   const bad = attempt(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'main', '--adopters', join(dir, 'adopters.json')])
   assert.notEqual(bad.status, 0)
   assert.match(bad.stderr, /--tag must be a release tag like v2\.6\.0/)
@@ -170,7 +264,7 @@ test("apply's auto-merge workflow lets the rollout bot's pull requests merge lik
   assert.ok(BRANCH.startsWith('release-kit/'))
 })
 
-test('the rollout workflow runs the waves in order, each in the protected environment with a pinned App token', () => {
+test('the rollout workflow runs the waves in order, gates a patch or minor on the canary merging, and waits for the owner only on a major', () => {
   const main = read('.github/workflows/rollout.yml')
   const wave = read('.github/workflows/rollout-wave.yml')
   assert.match(main, /^ {2}release:\n {4}types: \[published\]$/m)
@@ -178,16 +272,35 @@ test('the rollout workflow runs the waves in order, each in the protected enviro
   // Dry run is the default for a manual run; a release rolls out for real.
   assert.match(main, /dry_run:\n(?: {8}.*\n)*? {8}default: true/)
   assert.match(main, /DRY_RUN: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.dry_run \}\}/)
-  // canary, then public, then private; a failed wave stops the ones after it.
+  // canary, then the gate, then public, then private; a failed wave or gate stops the ones after it.
   assert.match(main, /^ {2}canary:\n(?: {4}.*\n)*? {4}needs: plan$/m)
-  assert.match(main, /^ {2}public:\n(?: {4}.*\n)*? {4}needs: \[plan, canary\]$/m)
-  assert.match(main, /^ {2}private:\n(?: {4}.*\n)*? {4}needs: \[plan, canary, public\]$/m)
-  assert.match(main, /needs\.canary\.result == 'success' \|\| needs\.canary\.result == 'skipped'/)
+  assert.match(main, /^ {2}canary-merged:\n(?: {4}.*\n)*? {4}needs: \[plan, canary\]$/m)
+  assert.match(main, /^ {2}public:\n(?: {4}.*\n)*? {4}needs: \[plan, canary, canary-merged\]$/m)
+  assert.match(main, /^ {2}private:\n(?: {4}.*\n)*? {4}needs: \[plan, canary, canary-merged, public\]$/m)
+  assert.equal(main.match(/needs\.canary\.result == 'success' \|\| needs\.canary\.result == 'skipped'/g).length, 2)
+  assert.equal(main.match(/needs\.canary-merged\.result == 'success' \|\| needs\.canary-merged\.result == 'skipped'/g).length, 2)
   assert.match(main, /needs\.public\.result == 'success' \|\| needs\.public\.result == 'skipped'/)
+  // The gate: only after a real canary, not in a dry run or a major, and with a timeout.
+  const gate = main.slice(main.indexOf('\n  canary-merged:\n'), main.indexOf('\n  public:\n'))
+  assert.match(gate, /needs\.canary\.result == 'success'\n {6}&& needs\.plan\.outputs\.dry-run != 'true' && needs\.plan\.outputs\.major != 'true'/)
+  assert.match(gate, /^ {4}environment: rollout$/m)
+  assert.match(gate, /permission-contents: read\n {10}permission-pull-requests: read\n/)
+  assert.match(gate, /node scripts\/rollout\.mjs wait-merge --adopter "\$ADOPTER" --tag "\$TAG" --timeout-minutes 60/)
+  assert.match(gate, /^ {4}timeout-minutes: 75$/m)
+  // Every wave call passes the secrets on, and says whether this is a major.
   assert.equal(main.match(/uses: \.\/\.github\/workflows\/rollout-wave\.yml/g).length, 3)
-  // Every wave call passes the secrets on: without them the App key is empty and every wave fails.
   assert.equal(main.match(/uses: \.\/\.github\/workflows\/rollout-wave\.yml\n(?: {4}#.*\n)* {4}secrets: inherit\n/g).length, 3)
-  // Each job: the environment, a token for its one repo, read-only in a dry run.
+  assert.equal(main.match(/^ {6}major: \$\{\{ needs\.plan\.outputs\.major == 'true' \}\}$/gm).length, 3)
+  // A failure in a real rollout opens or updates the rollout issue.
+  const report = main.slice(main.indexOf('\n  report:\n'))
+  assert.match(report, /needs: \[plan, canary, canary-merged, public, private\]/)
+  assert.match(report, /if: failure\(\) && !\(github\.event_name == 'workflow_dispatch' && inputs\.dry_run\)/)
+  assert.match(report, /issues: write/)
+  assert.match(report, /node scripts\/rollout\.mjs report --tag "\$TAG" --run-id "\$RUN_ID"/)
+  // A major waits in rollout-major, which holds no secrets, before each wave's jobs.
+  assert.match(wave, /^ {2}approve:\n {4}name: .*\n {4}if: inputs\.major\n(?: {4}.*\n)*? {4}environment: rollout-major$/m)
+  assert.match(wave, /^ {2}update:\n(?: {4}.*\n)*? {4}needs: approve\n(?: {4}#.*\n)* {4}if: \$\{\{ !cancelled\(\) && \(needs\.approve\.result == 'success' \|\| needs\.approve\.result == 'skipped'\) \}\}$/m)
+  // Each job: the environment with the key, a token for its one repo, read-only in a dry run.
   assert.match(wave, /^ {4}environment: rollout$/m)
   assert.match(wave, /uses: actions\/create-github-app-token@[0-9a-f]{40} # v\d/)
   assert.match(wave, /app-id: \$\{\{ vars\.RELEASE_KIT_BOT_APP_ID \}\}\n {10}private-key: \$\{\{ secrets\.RELEASE_KIT_BOT_KEY \}\}/)
@@ -196,6 +309,8 @@ test('the rollout workflow runs the waves in order, each in the protected enviro
   assert.match(wave, /fail-fast: false/)
   // apply comes from the tag being rolled out.
   assert.match(wave, /ref: refs\/tags\/\$\{\{ inputs\.tag \}\}\n {10}path: kit/)
+  // The plan passes --dry-run on, so a dry run can check a disabled adopter.
+  assert.match(main, /if \[ "\$DRY_RUN" = "true" \]; then set -- "\$@" --dry-run; fi\n {10}node scripts\/rollout\.mjs plan "\$@"/)
 })
 
 test('a release the Release workflow publishes starts one real rollout, in this repo only', () => {
