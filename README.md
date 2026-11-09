@@ -193,7 +193,7 @@ The choices are saved in `.release.json`, so re-running apply to upgrade keeps t
 ### Package, reusable and vendored modes
 
 In package mode nothing of the kit is copied into the repo: `npm run release` runs `release-kit release`, and the commit-msg hook runs `release-kit commit-msg` from `node_modules` (before `npm install` it lets commits through with a note; CI checks every commit anyway).
-The `release-kit` command also runs `notes`, `releases` (checks `releases.json`), `train`, `protect`, `check`, `verify`, `lanes`, `pre-push` (the guard), `install-guard` (the guard in a repo without the kit), `alarm` (the Direct push alarm's check) and `apply`.
+The `release-kit` command also runs `notes`, `releases` (checks `releases.json`), `backfill` (adds older releases to it), `train`, `protect`, `check`, `verify`, `lanes`, `pre-push` (the guard), `install-guard` (the guard in a repo without the kit), `alarm` (the Direct push alarm's check) and `apply`.
 
 Package and reusable mode write short callers of the kit's workflows, for example:
 
@@ -360,6 +360,35 @@ Every job has a timeout, so a hung check fails within 30 minutes instead of GitH
 Don't move or re-push a tag that is already on GitHub.
 
 ## Backfilling past milestones
+
+### Older releases in releases.json
+
+`releases.json` starts with the first release the kit cuts after it learned to write one.
+`npx release-kit backfill` (`node scripts/release-kit/backfill.mjs` outside package mode) adds the release tags before that, rebuilt from the commits between each tag and the one before it, and can fill in GitHub Release notes that are missing:
+
+```bash
+npx release-kit backfill                  # dry run: the plan, nothing written
+npx release-kit backfill --verbose        # the plan with every note, and every commit it couldn't read
+npx release-kit backfill --write          # add the planned releases to releases.json (commit it through a PR)
+npx release-kit backfill --edit-releases  # fill in empty or generated GitHub Release notes
+```
+
+It is a dry run unless `--write` or `--edit-releases` says otherwise, and it is careful with messy early history:
+
+- **A release already in `releases.json` is kept** exactly as it is; running it twice adds nothing.
+- **A baseline tag is skipped**: it marks a version, it isn't a release.
+- **A tag with a higher release tag on its history is skipped** (tags made out of order), since its changes can't be told apart.
+- **Commits that aren't Conventional Commits are never guessed at.** They are counted in the entry's `unattributed`, so a reader knows the notes may be short, and listed by `--verbose`; a release made only of them gets an entry with no notes.
+- **Bots, merges and git's own messages** are left out, as at release time.
+- **Pull request numbers** come from a `(#12)` at the end of the subject, else, with gh, from GitHub's list of the pull requests that merged the commit (`--no-github` skips GitHub).
+- **GitHub Release notes are only filled in where nothing a person wrote is lost:** a release whose body is empty, or only GitHub's generated "What's Changed" list (its "Full Changelog" link is kept).
+  A release with notes someone wrote, a draft and one with the kit's notes are left alone, and no release is created for a tag without one.
+  The notes it writes say they were backfilled, and how many commits it couldn't list.
+- `--since vX.Y.Z` limits it to that tag and newer, and `--json` prints the plan as JSON.
+
+Backfilled entries say `"source": "backfill"`; a release the kit cut says `"release"`.
+
+### Publishing a past milestone
 
 Tag a past commit with the version its `package.json` had, and publish it as a release:
 

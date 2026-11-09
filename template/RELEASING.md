@@ -186,6 +186,8 @@ There protect sets up the free safeguards instead, and says what GitHub still le
 
 - `npm run release -- --baseline` tags the version this repo is already at, without a GitHub Release, so the first real release lists only new work.
 - `npm run release -- --baseline <commit> --publish` tags a past milestone with the version its `package.json` had, and publishes it.
+- `npx release-kit backfill` adds release tags from before the kit wrote `releases.json` to it, from their commits: a dry run that prints the plan, `--write` to write the file, `--edit-releases` to fill in GitHub Release notes that are empty or only GitHub's generated list.
+  Commits that aren't Conventional Commits are counted as `unattributed`, never guessed at, and baseline tags are skipped.
 
 ## When to release
 

@@ -348,7 +348,7 @@ for (const source of walk(TEMPLATE)) {
   }
   if (packaged && hook) write(path, `#!/bin/sh\n${HOOKS[path.slice(10)]}`, 0o755)
   // RELEASING.md names the kit's commands as package mode runs them.
-  else if (!packaged && path === 'RELEASING.md') write(path, readFileSync(source, 'utf8').replaceAll('npx release-kit protect', 'node scripts/release-kit/protect.mjs'))
+  else if (!packaged && path === 'RELEASING.md') write(path, readFileSync(source, 'utf8').replaceAll('npx release-kit protect', 'node scripts/release-kit/protect.mjs').replaceAll('npx release-kit backfill', 'node scripts/release-kit/backfill.mjs'))
   // A copy, with the template's permissions (a hook is always executable).
   else write(path, readFileSync(source), hook ? 0o755 : statSync(source).mode & 0o777)
   done.push(path)

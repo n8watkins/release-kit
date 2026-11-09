@@ -13,6 +13,20 @@ const MAX_OUTPUT = 1024 * 1024 * 1024
 export const git = (...args) =>
   execFileSync('git', args, { encoding: 'utf8', maxBuffer: MAX_OUTPUT, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
+// The whole line a baseline tag's message carries, and nothing else does: a
+// release tag's message is its changelog section, whose lines are headings
+// or "- " items.
+export const BASELINE_NOTE = 'release-kit baseline: tagged when adopting release-kit; no GitHub Release.'
+
+/** True when `tag` is a baseline (npm run release -- --baseline): a version marker, never a release. */
+export function isBaseline(tag) {
+  try {
+    return git('tag', '--list', '--format=%(contents)', tag).replace(/\r\n?/g, '\n').split('\n').some((line) => line.trim() === BASELINE_NOTE)
+  } catch {
+    return false
+  }
+}
+
 /** True when `ref` names a commit. Never treats `ref` as an option. */
 export function isCommit(ref) {
   try {

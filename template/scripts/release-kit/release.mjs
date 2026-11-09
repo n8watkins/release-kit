@@ -37,7 +37,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { RELEASE_TAG, isPreOne, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
-import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
+import { BASELINE_NOTE, commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
 import { noteStyle, renderNotes } from './notes.mjs'
 import { RELEASES_FILE, readDocument, releaseEntry, releasesConfig, slugOf, writeReleaseFiles } from './releases.mjs'
 import { entryLabel, entryPath, readVersion, setVersion, versionFilesProblems } from './versions.mjs'
@@ -57,10 +57,6 @@ const config = existsSync('.release.json') ? readJson('.release.json') : {}
 const versionFiles = config.versionFiles ?? []
 const versionFilesProblem = versionFilesProblems(versionFiles)
 if (versionFilesProblem.length) fail(`.release.json "versionFiles": ${versionFilesProblem.join('; ')}`)
-// The whole line a baseline tag's message carries, and nothing else does: a
-// release tag's message is its changelog section, whose lines are headings
-// or "- " items.
-const BASELINE_NOTE = 'release-kit baseline: tagged when adopting release-kit; no GitHub Release.'
 // The branches releases are cut from: main or master, or the list in
 // .release.json "branches" (for a repo whose shipped build lives on another
 // long-lived branch).
