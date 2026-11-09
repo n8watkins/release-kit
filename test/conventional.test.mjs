@@ -156,9 +156,9 @@ test('a pull request title is checked as typed, since a squash merge commits it 
   const { writeFileSync } = await import('node:fs')
   const { join } = await import('node:path')
   const dir = tmp('title')
-  const check = (title) => {
+  const check = (title, ...more) => {
     writeFileSync(join(dir, 'title'), `${title}\n`)
-    return attempt(dir, 'node', [new URL('../template/scripts/release-kit/commit-msg.mjs', import.meta.url).pathname, '--title', join(dir, 'title')])
+    return attempt(dir, 'node', [new URL('../template/scripts/release-kit/commit-msg.mjs', import.meta.url).pathname, '--title', join(dir, 'title'), ...more])
   }
   assert.equal(check('feat: add dark mode (#12)').status, 0)
   const bad = check('Add dark mode')
@@ -167,4 +167,10 @@ test('a pull request title is checked as typed, since a squash merge commits it 
   // A leading "#" is part of a title, not a comment to strip.
   assert.match(check('#12 fix the menu').stderr, /"#12 fix the menu": expected/)
   assert.match(check(`feat: ${'x'.repeat(100)}`).stderr, /keep it to 100/)
+  // The squash merge appends " (#76)": a 97-character title makes a 103-character header.
+  const long = `feat: ${'x'.repeat(91)}`
+  assert.equal(check(long).status, 0)
+  assert.match(check(long, '--pr', '76').stderr, /header is 103 characters; keep it to 100 once the squash merge adds " \(#76\)"/)
+  assert.equal(check(`feat: ${'x'.repeat(88)}`, '--pr', '76').status, 0)
+  assert.equal(check(`feat: ${'x'.repeat(88)} (#76)`, '--pr', '76').status, 0, 'a title that already ends with it gets nothing added')
 })

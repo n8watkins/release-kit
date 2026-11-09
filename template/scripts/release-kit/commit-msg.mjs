@@ -3,8 +3,9 @@
 //
 //   node scripts/release-kit/commit-msg.mjs <file>          (the commit-msg hook)
 //   node scripts/release-kit/commit-msg.mjs --range a..b    (CI: every commit in a range)
-//   node scripts/release-kit/commit-msg.mjs --title <file>  (CI: a pull request title, which a
-//                                                            squash merge makes the commit on main)
+//   node scripts/release-kit/commit-msg.mjs --title <file> [--pr <number>]
+//       (CI: a pull request title, which a squash merge makes the commit on
+//       main; with --pr, as GitHub commits it, with " (#number)" appended)
 import { readFileSync } from 'node:fs'
 import { lint } from './conventional.mjs'
 import { commitsBetween, git, isBot, isMain } from './git.mjs'
@@ -41,7 +42,12 @@ if (isMain(import.meta.url)) {
   if (titleAt !== -1) {
     // The title as typed: no comment stripping, a title can start with "#".
     const title = readFileSync(process.argv[titleAt + 1], 'utf8').replace(/\r?\n$/, '')
-    const problem = title.includes('\n') ? 'a title is one line' : lint(title)
+    // GitHub's squash merge appends " (#12)" unless the title ends with it, so
+    // a title that fits by itself can still make a header that is too long.
+    const pr = process.argv.includes('--pr') ? process.argv[process.argv.indexOf('--pr') + 1] : undefined
+    const merged = /^\d+$/.test(pr ?? '') && !title.trimEnd().endsWith(`(#${pr})`) ? `${title} (#${pr})` : title
+    let problem = title.includes('\n') ? 'a title is one line' : lint(merged)
+    if (problem && merged !== title && !lint(title)) problem = `${problem} once the squash merge adds " (#${pr})"`
     if (problem) {
       console.error(`Pull request title check failed (a squash merge makes the title the commit message on main; see RELEASING.md):\n  - "${title}": ${problem}`)
       process.exit(1)
