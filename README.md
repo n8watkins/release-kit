@@ -67,7 +67,7 @@ The full answer, with a side-by-side table, is in [docs/UPGRADES.md](docs/UPGRAD
 - **No registry publishing:** it makes GitHub Releases and attaches files; publishing to npm is up to the repo.
 - **Not on the npm registry itself:** it installs as a git dependency, which npm 12 only allows through the `.npmrc` line apply writes, and which carries no provenance (publishing with trusted publishing is planned).
 - **One version per repo:** no monorepo support.
-- **npm only:** pnpm, yarn and bun repos need a `package-lock.json` too (support is planned).
+- **npm only:** pnpm, yarn and bun repos need a `package-lock.json` too (support is planned), and a repo without a `package.json` can't adopt it; [docs/BEYOND_NPM.md](docs/BEYOND_NPM.md) proposes a standalone CLI.
 - **No reviewable release PR or pre-release channels yet** (both planned).
 - **Upgrades that add files** reach the repos the rollout bot's GitHub App is installed on by pull request; any other repo needs a re-run of apply.
 - **One maintainer.**
