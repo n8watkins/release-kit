@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/n8watkins/release-kit/main/schema/releases.v1.json",
+  "title": "release-kit releases.json, schema version 1",
+  "description": "Every release of a repo as data, newest first. Written by release-kit's npm run release and backfill. Every key is always present; unknown values are null. A change that would break a reader gets a new schemaVersion and a new schema file; version 1 only ever gains optional keys.",
+  "type": "object",
+  "required": ["$schema", "schemaVersion", "repository", "releases"],
+  "properties": {
+    "$schema": {
+      "description": "This schema's URL.",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "description": "The format's version. Readers should refuse a version they don't know.",
+      "const": 1
+    },
+    "repository": {
+      "description": "The GitHub repo, owner/repo, or null when it isn't on GitHub.",
+      "type": ["string", "null"],
+      "pattern": "^[\\w.-]+/[\\w.-]+$"
+    },
+    "releases": {
+      "description": "Every release, highest version first.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/release" }
+    }
+  },
+  "$defs": {
+    "release": {
+      "type": "object",
+      "required": ["version", "tag", "date", "time", "url", "previous", "summary", "breaking", "notes", "source", "unattributed"],
+      "properties": {
+        "version": {
+          "description": "The version, x.y.z.",
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "tag": {
+          "description": "The git tag: v and the version.",
+          "type": "string",
+          "pattern": "^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "date": {
+          "description": "The release's day, as CHANGELOG.md shows it (in .release.json timeZone).",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "time": {
+          "description": "When the release was cut (for a backfilled release, when its tag was made), ISO 8601 in UTC, or null.",
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "url": {
+          "description": "The GitHub Release page, or null when the repo isn't on GitHub.",
+          "type": ["string", "null"]
+        },
+        "previous": {
+          "description": "The release tag this one follows, or null for the first.",
+          "type": ["string", "null"]
+        },
+        "summary": {
+          "description": "The releaser's lead line (npm run release -- --summary), or null.",
+          "type": ["string", "null"]
+        },
+        "breaking": {
+          "description": "True when any note is a breaking change.",
+          "type": "boolean"
+        },
+        "notes": {
+          "description": "The user-facing changes, in section order (breaking, new, fixed, safer, faster, reverted), commit order within a section. Empty for a maintenance release.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/note" }
+        },
+        "source": {
+          "description": "release: written by npm run release (or the train) as the release was cut. backfill: reconstructed later from the commits between tags by release-kit backfill.",
+          "enum": ["release", "backfill"]
+        },
+        "unattributed": {
+          "description": "Commits in the release that backfill couldn't read as Conventional Commits, so the notes may leave out changes. 0 for every release cut by the kit.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "note": {
+      "type": "object",
+      "required": ["section", "type", "scope", "text", "breaking", "pr", "prUrl", "commit", "commitUrl"],
+      "properties": {
+        "section": {
+          "description": "Where the note belongs, whatever the repo's headings call it: breaking (Breaking changes), new (New / Features), fixed (Fixed / Fixes), safer (Safer / Security), faster (Faster / Performance), reverted (Reverted / Reverts).",
+          "enum": ["breaking", "new", "fixed", "safer", "faster", "reverted"]
+        },
+        "type": {
+          "description": "The Conventional Commit type: feat, fix, perf, security or revert, or any type for a breaking change.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "The commit's scope, or null.",
+          "type": ["string", "null"]
+        },
+        "text": {
+          "description": "The note as written for users: the commit's Release-note line, else its subject, capitalized, without the trailing (#12). It may hold inline Markdown such as `code`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "breaking": {
+          "description": "True for a breaking change (! or a BREAKING CHANGE footer).",
+          "type": "boolean"
+        },
+        "pr": {
+          "description": "The pull request number, or null for a commit without one.",
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "prUrl": {
+          "description": "The pull request's URL, or null.",
+          "type": ["string", "null"]
+        },
+        "commit": {
+          "description": "The full commit SHA, or null.",
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "commitUrl": {
+          "description": "The commit's URL, or null.",
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

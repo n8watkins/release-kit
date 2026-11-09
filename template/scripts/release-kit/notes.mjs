@@ -49,6 +49,43 @@ function scopeLabel(scope, scopes) {
   return `**${scope}:** `
 }
 
+// Stable ids for the sections, whatever the headings read: releases.json
+// and the build log use these.
+export const SECTION_IDS = {
+  'Breaking changes': 'breaking',
+  Features: 'new',
+  Fixes: 'fixed',
+  Security: 'safer',
+  Performance: 'faster',
+  Reverts: 'reverted',
+}
+
+const PR_SUFFIX = /\s*\(#(\d+)\)$/
+
+/**
+ * The commits that reach the notes, as structured items in commit order:
+ *   { section, type, scope, text, breaking, pr, hash }
+ * `section` is a NOTE_SECTIONS name; `text` is the Release-note wording or
+ * the subject, capitalized, still ending in "(#12)" when it had one; `pr` is
+ * that number, or null.
+ */
+export function noteItems(commits) {
+  const items = []
+  for (const commit of commits) {
+    if (isBot(commit.author ?? '')) continue
+    const parsed = parse(commit.message)
+    const section = sectionFor(parsed)
+    if (!section) continue
+    const text = capitalize(parsed.note ?? parsed.subject)
+    const pr = PR_SUFFIX.exec(text)?.[1]
+    items.push({ section, type: parsed.type, scope: parsed.scope, text, breaking: parsed.breaking, pr: pr ? Number(pr) : null, hash: commit.hash ?? null })
+  }
+  return items
+}
+
+/** An item's text without its trailing "(#12)". */
+export const plainText = (text) => text.replace(PR_SUFFIX, '')
+
 /**
  * Markdown notes for `commits`.
  *   heading  "## 1.2.0 - 2026-10-23" (optional)
@@ -59,17 +96,13 @@ function scopeLabel(scope, scopes) {
  */
 export function renderNotes(commits, { heading, summary, repoUrl, commitLinks = true, style = noteStyle() } = {}) {
   const sections = new Map(NOTE_SECTIONS.map((s) => [s, []]))
-  for (const commit of commits) {
-    if (isBot(commit.author ?? '')) continue
-    const parsed = parse(commit.message)
-    const section = sectionFor(parsed)
-    if (!section) continue
-    let text = capitalize(parsed.note ?? parsed.subject)
+  for (const item of noteItems(commits)) {
+    let text = item.text
     if (repoUrl) text = text.replace(/\(#(\d+)\)$/, (_, n) => `([#${n}](${repoUrl}/pull/${n}))`)
-    const link = commitLinks && repoUrl && commit.hash && !/\(#\d+\)$/.test(parsed.note ?? parsed.subject)
-      ? ` ([${commit.hash.slice(0, 7)}](${repoUrl}/commit/${commit.hash}))`
+    const link = commitLinks && repoUrl && item.hash && item.pr === null
+      ? ` ([${item.hash.slice(0, 7)}](${repoUrl}/commit/${item.hash}))`
       : ''
-    sections.get(section).push(`- ${scopeLabel(parsed.scope, style.scopes)}${text}${link}`)
+    sections.get(item.section).push(`- ${scopeLabel(item.scope, style.scopes)}${text}${link}`)
   }
   const body = [...sections]
     .filter(([, lines]) => lines.length)

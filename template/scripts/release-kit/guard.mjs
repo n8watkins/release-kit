@@ -16,7 +16,7 @@
 //   - creating a new tag, and creating a protected branch the remote doesn't have yet
 //   - the kit's release flow: npm run release -- --push pushes exactly one
 //     release commit (chore(release): vX.Y.Z, changing only the version files
-//     and CHANGELOG.md, with the version it names) and sets RELEASE_KIT_RELEASE
+//     CHANGELOG.md and releases.json, with the version it names) and sets RELEASE_KIT_RELEASE
 //     to its tag; both must hold
 //   - anything in GitHub Actions (the server-side alarm, direct-push.yml, covers CI)
 //
@@ -44,7 +44,7 @@ const ZERO = /^0+$/
 const TAG = /^refs\/tags\/(v.*)$/
 const BRANCH = /^refs\/heads\/(.+)$/
 // The files a release commit may change, besides .release.json versionFiles.
-const RELEASE_FILES = ['package.json', 'package-lock.json', 'CHANGELOG.md']
+const RELEASE_FILES = ['package.json', 'package-lock.json', 'CHANGELOG.md', 'releases.json', 'releases.xml']
 
 /**
  * Why a commit is not a kit release commit, or null when it is one.
@@ -53,7 +53,7 @@ const RELEASE_FILES = ['package.json', 'package-lock.json', 'CHANGELOG.md']
  *   files         the paths it changes
  *   version       package.json's version in it
  *   versionFiles  .release.json versionFiles in it (paths, or { path, pattern })
- * A commit that passes changes nothing but the version and the changelog,
+ * A commit that passes changes nothing but the version, the changelog and releases.json,
  * so it is safe to land without a pull request whoever made it.
  */
 export function releaseCommitProblem({ subject, parents, files, version, versionFiles = [] }) {

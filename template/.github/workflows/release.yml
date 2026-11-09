@@ -125,6 +125,8 @@ jobs:
         run: |
           mkdir -p release-artifacts
           if npm run | grep -q "^  release:artifacts$"; then npm run release:artifacts; fi
+          # releases.json (and the releases.xml feed), as the release committed them.
+          node "$RELEASE_KIT/releases.mjs" --attach "$TAG" --dir release-artifacts
           cd release-artifacts
           if [ -n "$(ls -A)" ]; then sha256sum -- * > SHA256SUMS.txt; cat SHA256SUMS.txt; fi
 

@@ -5,6 +5,7 @@
 //   release-kit release [...]     cut a release (npm run release)
 //   release-kit commit-msg <file> check a commit message (the commit-msg hook)
 //   release-kit notes [...]       print release notes for a range
+//   release-kit releases --check  check releases.json against its schema
 //   release-kit train [...]       the release train's last step (CI)
 //   release-kit protect [...]     branch and tag rulesets for the release flow
 //                                 (and the train's deploy key); in a private repo
@@ -38,7 +39,7 @@ const KIT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPTS = join(KIT, 'template', 'scripts', 'release-kit')
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
 const KIT_REPO = /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(kitPackage.repository?.url ?? '')?.[1] ?? 'n8watkins/release-kit'
-const SCRIPT_COMMANDS = new Set(['release', 'commit-msg', 'notes', 'train', 'protect', 'lanes', 'alarm'])
+const SCRIPT_COMMANDS = new Set(['release', 'commit-msg', 'notes', 'releases', 'train', 'protect', 'lanes', 'alarm'])
 
 const [command, ...rest] = process.argv.slice(2)
 
@@ -238,6 +239,6 @@ else if (SCRIPT_COMMANDS.has(command)) run(join(SCRIPTS, `${command}.mjs`), rest
 else if (command === 'apply') run(join(KIT, 'apply.mjs'), rest)
 else if (command && !command.startsWith('-')) run(join(KIT, 'apply.mjs'), [command, ...rest])
 else {
-  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | train | protect | check | verify | lanes | pre-push | install-guard | alarm | apply <repo>`)
+  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | releases | train | protect | check | verify | lanes | pre-push | install-guard | alarm | apply <repo>`)
   process.exit(command ? 1 : 0)
 }
