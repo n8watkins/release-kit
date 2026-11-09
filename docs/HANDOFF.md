@@ -11,6 +11,15 @@ How kit updates reach a repo, with and without the GitHub App, is in [UPGRADES.m
 A private sandbox, `n8watkins/release-kit-sandbox`, has the kit vendored for trying the guard and the alarm against real GitHub (issue #2 there shows every kind of report).
 The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the planned work and the owner's steps are in [ROADMAP.md](ROADMAP.md).
 
+### v2.9.0 (2026-11-09)
+
+- The pre-1.0 rule: below 1.0 a breaking change bumps minor, and 1.0.0 needs `--stable` or `"stable": true` (#75).
+- `releases.json`, schema `schema/releases.v1.json`, written in every release commit and attached to the GitHub Release; an optional Atom feed (#76).
+  The n8builds.dev build log can read it instead of scraping release bodies (`lib/build-log.ts` there still scrapes; switching it is n8builds-web work).
+- `release-kit backfill` for older tags, dry run by default (#77); release-kit's own file was backfilled in #80.
+- The pull request title check counts the ` (#N)` a squash merge adds (#78), after #76's 104-character header failed the Commit messages check on main (that red run on 2ede208 stays).
+- Design note, not built: [BEYOND_NPM.md](BEYOND_NPM.md) recommends one standalone CLI with thin wrappers (#79).
+
 ### Who uses it
 
 - The rollout bot covers the eight repos the App is installed on, as listed in [adopters.json](../adopters.json): portfolio-rank (canary), n8builds-web, dev-portfolio, open-ping, scribe, voicedock, tl-dw, and n8builds-admin (private).
