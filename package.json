@@ -24,6 +24,7 @@
     "bin",
     "template",
     "reusable",
+    "schema",
     "STANDARD.md",
     "README.md",
     "LICENSE"

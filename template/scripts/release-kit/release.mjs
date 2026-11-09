@@ -39,6 +39,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { RELEASE_TAG, isPreOne, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
 import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
 import { noteStyle, renderNotes } from './notes.mjs'
+import { RELEASES_FILE, readDocument, releaseEntry, releasesConfig, slugOf, writeReleaseFiles } from './releases.mjs'
 import { entryLabel, entryPath, readVersion, setVersion, versionFilesProblems } from './versions.mjs'
 import { RULE_REJECTION, releaseThroughPullRequest } from './release-pr.mjs'
 
@@ -253,11 +254,22 @@ const section = renderNotes(commits, {
 })
 
 // Every version file must be readable before anything changes, so a bad one
-// stops the release here instead of halfway through the bump.
+// stops the release here instead of halfway through the bump. So must
+// releases.json and its setting.
 versions()
+const origin = repoUrl()
+const repository = typeof config.repository === 'string' ? config.repository : slugOf(origin)
+let wantReleases
+try {
+  wantReleases = releasesConfig(config.releases)
+  if (wantReleases.json) readDocument(repository)
+} catch (error) {
+  fail(error.message)
+}
 
 console.log(`release: ${current} -> ${version} (${kind}), ${commits.length} commit${commits.length === 1 ? '' : 's'} since ${since ?? 'the start'}\n`)
 console.log(section)
+if (wantReleases.json) console.log(`release: ${RELEASES_FILE}${wantReleases.feed ? ' and releases.xml' : ''} get${wantReleases.feed ? '' : 's'} ${tag}\n`)
 if (flag('dry-run')) {
   if (flag('push') || flag('via-pr')) console.log(`release: --push would ${releasePath(branch)}`)
   process.exit(0)
@@ -278,7 +290,23 @@ const existing = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf8
 const rest = existing.startsWith(TITLE) ? existing.slice(TITLE.length).replace(/^\n+/, '') : existing
 writeFileSync('CHANGELOG.md', `${TITLE}\n\n${section}\n${rest}`.replace(/\n{3,}/g, '\n\n'))
 
-const files = [...new Set(['package.json', 'CHANGELOG.md', ...versionFiles.map(entryPath)])]
+// releases.json (and the feed): the same release, as data.
+let releaseFiles
+try {
+  releaseFiles = writeReleaseFiles([releaseEntry({
+    version,
+    date,
+    time: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+    previous: since,
+    summary,
+    commits,
+    repoUrl: origin,
+  })], { config, repository })
+} catch (error) {
+  fail(error.message)
+}
+
+const files = [...new Set(['package.json', 'CHANGELOG.md', ...releaseFiles, ...versionFiles.map(entryPath)])]
 if (existsSync('package-lock.json')) files.push('package-lock.json')
 git('add', '--', ...files)
 git('commit', '-m', `chore(release): ${tag}`)

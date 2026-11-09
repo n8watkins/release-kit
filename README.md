@@ -10,6 +10,7 @@ release-kit sets up a whole release process in a GitHub repo with one command:
 - **Versions follow SemVer**, picked from the commits: a breaking change is major, a feature is minor, anything else is a patch.
   Below 1.0 a breaking change is a minor bump, and 1.0.0 is only ever cut on purpose (`npm run release -- --stable`).
 - **Release notes are written for users**, under the headings New, Fixed, Faster and Safer, from `feat`, `fix`, `perf` and `security` commits; chores, docs and bot commits stay out.
+- **Every release is data too**: `releases.json` lists each release's version, date and notes as structured entries (with an optional Atom feed), committed with the release and attached to the GitHub Release, so a site or app reads it instead of scraping Markdown.
 - **A tag publishes a GitHub Release** through a workflow that checks the tag against every version file, runs the repo's checks again, and checksums any files it ships.
 - **An optional release train** releases on a schedule, but only when something a user would notice has landed.
 - **A weekly security scan** checks every lock file against [OSV.dev](https://osv.dev) and fails on malicious packages and high or critical vulnerabilities.
@@ -162,7 +163,7 @@ Its design is in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along wit
   A `versionFiles` entry is a path whose kind comes from its name: a JSON file's top-level `version`, `package-lock.json`, `Cargo.toml` (its `[package]` version) and `Cargo.lock`, `pyproject.toml` (its `[project]` version only, never `[tool.*]` tables) and `uv.lock` (the project's own entry: the one with source editable or virtual `"."`, found by the project's name, or the only such entry when the lock still has an old name).
   Any other file takes `{ "path": "src/app/__init__.py", "pattern": "__version__ = \"(.*)\"" }`: a regular expression with exactly one capture group, the version, which must match the file exactly once (`^` and `$` match at each line); only the captured text changes.
   A release and the tag check stop, before changing anything, on a malformed entry, a pattern that matches nowhere or more than once, or a listed `pyproject.toml` whose `uv.lock` beside it isn't listed; apply warns about each.
-  Optional keys: `stable` (`true` lets a `0.y.z` repo reach 1.0.0, so a breaking change bumps major again; see [Versions before 1.0](#versions-before-10)), `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in), `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`), `visibility` (`"public"` or `"private"`; apply fills it in from gh) and the settings whose defaults depend on it: `security` (`{ "onPullRequest": false }` scans lock-file pull requests or not), `attest` (artifact attestations, once built) and `autoMerge` (`false` stops apply writing `auto-merge.yml`); see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md#settings-for-private-repos).
+  Optional keys: `releases` (`false` for no `releases.json`, `{ "feed": true }` for an Atom feed too; see [releases.json](#releasesjson)), `stable` (`true` lets a `0.y.z` repo reach 1.0.0, so a breaking change bumps major again; see [Versions before 1.0](#versions-before-10)), `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in), `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`), `visibility` (`"public"` or `"private"`; apply fills it in from gh) and the settings whose defaults depend on it: `security` (`{ "onPullRequest": false }` scans lock-file pull requests or not), `attest` (artifact attestations, once built) and `autoMerge` (`false` stops apply writing `auto-merge.yml`); see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md#settings-for-private-repos).
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
@@ -192,7 +193,7 @@ The choices are saved in `.release.json`, so re-running apply to upgrade keeps t
 ### Package, reusable and vendored modes
 
 In package mode nothing of the kit is copied into the repo: `npm run release` runs `release-kit release`, and the commit-msg hook runs `release-kit commit-msg` from `node_modules` (before `npm install` it lets commits through with a note; CI checks every commit anyway).
-The `release-kit` command also runs `notes`, `train`, `protect`, `check`, `verify`, `lanes`, `pre-push` (the guard), `install-guard` (the guard in a repo without the kit), `alarm` (the Direct push alarm's check) and `apply`.
+The `release-kit` command also runs `notes`, `releases` (checks `releases.json`), `train`, `protect`, `check`, `verify`, `lanes`, `pre-push` (the guard), `install-guard` (the guard in a repo without the kit), `alarm` (the Direct push alarm's check) and `apply`.
 
 Package and reusable mode write short callers of the kit's workflows, for example:
 
@@ -219,6 +220,45 @@ The notes come from `feat`, `fix`, `perf` and `security` subjects, so write thos
 - The GitHub Release shows exactly the section written to `CHANGELOG.md`, and `(#12)` links to its pull request.
 
 See [template/RELEASING.md](template/RELEASING.md) for examples.
+
+## releases.json
+
+Each release also adds itself to `releases.json` at the repo's root, in the release commit, and the Release workflow attaches the file to the GitHub Release.
+It is the same release as the changelog section, as data, for a program to read: the n8builds.dev build log, an app's "what's new" screen, a status page.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/n8watkins/release-kit/main/schema/releases.v1.json",
+  "schemaVersion": 1,
+  "repository": "n8watkins/scribe",
+  "releases": [
+    {
+      "version": "0.14.0",
+      "tag": "v0.14.0",
+      "date": "2026-11-09",
+      "time": "2026-11-09T18:02:11Z",
+      "url": "https://github.com/n8watkins/scribe/releases/tag/v0.14.0",
+      "previous": "v0.13.2",
+      "summary": null,
+      "breaking": true,
+      "notes": [
+        { "section": "breaking", "type": "feat", "scope": null, "text": "Settings live in one file now", "breaking": true, "pr": 101, "prUrl": "https://github.com/n8watkins/scribe/pull/101", "commit": "4f1c...", "commitUrl": "https://github.com/n8watkins/scribe/commit/4f1c..." }
+      ],
+      "source": "release",
+      "unattributed": 0
+    }
+  ]
+}
+```
+
+- **The format** is the JSON Schema in [schema/releases.v1.json](schema/releases.v1.json).
+  Every key is always there (null when unknown), releases are newest first, and a note's `section` is a fixed id (`breaking`, `new`, `fixed`, `safer`, `faster`, `reverted`) whatever the repo's headings say.
+  Version 1 only ever gains keys; a change that would break a reader gets `schemaVersion` 2 and a new schema file.
+- **Where to read it:** the file on the default branch, or the copy attached to the newest release, `https://github.com/<owner>/<repo>/releases/latest/download/releases.json`, which a private repo serves to a token that can read it.
+- **Older releases** aren't in it until [`release-kit backfill`](#backfilling-past-milestones) adds them from the commits.
+- **A feed:** `"releases": { "feed": true }` in `.release.json` also writes `releases.xml`, an Atom feed made from the same data, committed and attached the same way.
+- **Off:** `"releases": false` writes neither.
+- `node scripts/release-kit/releases.mjs --check` (`npx release-kit releases --check`) checks the file against the format and the feed against the file.
 
 ## Versions before 1.0
 

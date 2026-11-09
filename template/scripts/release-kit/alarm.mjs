@@ -14,7 +14,7 @@
 //       a force push is reported; so is every pushed commit that didn't come
 //       from a merged pull request (commits/{sha}/pulls), except the kit's own
 //       release commits (chore(release): vX.Y.Z changing only the version files
-//       and CHANGELOG.md, with that version: what npm run release -- --push and
+//       CHANGELOG.md and releases.json, with that version: what npm run release -- --push and
 //       the release train push) and commits that change only --allow-paths
 //   push that moves a v* tag, or deletes a protected branch or a v* tag
 //       reported

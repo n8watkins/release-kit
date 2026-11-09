@@ -81,7 +81,7 @@ npm run release -- --push      # check, bump, changelog, commit, tag, push
 - Force one with `npm run release -- minor` (or `patch`, `major`, or an exact `1.4.0`).
 - Going from `0.y.z` to 1.0.0 is a decision, never a side effect: `npm run release -- --stable` cuts 1.0.0, and `major` or a `1.x` version is refused without `--stable`.
   `"stable": true` in `.release.json` does the same for every release, the train's included, so a breaking change then bumps major.
-- It bumps `package.json`, `package-lock.json` and any file listed in `.release.json` `versionFiles` (a path, or `{ "path": "...", "pattern": "..." }` with one capture group for the version), adds a section to `CHANGELOG.md`, commits `chore(release): vX.Y.Z` and tags it.
+- It bumps `package.json`, `package-lock.json` and any file listed in `.release.json` `versionFiles` (a path, or `{ "path": "...", "pattern": "..." }` with one capture group for the version), adds a section to `CHANGELOG.md` and an entry to `releases.json` (the same notes as data; `"releases": { "feed": true }` adds an Atom feed, `releases.xml`), commits `chore(release): vX.Y.Z` and tags it.
 - With `--push` it first makes sure `main` isn't behind `origin/main` and runs `npm run release:check` (skip that with `--no-check`), so a tag is only pushed for a commit that passes. If the push is rejected, the release commit and tag are undone.
   On a branch that takes changes only through pull requests, it releases through one instead (see [Protecting the branch and the tags](#protecting-the-branch-and-the-tags)).
 - Releases are cut from `main` or `master`; a repo that ships from another long-lived branch lists it in `.release.json` `branches` (for example `["master", "release/1.x"]`).
@@ -96,7 +96,7 @@ Pushing the tag runs `.github/workflows/release.yml`:
 1. The tag must be a plain `vX.Y.Z` and match every version file.
 2. The repo's checks, `npm run release:check`, must pass.
 3. `npm run release:artifacts`, if defined, writes shippable files into `release-artifacts/`; they get SHA-256 checksums.
-4. The GitHub Release is created with the generated notes and the files, and the uploaded files are re-downloaded and checked.
+4. The GitHub Release is created with the generated notes and the files (`releases.json`, and `releases.xml` with the feed on, among them), and the uploaded files are re-downloaded and checked.
 
 In release-kit itself, a published release then starts the rollout bot: [`rollout-start.yml`](.github/workflows/rollout-start.yml) runs `.github/workflows/rollout.yml` for the tag, for real ([docs/UPGRADES.md](docs/UPGRADES.md#with-the-app)).
 A patch or minor release rolls out with no clicks, gated on the canary's update pull request merging; a major release waits for the owner's approval in the `rollout-major` environment before each wave; a failure opens a `release-kit: rollout` issue.

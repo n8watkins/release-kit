@@ -332,7 +332,7 @@ test('a Python project: apply finds pyproject.toml and uv.lock, and a release bu
   for (const entry of ['pyproject.toml', 'uv.lock', ...patterns]) assert.equal(readVersion(typeof entry === 'string' ? join(repo, entry) : { ...entry, path: join(repo, entry.path) }), '0.2.0')
   assert.equal(readFileSync(join(repo, 'pyproject.toml'), 'utf8'), PYPROJECT.replace('version = "0.1.0"', 'version = "0.2.0"'))
   assert.equal(run(repo, 'git', ['status', '--porcelain']), '')
-  assert.deepEqual(run(repo, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), ['CHANGELOG.md', 'package.json', 'pass-env.ts', 'pyproject.toml', 'src/devguard/__init__.py', 'uv.lock'])
+  assert.deepEqual(run(repo, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), ['CHANGELOG.md', 'package.json', 'pass-env.ts', 'pyproject.toml', 'releases.json', 'src/devguard/__init__.py', 'uv.lock'])
 
   // A file that has drifted fails the tag check, naming it.
   writeFileSync(join(repo, 'pass-env.ts'), PASS_ENV)
