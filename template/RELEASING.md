@@ -25,6 +25,7 @@ The `commit-msg` hook checks this locally, and the Commit messages workflow chec
 
 A squash merge turns the pull request into one commit whose message is the pull request's title, so the Commit messages workflow checks the title too, and checks it again when it is edited.
 Write the title like a commit subject: `feat: add dark mode`.
+GitHub adds ` (#12)` to it when it squashes, so the check counts that against the 100-character header limit.
 Put any `Release-note:` or `BREAKING CHANGE:` line in the description, and set the repo to use the title and description for squash commits (Settings, General, "Default commit message": "Pull request title and description"), or with the gh CLI:
 
 ```sh
