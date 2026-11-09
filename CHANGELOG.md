@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.9.0 - 2026-11-09
+
+Every release is now data too: releases.json, with a backfill command for older tags, and a pre-1.0 rule that never jumps to 1.0.0 on its own.
+
+### New
+
+- Below 1.0 a breaking change bumps minor, and 1.0.0 is cut only on purpose ([#75](https://github.com/n8watkins/release-kit/pull/75))
+- Every release writes releases.json, its notes as data, and attaches it to the GitHub Release ([#76](https://github.com/n8watkins/release-kit/pull/76))
+- Backfill adds older releases to releases.json and fills in missing release notes ([#77](https://github.com/n8watkins/release-kit/pull/77))
+
+### Fixed
+
+- A pull request title check counts the " (#12)" a squash merge adds ([#78](https://github.com/n8watkins/release-kit/pull/78))
+
 ## 2.8.1 - 2026-11-04
 
 ### Fixed
