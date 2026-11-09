@@ -8,6 +8,7 @@ release-kit sets up a whole release process in a GitHub repo with one command:
 
 - **Commit messages are checked**, by a `commit-msg` hook and by a CI check on every pushed commit and every pull request title (a squash merge commits the title), so the history follows [Conventional Commits](https://www.conventionalcommits.org) before release time, not after.
 - **Versions follow SemVer**, picked from the commits: a breaking change is major, a feature is minor, anything else is a patch.
+  Below 1.0 a breaking change is a minor bump, and 1.0.0 is only ever cut on purpose (`npm run release -- --stable`).
 - **Release notes are written for users**, under the headings New, Fixed, Faster and Safer, from `feat`, `fix`, `perf` and `security` commits; chores, docs and bot commits stay out.
 - **A tag publishes a GitHub Release** through a workflow that checks the tag against every version file, runs the repo's checks again, and checksums any files it ships.
 - **An optional release train** releases on a schedule, but only when something a user would notice has landed.
@@ -161,7 +162,7 @@ Its design is in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along wit
   A `versionFiles` entry is a path whose kind comes from its name: a JSON file's top-level `version`, `package-lock.json`, `Cargo.toml` (its `[package]` version) and `Cargo.lock`, `pyproject.toml` (its `[project]` version only, never `[tool.*]` tables) and `uv.lock` (the project's own entry: the one with source editable or virtual `"."`, found by the project's name, or the only such entry when the lock still has an old name).
   Any other file takes `{ "path": "src/app/__init__.py", "pattern": "__version__ = \"(.*)\"" }`: a regular expression with exactly one capture group, the version, which must match the file exactly once (`^` and `$` match at each line); only the captured text changes.
   A release and the tag check stop, before changing anything, on a malformed entry, a pattern that matches nowhere or more than once, or a listed `pyproject.toml` whose `uv.lock` beside it isn't listed; apply warns about each.
-  Optional keys: `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in), `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`), `visibility` (`"public"` or `"private"`; apply fills it in from gh) and the settings whose defaults depend on it: `security` (`{ "onPullRequest": false }` scans lock-file pull requests or not), `attest` (artifact attestations, once built) and `autoMerge` (`false` stops apply writing `auto-merge.yml`); see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md#settings-for-private-repos).
+  Optional keys: `stable` (`true` lets a `0.y.z` repo reach 1.0.0, so a breaking change bumps major again; see [Versions before 1.0](#versions-before-10)), `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in), `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`), `visibility` (`"public"` or `"private"`; apply fills it in from gh) and the settings whose defaults depend on it: `security` (`{ "onPullRequest": false }` scans lock-file pull requests or not), `attest` (artifact attestations, once built) and `autoMerge` (`false` stops apply writing `auto-merge.yml`); see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md#settings-for-private-repos).
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
@@ -219,7 +220,21 @@ The notes come from `feat`, `fix`, `perf` and `security` subjects, so write thos
 
 See [template/RELEASING.md](template/RELEASING.md) for examples.
 
-## The release train
+## Versions before 1.0
+
+Most projects sit at `0.y.z` for a long time, and SemVer lets anything change there.
+So below 1.0 the kit bumps like this, and never reaches 1.0.0 on its own:
+
+| Commits since the last release | `0.13.2` goes to | `1.4.2` goes to |
+|---|---|---|
+| A breaking change (`feat!:`, `BREAKING CHANGE:`) | `0.14.0` | `2.0.0` |
+| A feature | `0.14.0` | `1.5.0` |
+| Anything else | `0.13.3` | `1.4.3` |
+
+- `npm run release -- --stable` cuts 1.0.0: the deliberate step to "ready for people who aren't the author".
+- An explicit `major`, or an exact `1.x` version, from `0.y.z` is refused without `--stable`, and so is the release train's "Run workflow" with `major`.
+- `.release.json` `"stable": true` turns plain SemVer on for a `0.y.z` repo: a breaking change then bumps major, and the train may cut 1.0.0.
+
 
 With `--train`, a scheduled workflow cuts releases so nobody has to remember:
 

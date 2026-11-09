@@ -77,7 +77,10 @@ npm run release -- --push      # check, bump, changelog, commit, tag, push
 ```
 
 - With no bump given it picks one: major for a breaking change, minor for a feature, otherwise patch.
+- Below 1.0 (a `0.y.z` version) a breaking change is a minor bump instead: 0.13.0 goes to 0.14.0.
 - Force one with `npm run release -- minor` (or `patch`, `major`, or an exact `1.4.0`).
+- Going from `0.y.z` to 1.0.0 is a decision, never a side effect: `npm run release -- --stable` cuts 1.0.0, and `major` or a `1.x` version is refused without `--stable`.
+  `"stable": true` in `.release.json` does the same for every release, the train's included, so a breaking change then bumps major.
 - It bumps `package.json`, `package-lock.json` and any file listed in `.release.json` `versionFiles` (a path, or `{ "path": "...", "pattern": "..." }` with one capture group for the version), adds a section to `CHANGELOG.md`, commits `chore(release): vX.Y.Z` and tags it.
 - With `--push` it first makes sure `main` isn't behind `origin/main` and runs `npm run release:check` (skip that with `--no-check`), so a tag is only pushed for a commit that passes. If the push is rejected, the release commit and tag are undone.
   On a branch that takes changes only through pull requests, it releases through one instead (see [Protecting the branch and the tags](#protecting-the-branch-and-the-tags)).
@@ -187,5 +190,5 @@ There protect sets up the free safeguards instead, and says what GitHub still le
 
 - Release when something worth telling a user about has landed: a feature, a fix they would notice, or a batch of either.
 - With the release train on, that happens on its schedule without anyone remembering to; release by hand when something shouldn't wait.
-- Before 1.0, minor versions carry features and patch versions carry fixes.
-- Version 1.0.0 means "ready for people who aren't me".
+- Before 1.0, minor versions carry features and breaking changes, and patch versions carry fixes.
+- Version 1.0.0 means "ready for people who aren't me": cut it with `npm run release -- --stable`.

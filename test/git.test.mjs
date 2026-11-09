@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { KIT, attempt, commit, makeRepo, run, tmp } from './helpers.mjs'
+import { KIT, attempt, commit, makeRepo, outputs, run, tmp } from './helpers.mjs'
 
 const SCRIPTS = 'scripts/release-kit'
 const applied = (options) => {
@@ -123,6 +123,32 @@ test('the changelog date is in .release.json timeZone', () => {
   writeFileSync(join(bad, '.release.json'), JSON.stringify({ versionFiles: [], timeZone: 'Mars/Olympus' }))
   run(bad, 'git', ['commit', '-q', '-am', 'chore: set the time zone'])
   assert.match(attempt(bad, 'node', [`${SCRIPTS}/release.mjs`, '--dry-run']).stderr, /timeZone "Mars\/Olympus" is not a time zone/)
+})
+
+test('a 0.y.z repo releases a breaking change as a minor, and reaches 1.0.0 only with --stable or "stable"', () => {
+  const repo = applied({ version: '0.13.0' })
+  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
+  commit(repo, 'feat!: settings live in one file now')
+  const release = (...args) => attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, ...args])
+  assert.match(release('--dry-run').stdout, /0\.13\.0 -> 0\.14\.0 \(minor\)/)
+  assert.match(outputs(release('--plan').stdout).version, /^0\.14\.0$/)
+  // An explicit major, or a 1.x version, is refused: going stable is its own step.
+  for (const kind of ['major', '1.0.0']) {
+    assert.match(release(kind, '--dry-run').stderr, /0\.13\.0 is below 1\.0\.0.*--stable/, kind)
+    assert.match(release('--plan', kind).stderr, /--stable/, kind)
+  }
+  assert.match(release('--stable', '--dry-run').stdout, /0\.13\.0 -> 1\.0\.0 \(major\)/)
+  assert.match(release('--stable', '1.0.0', '--dry-run').stdout, /-> 1\.0\.0/)
+  // "stable": true in .release.json: the train and npm run release follow plain SemVer.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: [], stable: true }))
+  run(repo, 'git', ['commit', '-q', '-am', 'chore: declare 1.0'])
+  assert.equal(outputs(release('--plan').stdout).version, '1.0.0')
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: [], stable: 'yes' }))
+  assert.match(release('--dry-run').stderr, /"stable" must be true or false/)
+  // --stable is for 0.y.z only.
+  const one = applied({ version: '1.2.0' })
+  commit(one, 'fix: a')
+  assert.match(attempt(one, 'node', [`${SCRIPTS}/release.mjs`, '--stable', '--dry-run']).stderr, /already at 1\.2\.0/)
 })
 
 test('releases are cut from main or master, or the branches in .release.json', () => {

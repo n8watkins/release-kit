@@ -46,9 +46,10 @@ What the standard changes:
 
 - SemVer, `vX.Y.Z` tags, the version in `package.json` (plus any `.release.json` `versionFiles`: JSON files such as an extension `manifest.json` or `tauri.conf.json`, `package-lock.json`, a `Cargo.toml` and its `Cargo.lock`, a `pyproject.toml` (its `[project]` version) and its `uv.lock`, and any other file as `{ "path", "pattern" }`, a regex whose one capture group is the version and that matches exactly once).
   `apply.mjs` finds them on the first run and warns when one disagrees with `package.json` or an entry is malformed.
-- Before 1.0, minor carries features and patch carries fixes.
-- 1.0.0 means ready for people who aren't the author.
 - The bump comes from the commits unless forced: breaking means major, a feature means minor, otherwise patch.
+- Before 1.0 (a `0.y.z` version) a breaking change bumps the minor version instead (0.13.0 to 0.14.0), a feature bumps minor and anything else patch.
+  SemVer allows anything to change in `0.y.z`, and most of these projects live there for a long time, so one `feat!` must not declare them stable.
+- 1.0.0 means ready for people who aren't the author, so it is never reached on its own: an explicit `major` bump or a `1.x` version from `0.y.z` is refused unless the release says `--stable` (`npm run release -- --stable` cuts 1.0.0), or `.release.json` says `"stable": true`, which turns plain SemVer on (the train then follows it too).
 
 ### Releases
 
