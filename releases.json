@@ -1,0 +1,915 @@
+{
+  "$schema": "https://raw.githubusercontent.com/n8watkins/release-kit/main/schema/releases.v1.json",
+  "schemaVersion": 1,
+  "repository": "n8watkins/release-kit",
+  "releases": [
+    {
+      "version": "2.8.1",
+      "tag": "v2.8.1",
+      "date": "2026-11-04",
+      "time": "2026-11-04T21:20:11Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.8.1",
+      "previous": "v2.8.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Apply moves the kit version in a repo's own workflows that call the kit's",
+          "breaking": false,
+          "pr": 71,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/71",
+          "commit": "abaee8f1c3c544aba92c9cd801698f9ea99bea12",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/abaee8f1c3c544aba92c9cd801698f9ea99bea12"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "The canary gate waits for the bot's open update even when Dependabot moved the pin first",
+          "breaking": false,
+          "pr": 72,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/72",
+          "commit": "28523eb2e2fd45d795903e8c46cf6d68702d5dbc",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/28523eb2e2fd45d795903e8c46cf6d68702d5dbc"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.8.0",
+      "tag": "v2.8.0",
+      "date": "2026-11-04",
+      "time": "2026-11-04T20:05:27Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.8.0",
+      "previous": "v2.7.1",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Patch and minor kit releases roll out with no clicks, gated on the canary's update merging",
+          "breaking": false,
+          "pr": 69,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/69",
+          "commit": "8c03d63f1d07aae0f410c5ecf3a35ad063465736",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/8c03d63f1d07aae0f410c5ecf3a35ad063465736"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "An update whose required checks passed before auto-merge ran now merges instead of failing",
+          "breaking": false,
+          "pr": 68,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/68",
+          "commit": "c4ad2e46f048f5c20781dc0b709497c8feb4b2df",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/c4ad2e46f048f5c20781dc0b709497c8feb4b2df"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.7.1",
+      "tag": "v2.7.1",
+      "date": "2026-11-04",
+      "time": "2026-11-04T19:47:29Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.7.1",
+      "previous": "v2.7.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Dependabot opens security updates and keeps every dependency current, not only the kit",
+          "breaking": false,
+          "pr": 66,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/66",
+          "commit": "ad43bfb5a7addc7000d084230911728c87cda44d",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/ad43bfb5a7addc7000d084230911728c87cda44d"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.7.0",
+      "tag": "v2.7.0",
+      "date": "2026-11-04",
+      "time": "2026-11-04T18:49:01Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.7.0",
+      "previous": "v2.6.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "rollout",
+          "text": "The rollout bot's waves can read the App key again, so a real rollout no longer fails at the first adopter.",
+          "breaking": false,
+          "pr": 59,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/59",
+          "commit": "de31719b1955f4729b59e3d414a30f0b75e71349",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/de31719b1955f4729b59e3d414a30f0b75e71349"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "versions",
+          "text": "Find a uv.lock's own entry by its source when the name is stale",
+          "breaking": false,
+          "pr": 61,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/61",
+          "commit": "f1f15677d9f13d1a375876aa449d7f604e73237d",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/f1f15677d9f13d1a375876aa449d7f604e73237d"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "check",
+          "text": "Flag a missing fork guard only in workflows apply owns",
+          "breaking": false,
+          "pr": 62,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/62",
+          "commit": "619c3c61d455c807835c51e6aa7eeb2d65cab8e8",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/619c3c61d455c807835c51e6aa7eeb2d65cab8e8"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Kit updates merge on their own after a rollout",
+          "breaking": false,
+          "pr": 64,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/64",
+          "commit": "acb1592e58ffdd3a782e981ced89d8b51b04b27c",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/acb1592e58ffdd3a782e981ced89d8b51b04b27c"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.6.0",
+      "tag": "v2.6.0",
+      "date": "2026-11-03",
+      "time": "2026-11-04T00:20:41Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.6.0",
+      "previous": "v2.5.2",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Kit updates that add or change files now arrive as one pull request in each repo after a release, from the rollout bot.",
+          "breaking": false,
+          "pr": 47,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/47",
+          "commit": "b8d482556777c1cf32088ad323899423534e0d2e",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/b8d482556777c1cf32088ad323899423534e0d2e"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Releases bump pyproject.toml and uv.lock, and any file through a version pattern",
+          "breaking": false,
+          "pr": 51,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/51",
+          "commit": "b86f7e1f61087c0b610b627cd831fcdec57eecc0",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/b86f7e1f61087c0b610b627cd831fcdec57eecc0"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Release:check and CI say when a kit update adds or changes files you haven't applied",
+          "breaking": false,
+          "pr": 57,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/57",
+          "commit": "f9e6aed733fa45f2d2b166ab1b1722fdbb42f1cf",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/f9e6aed733fa45f2d2b166ab1b1722fdbb42f1cf"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Rerunning apply no longer replaces a repo's own workflow that calls release-kit, or switches off hooks a prepare script sets up.",
+          "breaking": false,
+          "pr": 46,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/46",
+          "commit": "5ec8888191e70ef49405bcbdc65ec097287d4b48",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/5ec8888191e70ef49405bcbdc65ec097287d4b48"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Auto-merge reads the versions a Dependabot pull request names when its update-type is missing",
+          "breaking": false,
+          "pr": 48,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/48",
+          "commit": "d77ddf6d0058e3c3901ac971ce121dcf6032e27d",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/d77ddf6d0058e3c3901ac971ce121dcf6032e27d"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "A release pull request waits for the checks that gate the merge and ignores the rest",
+          "breaking": false,
+          "pr": 53,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/53",
+          "commit": "5b0fc4e3339bff66b1d86e6e48d206a40f53b95d",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/5b0fc4e3339bff66b1d86e6e48d206a40f53b95d"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.5.2",
+      "tag": "v2.5.2",
+      "date": "2026-11-02",
+      "time": "2026-11-03T06:38:07Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.5.2",
+      "previous": "v2.5.1",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Merge when green works in private repos again: update pull requests merge once their checks pass",
+          "breaking": false,
+          "pr": 43,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/43",
+          "commit": "aba0f314dd122518c1c7ea15a77095b3ab5fca50",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/aba0f314dd122518c1c7ea15a77095b3ab5fca50"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.5.1",
+      "tag": "v2.5.1",
+      "date": "2026-11-02",
+      "time": "2026-11-03T06:24:14Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.5.1",
+      "previous": "v2.5.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "A release-kit update that adds or re-pins the auto-merge workflow or the Direct push alarm runs the one-minute kit check, not the full CI",
+          "breaking": false,
+          "pr": 41,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/41",
+          "commit": "4d63433ec57de7573af3a59681ebad97c216049d",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/4d63433ec57de7573af3a59681ebad97c216049d"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.5.0",
+      "tag": "v2.5.0",
+      "date": "2026-11-02",
+      "time": "2026-11-03T06:20:45Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.5.0",
+      "previous": "v2.4.1",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Apply writes the auto-merge workflow in every repo, and protect allows auto-merge",
+          "breaking": false,
+          "pr": 39,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/39",
+          "commit": "64d421d7386a471ee4fddb6a00f70dac7e663ecf",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/64d421d7386a471ee4fddb6a00f70dac7e663ecf"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.4.1",
+      "tag": "v2.4.1",
+      "date": "2026-11-02",
+      "time": "2026-11-03T01:54:11Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.4.1",
+      "previous": "v2.4.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "A kit update that adds the pre-push guard takes the one-minute kit lane, not the full CI",
+          "breaking": false,
+          "pr": 37,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/37",
+          "commit": "6a64c2c0e5e2f0ac618a512464590ed6f181c349",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/6a64c2c0e5e2f0ac618a512464590ed6f181c349"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.4.0",
+      "tag": "v2.4.0",
+      "date": "2026-11-02",
+      "time": "2026-11-03T01:41:17Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.4.0",
+      "previous": "v2.3.3",
+      "summary": "Free safeguards for private repos: a pre-push guard and a Direct push alarm.",
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Stop and report direct pushes, even in private repos on GitHub Free",
+          "breaking": false,
+          "pr": 34,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/34",
+          "commit": "2046e5c3fac8289c7ba39f19127352e6ba70f5d3",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/2046e5c3fac8289c7ba39f19127352e6ba70f5d3"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.3.3",
+      "tag": "v2.3.3",
+      "date": "2026-11-02",
+      "time": "2026-11-03T00:03:26Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.3.3",
+      "previous": "v2.3.2",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Kit updates arrive again, because Dependabot accepts the dependabot.yml apply writes",
+          "breaking": false,
+          "pr": 32,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/32",
+          "commit": "f307a678974ca6065b7aaf0bf197959122a133f0",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/f307a678974ca6065b7aaf0bf197959122a133f0"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.3.2",
+      "tag": "v2.3.2",
+      "date": "2026-11-02",
+      "time": "2026-11-02T23:47:38Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.3.2",
+      "previous": "v2.3.1",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Release-kit protect reads the required checks from the latest merged pull request",
+          "breaking": false,
+          "pr": 30,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/30",
+          "commit": "c8766c6c94810e6b036691140225b81423ce6041",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/c8766c6c94810e6b036691140225b81423ce6041"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.3.1",
+      "tag": "v2.3.1",
+      "date": "2026-11-02",
+      "time": "2026-11-02T23:40:23Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.3.1",
+      "previous": "v2.3.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Release-kit protect never requires a check that only runs on some pull requests",
+          "breaking": false,
+          "pr": 28,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/28",
+          "commit": "2a7fcace0f9658c34232e19554f9bde8ddd26e7c",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/2a7fcace0f9658c34232e19554f9bde8ddd26e7c"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.3.0",
+      "tag": "v2.3.0",
+      "date": "2026-11-02",
+      "time": "2026-11-02T23:35:23Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.3.0",
+      "previous": "v2.2.0",
+      "summary": "Branch and tag protection that fits the release flow, fork-proof release workflows, and no more Dependabot downgrades.",
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "One grouped Dependabot PR per kit release, dev dependency and workflow pins together",
+          "breaking": false,
+          "pr": 20,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/20",
+          "commit": "b669d6c86d3034cbddd1d2aef901d4e207ee1ce7",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/b669d6c86d3034cbddd1d2aef901d4e207ee1ce7"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "A fork can no longer publish releases, and rerunning apply keeps that guard",
+          "breaking": false,
+          "pr": 25,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/25",
+          "commit": "2a9950149f0f858b2c3d495b11015099fbf954c6",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/2a9950149f0f858b2c3d495b11015099fbf954c6"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Release-kit protect guards the release branches and tags, and releases still go through",
+          "breaking": false,
+          "pr": 26,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/26",
+          "commit": "be5c178951f5fcd83e85bff706fbbd2939fc41bc",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/be5c178951f5fcd83e85bff706fbbd2939fc41bc"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Dependabot no longer proposes moving the kit back to an older release",
+          "breaking": false,
+          "pr": 24,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/24",
+          "commit": "a007f1a9cb4ec70bdffaed732e428052582b7128",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/a007f1a9cb4ec70bdffaed732e428052582b7128"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.2.0",
+      "tag": "v2.2.0",
+      "date": "2026-11-02",
+      "time": "2026-11-02T21:49:16Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.2.0",
+      "previous": "v2.1.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "A failed Release run can be re-run safely, and every job has a timeout",
+          "breaking": false,
+          "pr": 14,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/14",
+          "commit": "9bfb238e4e87a61a9fe4d853a762d79c19fb480b",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/9bfb238e4e87a61a9fe4d853a762d79c19fb480b"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Pull request titles are checked, since a squash merge commits the title to main",
+          "breaking": false,
+          "pr": 15,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/15",
+          "commit": "79abad3bd4f6ad4f91e142e9b8ade7168490f33d",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/79abad3bd4f6ad4f91e142e9b8ade7168490f33d"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "CI lanes, so a docs or kit-only pull request skips the full suite, and release-kit verify",
+          "breaking": false,
+          "pr": 18,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/18",
+          "commit": "74783a9fd81ac34ce2f8e8e384f2fec3322e5376",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/74783a9fd81ac34ce2f8e8e384f2fec3322e5376"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Auto-merge kit and Dependabot updates, never majors, with a merge-when-green fallback",
+          "breaking": false,
+          "pr": 19,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/19",
+          "commit": "f62cce7b4212aa14f5fdc32f882870d11266313b",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/f62cce7b4212aa14f5fdc32f882870d11266313b"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "The security gate fails the build when run through the scripts link",
+          "breaking": false,
+          "pr": 12,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/12",
+          "commit": "a46aedc845f9a12d3c441f0f5260da1d6965e6dd",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/a46aedc845f9a12d3c441f0f5260da1d6965e6dd"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Npm 12 installs the kit, because apply allows it as a git dependency in .npmrc",
+          "breaking": false,
+          "pr": 13,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/13",
+          "commit": "97a64065154e037c3d13e6192c00e5e360f35893",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/97a64065154e037c3d13e6192c00e5e360f35893"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Commit messages are checked on the branches releases are cut from",
+          "breaking": false,
+          "pr": 16,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/16",
+          "commit": "d8898ba7195bf41f856b649d3774661e467212e4",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/d8898ba7195bf41f856b649d3774661e467212e4"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.1.0",
+      "tag": "v2.1.0",
+      "date": "2026-11-02",
+      "time": "2026-11-02T20:17:11Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.1.0",
+      "previous": "v2.0.1",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "A weekly OSV security scan that blocks malicious and high-severity packages",
+          "breaking": false,
+          "pr": 9,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/9",
+          "commit": "607449e3dfd6ecf9cc586322085d93a34f3edaf3",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/607449e3dfd6ecf9cc586322085d93a34f3edaf3"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Release from a long-lived branch other than main, listed in .release.json branches",
+          "breaking": false,
+          "pr": 10,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/10",
+          "commit": "142e3f43ad211e8b78f509e3473d50f1b311c117",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/142e3f43ad211e8b78f509e3473d50f1b311c117"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.0.1",
+      "tag": "v2.0.1",
+      "date": "2026-10-27",
+      "time": "2026-10-27T19:08:41Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.0.1",
+      "previous": "v2.0.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Re-applying keeps the kit's hook, and Dependabot must watch the repo root",
+          "breaking": false,
+          "pr": 7,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/7",
+          "commit": "ed705c5a3c21b7ffe05be090087d152df00972f5",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/ed705c5a3c21b7ffe05be090087d152df00972f5"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "2.0.0",
+      "tag": "v2.0.0",
+      "date": "2026-10-27",
+      "time": "2026-10-27T18:57:08Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.0.0",
+      "previous": "v1.2.0",
+      "summary": "Every repo now installs the kit as a dev dependency, so a new kit release arrives as a Dependabot update PR. Release notes read like patch notes by default: New, Fixed, Faster, Safer.",
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Version files beyond JSON (Cargo.toml, Cargo.lock, package-lock.json)",
+          "breaking": false,
+          "pr": 4,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/4",
+          "commit": "21ce8424e96e7da44dd2aa24067fe4f2b904ab63",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/21ce8424e96e7da44dd2aa24067fe4f2b904ab63"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Patch-note release notes, and extension manifests found by apply",
+          "breaking": false,
+          "pr": 5,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/5",
+          "commit": "4c4ad9810fb046c2ec3ffe50b73b740ee58ac5bc",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/4c4ad9810fb046c2ec3ffe50b73b740ee58ac5bc"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Install the kit as a dev dependency, kept current by Dependabot, with plain notes",
+          "breaking": false,
+          "pr": 6,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/6",
+          "commit": "716891d4b6524d098aa507239fd7c140fe600633",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/716891d4b6524d098aa507239fd7c140fe600633"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "release",
+          "text": "Say \"1 commit\", not \"1 commits\"",
+          "breaking": false,
+          "pr": 3,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/3",
+          "commit": "d47942998d7de9c02ffee56b302e5a90d9ca33fb",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/d47942998d7de9c02ffee56b302e5a90d9ca33fb"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "1.2.0",
+      "tag": "v1.2.0",
+      "date": "2026-10-25",
+      "time": "2026-10-25T15:32:42Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v1.2.0",
+      "previous": "v1.1.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": "train",
+          "text": "Push a protected main with a deploy key; protect.mjs sets it up",
+          "breaking": false,
+          "pr": 2,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/2",
+          "commit": "400d018cd9d8e6babef8c2039fd169ddbe95db2a",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/400d018cd9d8e6babef8c2039fd169ddbe95db2a"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "1.1.0",
+      "tag": "v1.1.0",
+      "date": "2026-10-25",
+      "time": "2026-10-25T09:45:12Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v1.1.0",
+      "previous": "v1.0.3",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Opt-in release train and reusable workflows",
+          "breaking": false,
+          "pr": 1,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/1",
+          "commit": "3ebba29b4ac6c8b061b7e7eed58a7f91fef585fb",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/3ebba29b4ac6c8b061b7e7eed58a7f91fef585fb"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": "train",
+          "text": "Run the required checks on the release commit before moving a protected main",
+          "breaking": false,
+          "pr": 1,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/1",
+          "commit": "adf1c370f0e5d7046251ab22088a1d8fe7a2f8c9",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/adf1c370f0e5d7046251ab22088a1d8fe7a2f8c9"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "release",
+          "text": "Safe tags and pushes, long histories, CRLF and blank-line messages",
+          "breaking": false,
+          "pr": 1,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/1",
+          "commit": "905d9e36f050bc6bde6bda7ff963786bdc8edf77",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/905d9e36f050bc6bde6bda7ff963786bdc8edf77"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "train",
+          "text": "Plan reasons read cleanly next to the tag they count from",
+          "breaking": false,
+          "pr": 1,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/1",
+          "commit": "3c7f4cf03c390368995670e96547e376ed95f5bb",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/3c7f4cf03c390368995670e96547e376ed95f5bb"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "1.0.3",
+      "tag": "v1.0.3",
+      "date": "2026-10-24",
+      "time": "2026-10-25T04:47:18Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v1.0.3",
+      "previous": "v1.0.2",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "apply",
+          "text": "Husky repos get no .githooks folder; README covers npm 12's --allow-git",
+          "breaking": false,
+          "pr": null,
+          "prUrl": null,
+          "commit": "89de043b1e9e75acd4c8fde09f2df04d55f9c697",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/89de043b1e9e75acd4c8fde09f2df04d55f9c697"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "1.0.2",
+      "tag": "v1.0.2",
+      "date": "2026-10-24",
+      "time": "2026-10-25T04:45:22Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v1.0.2",
+      "previous": "v1.0.1",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "release",
+          "text": "Push the branch and the tag in one atomic push",
+          "breaking": false,
+          "pr": null,
+          "prUrl": null,
+          "commit": "94ea2ae40c51507b871b432cdb630849261baf6e",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/94ea2ae40c51507b871b432cdb630849261baf6e"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "1.0.1",
+      "tag": "v1.0.1",
+      "date": "2026-10-24",
+      "time": "2026-10-25T04:44:06Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v1.0.1",
+      "previous": "v1.0.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": "notes",
+          "text": "Print notes when the scripts folder is a symlink",
+          "breaking": false,
+          "pr": null,
+          "prUrl": null,
+          "commit": "782b75eaa4990e5b1b930a25f0d25191cdf82928",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/782b75eaa4990e5b1b930a25f0d25191cdf82928"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    },
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "date": "2026-10-24",
+      "time": "2026-10-25T04:42:34Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v1.0.0",
+      "previous": null,
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Release-kit 1.0.0, the n8 release standard",
+          "breaking": false,
+          "pr": null,
+          "prUrl": null,
+          "commit": "4f420245a0cf5a31dbf59f04b8ae66f3ea4f745a",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/4f420245a0cf5a31dbf59f04b8ae66f3ea4f745a"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "The kit follows its own standard; installable with npx",
+          "breaking": false,
+          "pr": null,
+          "prUrl": null,
+          "commit": "4deb8284cd54e5b84aeecfd1f55bf93d31352ed0",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/4deb8284cd54e5b84aeecfd1f55bf93d31352ed0"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "Warn when a repo has no lock file; add the kit's own lock file",
+          "breaking": false,
+          "pr": null,
+          "prUrl": null,
+          "commit": "03979dc9752ec76386965841ea92a15e447421db",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/03979dc9752ec76386965841ea92a15e447421db"
+        }
+      ],
+      "source": "backfill",
+      "unattributed": 0
+    }
+  ]
+}
