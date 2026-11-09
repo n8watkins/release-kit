@@ -4,6 +4,64 @@
   "repository": "n8watkins/release-kit",
   "releases": [
     {
+      "version": "2.9.0",
+      "tag": "v2.9.0",
+      "date": "2026-11-09",
+      "time": "2026-11-09T22:58:36Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.9.0",
+      "previous": "v2.8.1",
+      "summary": "Every release is now data too: releases.json, with a backfill command for older tags, and a pre-1.0 rule that never jumps to 1.0.0 on its own.",
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Below 1.0 a breaking change bumps minor, and 1.0.0 is cut only on purpose",
+          "breaking": false,
+          "pr": 75,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/75",
+          "commit": "94dc04d2e82d587b400c5f61fe97409d38984d85",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/94dc04d2e82d587b400c5f61fe97409d38984d85"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Every release writes releases.json, its notes as data, and attaches it to the GitHub Release",
+          "breaking": false,
+          "pr": 76,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/76",
+          "commit": "2ede20812463832dd0247fdb5d0c95cb573ba483",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/2ede20812463832dd0247fdb5d0c95cb573ba483"
+        },
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Backfill adds older releases to releases.json and fills in missing release notes",
+          "breaking": false,
+          "pr": 77,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/77",
+          "commit": "aa02742bd9a918d0f092845d6898fc68af7a3b4a",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/aa02742bd9a918d0f092845d6898fc68af7a3b4a"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "A pull request title check counts the \" (#12)\" a squash merge adds",
+          "breaking": false,
+          "pr": 78,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/78",
+          "commit": "122df44d7b60555b56b98d3f37ceaa93d3c90b66",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/122df44d7b60555b56b98d3f37ceaa93d3c90b66"
+        }
+      ],
+      "source": "release",
+      "unattributed": 0
+    },
+    {
       "version": "2.8.1",
       "tag": "v2.8.1",
       "date": "2026-11-04",
