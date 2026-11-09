@@ -3,7 +3,7 @@
 // section from the commits, commits "chore(release): vX.Y.Z" and makes an
 // annotated tag. Pushing the tag runs .github/workflows/release.yml.
 //
-//   npm run release -- [patch|minor|major|x.y.z] [--summary "<text>"] [--dry-run] [--push] [--no-check]
+//   npm run release -- [patch|minor|major|x.y.z] [--stable] [--summary "<text>"] [--dry-run] [--push] [--no-check]
 //       --summary puts a line or two, in your words, at the top of the notes.
 //       --push first checks the branch is up to date with origin and runs
 //       npm run release:check (skip it with --no-check), so a tag is only
@@ -30,10 +30,13 @@
 //       tags make no GitHub Release unless --publish.
 //
 // With no bump given, it picks one from the commits: major for a breaking
-// change, minor for a feature, otherwise patch.
+// change, minor for a feature, otherwise patch. Below 1.0.0 a breaking change
+// is a minor bump, and nothing reaches 1.0.0 without --stable (or "stable":
+// true in .release.json):
+//   npm run release -- --stable     0.y.z -> 1.0.0, the deliberate step to 1.0
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { RELEASE_TAG, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
+import { RELEASE_TAG, isPreOne, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
 import { commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
 import { noteStyle, renderNotes } from './notes.mjs'
 import { entryLabel, entryPath, readVersion, setVersion, versionFilesProblems } from './versions.mjs'
@@ -61,6 +64,9 @@ const BASELINE_NOTE = 'release-kit baseline: tagged when adopting release-kit; n
 // .release.json "branches" (for a repo whose shipped build lives on another
 // long-lived branch).
 const BRANCHES = config.branches ?? ['main', 'master']
+// Below 1.0.0, only --stable (or "stable": true) lets a release reach 1.0.0.
+const stable = flag('stable') || config.stable === true
+if (config.stable !== undefined && typeof config.stable !== 'boolean') fail('.release.json "stable" must be true or false')
 if (!Array.isArray(BRANCHES) || !BRANCHES.length || BRANCHES.some((b) => typeof b !== 'string' || !b)) {
   fail('.release.json "branches" must be a list of branch names, like ["main"]')
 }
@@ -180,7 +186,7 @@ if (flag('plan')) {
   const { current, since, commits } = state({ strict: true })
   let plan
   try {
-    plan = planRelease({ current, commits, bump })
+    plan = planRelease({ current, commits, bump, stable })
   } catch (error) {
     fail(error.message)
   }
@@ -216,10 +222,12 @@ if (flag('summary') && !summary) fail('--summary needs the text, in quotes: --su
 // The bump is the one bare argument that isn't --summary's text.
 const prTimeout = valueOf('pr-timeout') === undefined ? 30 : Number(valueOf('pr-timeout'))
 if (flag('pr-timeout') && !(prTimeout > 0)) fail('--pr-timeout needs a number of minutes, like --pr-timeout 45')
-const kind = args.find((a, i) => !a.startsWith('--') && !['--summary', '--pr-timeout'].includes(args[i - 1])) ?? suggestedBump(commits)
+const given = args.find((a, i) => !a.startsWith('--') && !['--summary', '--pr-timeout'].includes(args[i - 1]))
+if (flag('stable') && !isPreOne(current)) fail(`--stable takes a 0.y.z project to 1.0.0, and this one is already at ${current}`)
+const kind = given ?? (flag('stable') ? 'major' : suggestedBump(commits, { current, stable }))
 let version
 try {
-  version = nextVersion(current, kind)
+  version = nextVersion(current, kind, { stable })
 } catch (error) {
   fail(error.message)
 }

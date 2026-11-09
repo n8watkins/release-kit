@@ -44,8 +44,8 @@ test('versions compare numerically, bump forward only, and the bump comes from t
   assert.throws(() => nextVersion('1.2.0-beta', 'patch'), /not x\.y\.z/)
   assert.equal(nextVersion('0.3.9', 'patch'), '0.3.10')
   assert.equal(nextVersion('0.3.9', 'minor'), '0.4.0')
-  assert.equal(nextVersion('0.3.9', 'major'), '1.0.0')
-  assert.equal(nextVersion('0.3.9', '2.0.0'), '2.0.0')
+  assert.equal(nextVersion('1.3.9', 'major'), '2.0.0')
+  assert.equal(nextVersion('1.3.9', '3.0.0'), '3.0.0')
   assert.throws(() => nextVersion('0.3.9', 'huge'))
   assert.equal(suggestedBump([{ message: 'fix: a' }, { message: 'docs: b' }]), 'patch')
   assert.equal(suggestedBump([{ message: 'fix: a' }, { message: 'feat: b' }]), 'minor')
@@ -55,6 +55,33 @@ test('versions compare numerically, bump forward only, and the bump comes from t
   const botFeat = { author: 'github-actions[bot]', message: 'feat: sync portfolios' }
   assert.equal(suggestedBump([botFeat, { author: 'N', message: 'fix: a' }]), 'patch')
   assert.deepEqual(userFacing([botFeat, { author: 'dependabot[bot]', message: 'fix(deps): bump x' }]), [])
+})
+
+test('below 1.0.0 a breaking change bumps minor, and only --stable or "stable" reaches 1.0.0', () => {
+  const c = (message) => ({ author: 'N', message })
+  // The bump the commits call for.
+  assert.equal(suggestedBump([c('feat!: drop the old API')], { current: '0.13.0' }), 'minor')
+  assert.equal(suggestedBump([c('fix: a'), c('refactor: b\n\nBREAKING CHANGE: the config moved')], { current: '0.13.0' }), 'minor')
+  assert.equal(suggestedBump([c('feat: a')], { current: '0.13.0' }), 'minor')
+  assert.equal(suggestedBump([c('fix: a')], { current: '0.13.0' }), 'patch')
+  assert.equal(suggestedBump([c('feat!: a')], { current: '1.4.0' }), 'major')
+  assert.equal(suggestedBump([c('feat!: a')], { current: '0.13.0', stable: true }), 'major')
+  // The plan, as the train and npm run release see it.
+  assert.equal(planRelease({ current: '0.13.0', commits: [c('feat!: drop the old API')] }).version, '0.14.0')
+  assert.equal(planRelease({ current: '0.13.2', commits: [c('feat: a')] }).version, '0.14.0')
+  assert.equal(planRelease({ current: '0.13.2', commits: [c('fix: a')] }).version, '0.13.3')
+  assert.equal(planRelease({ current: '0.0.3', commits: [c('feat!: a')] }).version, '0.1.0')
+  // Going to 1.0 is never a side effect: an explicit major or 1.x version needs stable.
+  for (const kind of ['major', '1.0.0', '2.0.0']) {
+    assert.throws(() => nextVersion('0.13.0', kind), /below 1\.0\.0.*--stable/, kind)
+    assert.throws(() => planRelease({ current: '0.13.0', commits: [c('fix: a')], bump: kind }), /--stable/, kind)
+  }
+  assert.equal(nextVersion('0.13.0', 'major', { stable: true }), '1.0.0')
+  assert.equal(nextVersion('0.13.0', '1.0.0', { stable: true }), '1.0.0')
+  assert.equal(planRelease({ current: '0.13.0', commits: [c('feat!: a')], stable: true }).version, '1.0.0')
+  assert.equal(planRelease({ current: '0.13.0', commits: [c('fix: a')], bump: 'major', stable: true }).version, '1.0.0')
+  // Within 0.y.z an explicit version is still fine.
+  assert.equal(nextVersion('0.13.0', '0.20.0'), '0.20.0')
 })
 
 test('notes keep user-facing changes, grouped, and drop chores, docs and bots', () => {

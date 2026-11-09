@@ -93,9 +93,22 @@ export function compareVersions(a, b) {
   return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]
 }
 
-/** The next version after `current` for a bump of `kind` (or an explicit x.y.z). */
-export function nextVersion(current, kind) {
+/**
+ * The next version after `current` for a bump of `kind` (or an explicit x.y.z).
+ * Below 1.0.0 the kit never reaches 1.0.0 or later on its own: that takes
+ * `stable` (release --stable, or "stable": true in .release.json), so going
+ * stable is always a decision, never the side effect of one breaking change.
+ */
+export function nextVersion(current, kind, { stable = false } = {}) {
   if (!isVersion(current)) throw new Error(`package.json version "${current}" is not x.y.z`)
+  const next = bumped(current, kind)
+  if (isPreOne(current) && !isPreOne(next) && !stable) {
+    throw new Error(`${current} is below 1.0.0, and the kit goes to ${next} only when asked: release it with --stable (or set "stable": true in .release.json) once the project is ready for 1.0`)
+  }
+  return next
+}
+
+function bumped(current, kind) {
   if (/^\d+\.\d+\.\d+$/.test(kind)) {
     if (!isVersion(kind)) throw new Error(`"${kind}" is not a valid x.y.z version`)
     if (compareVersions(kind, current) <= 0) throw new Error(`${kind} is not higher than the current ${current}`)
@@ -108,15 +121,23 @@ export function nextVersion(current, kind) {
   throw new Error(`unknown bump "${kind}"; use patch, minor, major or x.y.z`)
 }
 
+/** True for a 0.y.z version: SemVer's initial development, where the pre-1.0 rule applies. */
+export const isPreOne = (version) => isVersion(version) && version.split('.')[0] === '0'
+
 /** Commits written by bots (Dependabot, GitHub Actions): checked for nothing, left out of the notes. */
 export function isBot(author) {
   return /\[bot\]$|^dependabot|^github-actions/i.test(author ?? '')
 }
 
-/** The bump the commits call for: major for breaking, minor for features, else patch. */
-export function suggestedBump(commits) {
+/**
+ * The bump the commits call for: major for a breaking change, minor for a
+ * feature, else patch. Below 1.0.0 (`current` is 0.y.z) a breaking change is
+ * a minor bump instead, unless the repo is `stable`: 0.13.0 goes to 0.14.0,
+ * never to 1.0.0 on its own.
+ */
+export function suggestedBump(commits, { current, stable = false } = {}) {
   const parsed = commits.filter((c) => !isBot(c.author)).map((c) => parse(c.message)).filter(Boolean)
-  if (parsed.some((p) => p.breaking)) return 'major'
+  if (parsed.some((p) => p.breaking)) return isPreOne(current) && !stable ? 'minor' : 'major'
   if (parsed.some((p) => p.type === 'feat')) return 'minor'
   return 'patch'
 }
@@ -130,9 +151,10 @@ export function userFacing(commits) {
  * What the release train should do now. `bump` is "auto" (release only when
  * there are user-facing commits, with the bump they call for) or an explicit
  * patch, minor, major or x.y.z (release if there is any commit at all).
+ * `stable` lets a 0.y.z repo reach 1.0.0 (see nextVersion).
  * Returns { release, reason, bump?, version? }.
  */
-export function planRelease({ current, commits, bump = 'auto' }) {
+export function planRelease({ current, commits, bump = 'auto', stable = false }) {
   const count = (n) => `${n} commit${n === 1 ? '' : 's'}`
   if (!commits.length) return { release: false, reason: 'no commits' }
   if (bump === 'auto') {
@@ -140,8 +162,8 @@ export function planRelease({ current, commits, bump = 'auto' }) {
     if (!shown.length) {
       return { release: false, reason: `${count(commits.length)}, none user-facing (feat, fix, perf, security)` }
     }
-    const kind = suggestedBump(commits)
-    return { release: true, reason: `${shown.length} user-facing of ${count(commits.length)}`, bump: kind, version: nextVersion(current, kind) }
+    const kind = suggestedBump(commits, { current, stable })
+    return { release: true, reason: `${shown.length} user-facing of ${count(commits.length)}`, bump: kind, version: nextVersion(current, kind, { stable }) }
   }
-  return { release: true, reason: `${bump} requested, ${count(commits.length)}`, bump, version: nextVersion(current, bump) }
+  return { release: true, reason: `${bump} requested, ${count(commits.length)}`, bump, version: nextVersion(current, bump, { stable }) }
 }
