@@ -4,6 +4,31 @@
   "repository": "n8watkins/release-kit",
   "releases": [
     {
+      "version": "2.10.0",
+      "tag": "v2.10.0",
+      "date": "2026-11-10",
+      "time": "2026-11-10T16:28:12Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.10.0",
+      "previous": "v2.9.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "A secret scan checks the commits every pull request adds",
+          "breaking": false,
+          "pr": 82,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/82",
+          "commit": "3760e38b53197669dde9ce758c798f3dee1bb6f7",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/3760e38b53197669dde9ce758c798f3dee1bb6f7"
+        }
+      ],
+      "source": "release",
+      "unattributed": 0
+    },
+    {
       "version": "2.9.0",
       "tag": "v2.9.0",
       "date": "2026-11-09",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.10.0 - 2026-11-10
+
+### New
+
+- A secret scan checks the commits every pull request adds ([#82](https://github.com/n8watkins/release-kit/pull/82))
+
 ## 2.9.0 - 2026-11-09
 
 Every release is now data too: releases.json, with a backfill command for older tags, and a pre-1.0 rule that never jumps to 1.0.0 on its own.
