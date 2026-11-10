@@ -14,6 +14,7 @@ release-kit sets up a whole release process in a GitHub repo with one command:
 - **A tag publishes a GitHub Release** through a workflow that checks the tag against every version file, runs the repo's checks again, and checksums any files it ships.
 - **An optional release train** releases on a schedule, but only when something a user would notice has landed.
 - **A weekly security scan** checks every lock file against [OSV.dev](https://osv.dev) and fails on malicious packages and high or critical vulnerabilities.
+- **A secret scan** runs [gitleaks](https://github.com/gitleaks/gitleaks) over the commits every pull request and push adds, so a key or a private backup location is caught before it is merged ([Secret scan](#secret-scan)).
 - **Agents get the rules too**: apply writes a short section into `AGENTS.md` (and `CLAUDE.md` when the repo has one), so coding agents write commits the check accepts.
 - **Direct pushes are stopped and reported**, even in a private repo on GitHub Free, which has no rulesets: a pre-push guard blocks pushes to `main`, force pushes and moved release tags before they leave the machine, and a Direct push alarm reports any that get through ([docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md)).
 
@@ -344,6 +345,20 @@ OSV also lists malicious packages, which Dependabot alerts don't cover, so the t
 - **To accept a finding on purpose**, add an `[[IgnoredVulns]]` entry (`id`, `ignoreUntil`, `reason`) to `osv-scanner.toml` next to the lock file.
 - OSV-Scanner is a pinned release, checked against its published SHA-256 before it runs.
 - Don't make "Security scan" a required status check: it only runs on pull requests that change a lock file, and GitHub leaves a required check from a skipped workflow waiting forever.
+
+## Secret scan
+
+The `secrets` job in `commits.yml` runs [gitleaks](https://github.com/gitleaks/gitleaks) on every pull request and every push to a release branch.
+It scans only the commits the pull request or push adds, the same ones the commit check reads, so a repo is never failed for what its older history already holds, and a scan takes seconds.
+
+- **The rules** are gitleaks's own plus the kit's, in `scripts/release-kit/gitleaks.toml`: a Cloudflare R2 endpoint (`<account id>.r2.cloudflarestorage.com`, which names the account) and a hushkey backup bucket name (`hushkey-backup-...`).
+  Placeholders such as `<ACCOUNT_ID>` or `${ACCOUNT_ID}` don't match.
+- **The log is redacted**: a public repo's run shows the file, line, commit and rule, never the value.
+- **A false positive**: add a `gitleaks:allow` comment on the line, or the fingerprint the scan prints to `.gitleaksignore` at the repo root.
+- **A real leak**: rotate the secret first; deleting the commit doesn't take back what was pushed.
+- gitleaks is a pinned release, checked against its published SHA-256 before it runs.
+- The scan is its own check (`secrets`, or `check / secrets` from the kit's callers), so it can be required on its own: `npx release-kit protect --checks "...,check / secrets"`.
+  It is skipped when only a pull request's title changes.
 
 ## zizmor
 

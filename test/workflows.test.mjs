@@ -90,7 +90,7 @@ test('no ${{ }} expression is pasted into a shell script', () => {
 test('every job that runs the kit fetches its scripts the same way', () => {
   const step = /- name: Fetch the release-kit scripts\n[\s\S]*?persist-credentials: false\n/g
   const copies = [...['commits.yml', 'release.yml', 'release-train.yml'].map((name) => `template/.github/workflows/${name}`), '.github/workflows/changes.yml'].flatMap((file) => read(file).match(step))
-  assert.equal(copies.length, 5)
+  assert.equal(copies.length, 6)
   assert.equal(new Set(copies).size, 1)
   assert.match(copies[0], /ref: \$\{\{ job\.workflow_sha \}\}/)
 })
