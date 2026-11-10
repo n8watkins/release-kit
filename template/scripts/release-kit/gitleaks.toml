@@ -1,0 +1,35 @@
+# release-kit: the secret scan's gitleaks config (commits.yml, job "secrets").
+# gitleaks's own rules, plus ones for things that aren't keys but still must not
+# be published: where a private backup lives.
+#
+# A false positive: add `gitleaks:allow` as a comment on the line, or its
+# fingerprint (printed by the scan) to .gitleaksignore at the repo root.
+
+title = "release-kit"
+
+[extend]
+useDefault = true
+
+# A Cloudflare R2 S3 endpoint names the account it belongs to:
+# <account id>.r2.cloudflarestorage.com, or <account id>.eu.r2... for a
+# jurisdiction. Placeholders like <ACCOUNT_ID> or ${ACCOUNT_ID} don't match.
+[[rules]]
+id = "cloudflare-r2-endpoint"
+description = "A Cloudflare R2 endpoint, which names the account"
+regex = '''(?i)\b[a-z0-9][a-z0-9-]*\.(?:[a-z]+\.)?r2\.cloudflarestorage\.com\b'''
+keywords = ["r2.cloudflarestorage.com"]
+
+  [[rules.allowlists]]
+  regexTarget = "match"
+  regexes = ['''(?i)^(?:example|account|your|my)[a-z0-9-]*\.''']
+
+# Hushkey's backup buckets: a bucket name tells an attacker where to look.
+[[rules]]
+id = "hushkey-backup-bucket"
+description = "A hushkey backup bucket name"
+regex = '''(?i)\bhushkey-backup-[a-z0-9][a-z0-9.-]*'''
+keywords = ["hushkey-backup-"]
+
+  [[rules.allowlists]]
+  regexTarget = "match"
+  regexes = ['''(?i)^hushkey-backup-example\b''']

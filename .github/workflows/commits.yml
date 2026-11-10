@@ -77,3 +77,68 @@ jobs:
             if git cat-file -e "$HEAD_SHA~1^{commit}" 2>/dev/null; then from="$HEAD_SHA~1"; else from=""; fi
           fi
           node "$RELEASE_KIT/commit-msg.mjs" --range "$from..$HEAD_SHA"
+
+  # A secret in a pushed commit is public at once, so scan what this pull
+  # request or push adds, with gitleaks's own rules and the kit's
+  # (scripts/release-kit/gitleaks.toml). Only the new commits: a repo isn't
+  # failed for what its older history already holds.
+  secrets:
+    # A title edit adds no commits.
+    if: github.event.action != 'edited'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Called from another repo: run the kit's scripts at the exact commit the
+      # caller pinned. A vendored copy runs the repo's own scripts/release-kit.
+      - name: Fetch the release-kit scripts
+        if: job.workflow_repository != '' && job.workflow_repository != github.repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .release-kit-source
+          sparse-checkout: template/scripts/release-kit
+          persist-credentials: false
+
+      - name: Locate the release-kit scripts
+        run: |
+          if [ -d .release-kit-source ]; then
+            mv .release-kit-source/template/scripts/release-kit "$RUNNER_TEMP/release-kit"
+            rm -rf .release-kit-source
+            echo "RELEASE_KIT=$RUNNER_TEMP/release-kit" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_KIT=scripts/release-kit" >> "$GITHUB_ENV"
+          fi
+
+      # A pinned release, checked against the checksum published with it.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$GITLEAKS_SHA256  gitleaks.tar.gz" | sha256sum --check
+          tar xzf gitleaks.tar.gz gitleaks
+
+      - name: Scan the new commits for secrets
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          from="${BASE:-$BEFORE}"
+          # The same commits as the commit check: a new branch or a force push
+          # has no usable "before", so it scans the last commit only.
+          if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then
+            if git cat-file -e "$HEAD_SHA~1^{commit}" 2>/dev/null; then from="$HEAD_SHA~1"; else from=""; fi
+          fi
+          if [ -n "$from" ]; then range="$from..$HEAD_SHA"; else range="-1 $HEAD_SHA"; fi
+          # --redact: a public repo's log must not repeat what it found.
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose \
+            --config "$RELEASE_KIT/gitleaks.toml" --log-opts="$range" .
