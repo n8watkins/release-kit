@@ -4,6 +4,42 @@
   "repository": "n8watkins/release-kit",
   "releases": [
     {
+      "version": "2.10.1",
+      "tag": "v2.10.1",
+      "date": "2026-11-10",
+      "time": "2026-11-11T01:59:56Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.10.1",
+      "previous": "v2.10.0",
+      "summary": "Ships the secret scan from v2.10.0 (#82), whose release failed its checks, and makes 0.x minor dependency updates wait for review.",
+      "breaking": false,
+      "notes": [
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "The kit's release no longer fails its checks on a runner without gitleaks",
+          "breaking": false,
+          "pr": 84,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/84",
+          "commit": "ab584f2e4c086992a280a75e3d3fba96de4fdab1",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/ab584f2e4c086992a280a75e3d3fba96de4fdab1"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "A Dependabot minor update below 1.0.0 waits for a person instead of merging on its own",
+          "breaking": false,
+          "pr": 85,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/85",
+          "commit": "aabfb74c56dabfd08be43c75072a61d44a6074b4",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/aabfb74c56dabfd08be43c75072a61d44a6074b4"
+        }
+      ],
+      "source": "release",
+      "unattributed": 0
+    },
+    {
       "version": "2.10.0",
       "tag": "v2.10.0",
       "date": "2026-11-10",

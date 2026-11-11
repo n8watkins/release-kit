@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.10.1 - 2026-11-10
+
+Ships the secret scan from v2.10.0 (#82), whose release failed its checks, and makes 0.x minor dependency updates wait for review.
+
+### Fixed
+
+- The kit's release no longer fails its checks on a runner without gitleaks ([#84](https://github.com/n8watkins/release-kit/pull/84))
+- A Dependabot minor update below 1.0.0 waits for a person instead of merging on its own ([#85](https://github.com/n8watkins/release-kit/pull/85))
+
 ## 2.10.0 - 2026-11-10
 
 ### New
