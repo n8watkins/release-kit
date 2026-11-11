@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // The auto-merge policy (.github/workflows/auto-merge.yml): merge release-kit
 // updates and Dependabot patch and minor updates (security ones included) on
-// their own once CI passes, and never a major update.
+// their own once CI passes, and never a major update. A minor update of a
+// dependency below 1.0.0 (0.y.z) waits for a person too, since SemVer lets a
+// 0.x minor break: it gets the REVIEW_LABEL label and a comment saying why.
 //
 //   node scripts/release-kit/automerge.mjs [--fallback true|false] [--method squash|merge|rebase] [--bots "dependabot[bot],my-app[bot]"]
 //
@@ -10,6 +12,9 @@
 // metadata is read: no pull request code runs. Each Dependabot dependency's
 // kind comes from the update-type in its commit metadata or, when that line is
 // missing, from the "from A to B" versions Dependabot names (classifyUpdate).
+// These are what dependabot/fetch-metadata reads too (update-type,
+// previous-version, new-version), read here for every dependency in a group
+// and on workflow_run as well, where that action has no pull request to read.
 //
 //   pull_request   When the base branch requires status checks and the repo
 //                  allows auto-merge, it turns on GitHub's auto-merge, which
@@ -27,15 +32,23 @@ import { isMain } from './git.mjs'
 
 export const UPDATE_TYPES = ['patch', 'minor', 'major']
 const KIT_BRANCH = 'release-kit/'
+/** The label on a pull request left for a person because it is a minor update below 1.0.0. */
+export const REVIEW_LABEL = 'needs-review: 0.x minor'
+const REVIEW_MARKER = '<!-- release-kit: 0.x minor -->'
 
-/** The update types in a Dependabot commit message's "updated-dependencies" metadata. */
+/**
+ * The dependencies in a Dependabot commit message's "updated-dependencies"
+ * metadata: { name, type, version }, where type is its update-type and version
+ * the dependency-version it moves to (each null when the line is missing).
+ */
 export function dependabotUpdates(message) {
   const block = /^updated-dependencies:\n([\s\S]*?)^\.\.\.$/m.exec(message.replace(/\r\n?/g, '\n'))?.[1] ?? ''
   const updates = []
   for (const entry of block.split(/^- /m).slice(1)) {
     const name = /dependency-name:\s*(\S+)/.exec(entry)?.[1]
     const type = /update-type:\s*version-update:semver-(patch|minor|major)/.exec(entry)?.[1]
-    if (name) updates.push({ name, type: type ?? null })
+    const version = /dependency-version:\s*['"]?([^\s'"]+)/.exec(entry)?.[1]
+    if (name) updates.push({ name, type: type ?? null, version: version ?? null })
   }
   return updates
 }
@@ -84,6 +97,12 @@ export function versionChange(from, to) {
   return { type: UPDATE_TYPES[2 - at], why: `${from} to ${to}` }
 }
 
+/** The major version of a semantic version (with or without a "v"), or null. */
+export const majorOf = (version) => {
+  const m = SEMVER.exec(version ?? '')
+  return m ? Number(m[1]) : null
+}
+
 /**
  * patch, minor or major between two semantic versions (with or without a "v"),
  * "downgrade" when `to` is lower, or null (see versionChange).
@@ -116,7 +135,7 @@ export function dependabotVersions(text) {
 }
 
 /**
- * What a pull request updates: { type, what, why, parts }.
+ * What a pull request updates: { type, what, why, parts, belowOne }.
  *   kit         [from, to]: the release-kit pin on the base and head side
  *   dependabot  whether Dependabot opened it
  *   messages    its commit messages; body: its description
@@ -124,35 +143,47 @@ export function dependabotVersions(text) {
  * when that line is missing, from the "from A to B" versions Dependabot names
  * (commit messages first, then the description). A group takes its biggest
  * change; any downgrade makes it a downgrade, anything unreadable makes the
- * type null with `why` saying what.
+ * type null with `why` saying what. `belowOne` names each minor update of a
+ * dependency below 1.0.0, where SemVer lets a minor break; a minor update
+ * whose versions can't be read counts as unreadable, since it might be one.
  */
 export function classifyUpdate({ kit = [null, null], dependabot = false, messages = [], body = '' }) {
   const parts = []
-  if (kit[0] !== kit[1]) parts.push({ name: 'release-kit', ...versionChange(kit[0], kit[1]), source: 'the package.json pin' })
+  if (kit[0] !== kit[1]) parts.push({ name: 'release-kit', ...versionChange(kit[0], kit[1]), from: kit[0], to: kit[1], source: 'the package.json pin' })
   if (dependabot) {
     const fromCommits = messages.flatMap(dependabotVersions)
     const named = [...fromCommits, ...dependabotVersions(body)]
-    const read = (v, source) => ({ name: v.name, ...versionChange(v.from, v.to), source })
+    const read = (v, source) => ({ name: v.name, ...versionChange(v.from, v.to), from: v.from, to: v.to, source })
     const metadata = messages.flatMap(dependabotUpdates)
     for (const entry of metadata) {
+      const versions = named.find((v) => v.name === entry.name)
       if (entry.type) {
-        parts.push({ name: entry.name, type: entry.type, why: 'its update-type', source: 'Dependabot metadata' })
+        const [from, to] = [versions?.from ?? null, versions?.to ?? entry.version]
+        const span = from && to ? ` (${from} to ${to})` : to ? ` (to ${to})` : ''
+        parts.push({ name: entry.name, type: entry.type, from, to, why: `its update-type${span}`, source: 'Dependabot metadata' })
         continue
       }
-      const versions = named.find((v) => v.name === entry.name)
       parts.push(versions ? read(versions, 'the versions Dependabot names') : { name: entry.name, type: null, why: `${entry.name} has no update-type and no "from A to B" line` })
     }
     if (!metadata.length) {
       for (const v of fromCommits.length ? fromCommits : dependabotVersions(body)) parts.push(read(v, 'the versions Dependabot names'))
     }
   }
+  // A minor update keeps the major version, so either side tells whether it is below 1.0.0.
+  for (const part of parts) {
+    if (part.type !== 'minor') continue
+    const majors = [majorOf(part.from), majorOf(part.to)].filter((n) => n !== null)
+    if (!majors.length) Object.assign(part, { type: null, why: `a minor update with no readable version (${part.from ?? 'none'} to ${part.to ?? 'none'}), so it might be below 1.0.0` })
+    else if (majors.includes(0)) Object.assign(part, { belowOne: true, why: `${part.why}, below 1.0.0` })
+  }
   const what = [...new Set(parts.map((p) => p.name))].join(', ')
+  const belowOne = [...new Set(parts.filter((p) => p.belowOne).map((p) => p.name))]
   const downgrade = parts.find((p) => p.type === 'downgrade')
-  if (downgrade) return { type: 'downgrade', what, why: `${downgrade.name}: ${downgrade.why}`, parts }
-  if (!parts.length) return { type: null, what, why: 'no version change found', parts }
+  if (downgrade) return { type: 'downgrade', what, why: `${downgrade.name}: ${downgrade.why}`, parts, belowOne }
+  if (!parts.length) return { type: null, what, why: 'no version change found', parts, belowOne }
   const unknown = parts.find((p) => !p.type)
-  if (unknown) return { type: null, what, why: unknown.why.startsWith(unknown.name) ? unknown.why : `${unknown.name}: ${unknown.why}`, parts }
-  return { type: UPDATE_TYPES[Math.max(...parts.map((p) => UPDATE_TYPES.indexOf(p.type)))], what, why: '', parts }
+  if (unknown) return { type: null, what, why: unknown.why.startsWith(unknown.name) ? unknown.why : `${unknown.name}: ${unknown.why}`, parts, belowOne }
+  return { type: UPDATE_TYPES[Math.max(...parts.map((p) => UPDATE_TYPES.indexOf(p.type)))], what, why: '', parts, belowOne }
 }
 
 /** The version a release-kit dev dependency spec pins (github:o/release-kit#v1.2.3), or null. */
@@ -161,11 +192,12 @@ export const kitVersion = (spec) => /#v?(\d+\.\d+\.\d+)$/.exec(spec ?? '')?.[1] 
 /**
  * What to do with a pull request.
  *   pr        { author, headRef, state, draft, autoMerge }
- *   update    { type: 'patch' | 'minor' | 'major' | 'downgrade' | null, what: text, why: text }
+ *   update    { type: 'patch' | 'minor' | 'major' | 'downgrade' | null, what: text, why: text, belowOne: [names] }
  *   repo      { requiredChecks, allowAutoMerge }
  *   event     'pull_request' or 'workflow_run'
  *   checks    'green' | 'pending' | 'red' (workflow_run only)
- * Returns { action: 'enable' | 'merge' | 'skip', reason }.
+ * Returns { action: 'enable' | 'merge' | 'skip' | 'review', reason }: 'review'
+ * leaves it for a person like 'skip' and also labels it REVIEW_LABEL and says why.
  */
 export function decide({ pr, update, repo, event, fallback = true, bots = ['dependabot[bot]'], checks }) {
   const skip = (reason) => ({ action: 'skip', reason })
@@ -176,6 +208,10 @@ export function decide({ pr, update, repo, event, fallback = true, bots = ['depe
   if (!update.type) return skip(`could not tell what kind of update this is (${update.why || update.what || 'no version change found'})`)
   if (update.type === 'downgrade') return skip(`${update.what} would move to an older version (${update.why || 'a downgrade'}): close it (see "Dependabot proposes an older kit" in docs/AUTO_MERGE.md)`)
   if (update.type === 'major') return skip(`${update.what} is a major update: a person reviews and merges it`)
+  if (update.belowOne?.length) {
+    const one = update.belowOne.length === 1
+    return { action: 'review', reason: `${update.belowOne.join(', ')} ${one ? 'is' : 'are'} below 1.0.0, where a minor update may break (SemVer): a person reviews and merges it` }
+  }
   if (event === 'pull_request') {
     if (!repo.requiredChecks) {
       return skip(`the base branch requires no status checks, so auto-merge would merge before CI finishes${fallback ? '; the merge-when-green fallback merges it once every check passes' : ''}`)
@@ -192,6 +228,23 @@ export function decide({ pr, update, repo, event, fallback = true, bots = ['depe
     return { action: 'merge', reason: `${update.what} is a ${update.type} update and every check passed` }
   }
   return skip(`nothing to do on a ${event} event`)
+}
+
+/** The comment on a pull request left for a person because it has a minor update below 1.0.0. */
+export function reviewComment(update) {
+  const rows = (update.parts ?? []).filter((p) => p.belowOne).map((p) => `| ${p.name} | ${p.from ?? '?'} | ${p.to ?? '?'} |`)
+  return [
+    REVIEW_MARKER,
+    `**Auto-merge left this for a person.** It moves ${rows.length === 1 ? 'a dependency' : 'dependencies'} below 1.0.0 up a minor version:`,
+    '',
+    '| Dependency | From | To |',
+    '|---|---|---|',
+    ...rows,
+    '',
+    'Under SemVer anything may change before 1.0.0, so a 0.x minor update can carry breaking changes (release-kit itself ships breaking changes as a minor before 1.0).',
+    'Check the release notes, then merge it by hand.',
+    'Patch updates below 1.0.0, and minor updates from 1.0.0 on, still merge on their own once CI passes.',
+  ].join('\n')
 }
 
 /**
@@ -235,6 +288,15 @@ function main() {
   const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
   const gh = (...ghArgs) => execFileSync('gh', ghArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   const api = (path) => JSON.parse(gh('api', '-H', 'Accept: application/vnd.github+json', path))
+  // A label or comment that can't be written leaves the pull request unmerged all the same.
+  const tryGh = (...ghArgs) => {
+    try {
+      return gh(...ghArgs)
+    } catch (error) {
+      console.log(`::warning title=Auto-merge::gh ${ghArgs.slice(0, 3).join(' ')} failed: ${String(error.stderr ?? error.message).trim().replace(/\r?\n/g, ' ')}`)
+      return null
+    }
+  }
   const tryApi = (path, fallbackValue) => {
     try {
       return api(path)
@@ -260,6 +322,7 @@ function main() {
   }
   if (!number) return notice('no open pull request for this run')
   const raw = api(`repos/${repoName}/pulls/${number}`)
+  const labels = (raw.labels ?? []).map((l) => l.name)
   const pr = { author: raw.user.login, headRef: raw.head.ref, state: raw.state, draft: raw.draft, autoMerge: Boolean(raw.auto_merge) }
 
   // What it updates: the release-kit pin in package.json, and Dependabot's metadata.
@@ -293,6 +356,10 @@ function main() {
   }
 
   const decision = decide({ pr, update, repo, event, fallback, bots, checks })
+  // A label from an earlier version of the pull request goes once it may merge on its own.
+  if (['enable', 'merge'].includes(decision.action) && labels.includes(REVIEW_LABEL)) {
+    tryGh('api', '-X', 'DELETE', `repos/${repoName}/issues/${number}/labels/${encodeURIComponent(REVIEW_LABEL)}`)
+  }
   if (decision.action === 'enable') {
     try {
       gh('pr', 'merge', String(number), '--repo', repoName, '--auto', `--${method}`, '--match-head-commit', raw.head.sha)
@@ -306,6 +373,14 @@ function main() {
   } else if (decision.action === 'merge') {
     gh('pr', 'merge', String(number), '--repo', repoName, `--${method}`, '--match-head-commit', raw.head.sha)
     notice(`merged #${number}: ${decision.reason}`, update.parts)
+  } else if (decision.action === 'review') {
+    // Labeling creates the label in a repo without one; the comment is written once.
+    if (!labels.includes(REVIEW_LABEL)) tryGh('api', '-X', 'POST', '-f', `labels[]=${REVIEW_LABEL}`, `repos/${repoName}/issues/${number}/labels`)
+    const comments = tryApi(`repos/${repoName}/issues/${number}/comments?per_page=100`, null)
+    if (comments && !comments.some((c) => c.body?.includes(REVIEW_MARKER))) {
+      tryGh('api', '-X', 'POST', '-f', `body=${reviewComment(update)}`, `repos/${repoName}/issues/${number}/comments`)
+    }
+    notice(`#${number} left for a person, labeled "${REVIEW_LABEL}": ${decision.reason}`, update.parts)
   } else {
     notice(`#${number} left for a person: ${decision.reason}`, update.parts)
   }

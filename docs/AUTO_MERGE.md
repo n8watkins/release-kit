@@ -5,10 +5,18 @@ The kit's reusable `auto-merge.yml` merges them on their own, within a strict po
 
 ## The policy
 
-- **What may merge on its own:** release-kit updates, and Dependabot patch and minor updates, including Dependabot security updates.
-- **What never does:** a major update of anything, a downgrade, an update whose kind can't be read, a draft, and any pull request that isn't from an update bot.
+- **What may merge on its own:** release-kit updates, and Dependabot patch and minor updates, including Dependabot security updates, except a minor update of a dependency below 1.0.0.
+- **What never does:** a major update of anything, a minor update of a dependency below 1.0.0 (a 0.x minor), a downgrade, an update whose kind can't be read, a draft, and any pull request that isn't from an update bot.
+- **Why a 0.x minor waits:** under SemVer anything may change before 1.0.0, so a minor update of a `0.y.z` dependency (0.13.2 to 0.14.0) can break, and the kit's own pre-1.0 rule ships breaking changes as minors.
+  A patch update below 1.0.0 (0.13.1 to 0.13.2) still merges on its own, as does a minor update from 1.0.0 on.
+  The pull request gets the label `needs-review: 0.x minor` (created in the repo the first time) and one comment listing each such dependency with its old and new version; review it and merge it by hand.
+  A grouped pull request with even one 0.x minor in it waits as a whole, so a weekly `npm-minor-patch` group with one stays open until you merge it.
+  If Dependabot later rebases the pull request into one that may merge on its own, the label is taken off again.
 - **Who counts as an update bot:** `dependabot[bot]`, plus any author listed in the `bots` input, whose pull requests must also come from a `release-kit/` branch; the `auto-merge.yml` apply writes lists the rollout bot, `release-kit-bot-n8watkins[bot]`.
 - **How the kind is read:** the release-kit pin in `package.json` on both sides of the pull request, and the `update-type` of each dependency in Dependabot's `updated-dependencies` metadata in its commit messages.
+  Each dependency's old and new version come from the "from A to B" lines below, with the metadata's `dependency-version` as the new version when there is no such line.
+  This is the same metadata `dependabot/fetch-metadata` reads (its `update-type`, `previous-version` and `new-version` outputs), read here for every dependency in a group, and on `workflow_run` too, where that action has no pull request to read.
+  A minor update keeps the major version, so either version tells whether it is below 1.0.0; a minor update with neither version readable (a commit SHA alone) waits for a person, since it might be one.
   A grouped pull request takes the biggest change in it, so a group with one major update waits for a person.
   The `dependabot.yml` apply writes keeps majors in groups of their own (`npm-major`, `actions-major`), so the weekly patch and minor groups (`npm-minor-patch`, `actions-minor-patch`) still merge on their own ([UPGRADES.md](UPGRADES.md#everything-else-dependabot-updates)).
 - **When `update-type` is missing:** Dependabot sometimes leaves it out (a multi-ecosystem group pull request did), so the policy reads the old and new version Dependabot names instead and compares them with semver.
@@ -16,7 +24,7 @@ The kit's reusable `auto-merge.yml` merges them on their own, within a strict po
   A GitHub Action pinned to a commit SHA counts only when a version is written next to the SHA.
   What stays for a person, with the reason in the notice and the job summary: commit SHAs with no version, versions that aren't semver (`v4`, `22-alpine`), a move to a prerelease, a downgrade, and a dependency with neither an `update-type` nor a "from A to B" line.
   A prerelease's own release (2.0.0-rc.1 to 2.0.0) counts as the change its release line makes, here a major.
-- **The job summary** lists each dependency, the kind of update it is and where that was read from.
+- **The job summary** lists each dependency, the kind of update it is, its versions, whether it is below 1.0.0 and where that was read from.
 - **Only metadata is read**, through the GitHub API; no pull request code runs in the job that holds the write token.
 
 ## How it merges
@@ -60,7 +68,7 @@ A pull request's own `pull_request` run uses the kit version it moves to, so for
    gh api -X PATCH repos/{owner}/{repo} -F allow_auto_merge=true
    ```
 
-3. Dependabot's own pull requests run with a read-only token unless the workflow asks for more, which the example does (`contents: write` and `pull-requests: write`, for that one job).
+3. Dependabot's own pull requests run with a read-only token unless the workflow asks for more, which the example does (`contents: write` and `pull-requests: write`, for that one job; `pull-requests: write` also covers the label and the comment on a 0.x minor).
    The merge-when-green fallback also reads the pull request's checks, so the job asks for `checks: read` and `statuses: read` too: without them a private repo's token gets a 403 ("Resource not accessible by integration") and nothing merges.
    An `auto-merge.yml` from before v2.5.2 lacks them: rerun `npx release-kit apply .`, or add the two lines by hand.
 

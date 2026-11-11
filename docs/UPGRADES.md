@@ -63,13 +63,13 @@ The first covers only the kit, in the `release-kit` group above.
 The second covers every other dependency:
 
 - **Version updates, weekly, in two pull requests per ecosystem.**
-  `npm-minor-patch` and `actions-minor-patch` hold the patch and minor updates, which `auto-merge.yml` merges once CI passes.
+  `npm-minor-patch` and `actions-minor-patch` hold the patch and minor updates, which `auto-merge.yml` merges once CI passes, unless one of them is a minor update of a dependency below 1.0.0: then the pull request waits for you with the `needs-review: 0.x minor` label ([AUTO_MERGE.md](AUTO_MERGE.md#the-policy)).
   `npm-major` and `actions-major` hold the major updates, which wait for you.
   Dependabot proposes each dependency's newest version, so a dependency with a new major is in the major pull request only, not also in the minor one at its newest minor.
   Their commits read `build(deps): ...` (`build(deps-dev): ...` for a dev dependency), like the kit's.
 - **A cooldown:** a new release is proposed after 3 days, and a new npm major after 7 (Dependabot has no per-level cooldown for GitHub Actions), so a broken or malicious release has time to be pulled first.
 - **Security updates as soon as an alert appears**, one pull request per vulnerable dependency, direct or transitive, with no cooldown.
-  `auto-merge.yml` merges a patch or minor one; a major one waits for you.
+  `auto-merge.yml` merges a patch or minor one; a major one, or a minor one below 1.0.0, waits for you.
 
 This matters for transitive vulnerabilities too.
 When a fix needs a new major of a transitive dependency (minimatch 11, say), Dependabot's security update can't force it, and the fix arrives only once the direct dependency that pulls it in releases a version that accepts it.
@@ -137,7 +137,7 @@ A reusable rollout for your own repos, with your own App and a configured bot id
 |---|---|---|
 | Version pins | Dependabot's pull request | Dependabot's pull request, and the bot's |
 | New or changed files | You run `npx release-kit apply .` in each repo | The bot's pull request, one per repo |
-| Merging | `auto-merge.yml`: patch and minor on their own, major waits | The same policy |
+| Merging | `auto-merge.yml`: patch and minor on their own, major and a 0.x minor wait | The same policy |
 | Your part | Merge majors, run apply when a release adds files | Approve each wave of a major and merge its pull requests; read a `release-kit: rollout` issue if one opens |
 | Setup | Nothing beyond apply | The App, its installs and the `rollout` and `rollout-major` environments |
 | Available to | Anyone | Repos in release-kit's `adopters.json` |
