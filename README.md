@@ -61,7 +61,7 @@ The full answer, with a side-by-side table, is in [docs/UPGRADES.md](docs/UPGRAD
 - **Notes for users.** `feat`, `fix`, `perf` and `security` subjects become plain "New, Fixed, Faster, Safer" notes, a `Release-note:` line rewords a technical subject, and chores, docs and bot commits stay out.
 - **A release train that only ships user-facing work.** On a schedule it releases what landed, but a week of chores and docs releases nothing, and it runs the required checks on the exact release commit first.
 - **Security in the same kit, with nothing to install.** A weekly OSV scan blocks malicious packages (which Dependabot alerts don't cover) and high or critical vulnerabilities, every workflow's hardening is enforced by tests, and the kit itself has zero runtime dependencies.
-- **Upgrades that stay in step.** One grouped Dependabot pull request per kit release, a one-minute `release-kit verify` lane for it, and an auto-merge policy that merges patch and minor updates once CI passes and never a major.
+- **Upgrades that stay in step.** One grouped Dependabot pull request per kit release, a one-minute `release-kit verify` lane for it, and an auto-merge policy that merges patch and minor updates once CI passes and never a major, nor a minor below 1.0.0.
 
 ### Where it is behind
 
@@ -119,7 +119,7 @@ Each repo installs the kit as a dev dependency pinned to a release tag, `"releas
   A `dependabot.yml` the kit wrote before is upgraded by re-running apply; a repo's own `dependabot.yml` is left alone, and apply says how to add the group.
   The kit is excluded from Dependabot's default 3-day cooldown: with the cooldown, Dependabot skips the newest tags of a git dependency and proposes the newest older one, even below the installed version (repos on v2.2.0 got "bump release-kit from v2.2.0 to v2.0.1").
   So a release reaches each repo's PR queue within a day, and the auto-merge policy refuses any downgrade as a second line of defense.
-- **Every other dependency stays current too.** The same `dependabot.yml` has a second npm and github-actions entry for everything but the kit: weekly version updates, patch and minor in one pull request that merges on its own once CI passes, majors in another that waits for a person, after a 3-day cooldown (7 for an npm major).
+- **Every other dependency stays current too.** The same `dependabot.yml` has a second npm and github-actions entry for everything but the kit: weekly version updates, patch and minor in one pull request that merges on its own once CI passes (unless it holds a minor update of a dependency below 1.0.0), majors in another that waits for a person, after a 3-day cooldown (7 for an npm major).
   Security updates are never blocked: Dependabot opens one as soon as an alert appears, for direct and transitive dependencies alike ([docs/UPGRADES.md](docs/UPGRADES.md#everything-else-dependabot-updates)).
 - **`npm run release:check` warns** when the installed kit is behind the newest release, when the workflows pin a different version than the one installed, or when the files differ from what apply writes at the installed version ("release-kit vX.Y.Z adds or changes N files; run npx release-kit apply ."); `npx release-kit apply --check .` is the same comparison as a command that exits 1, and a kit-only pull request's `release-kit verify` shows it as a warning ([docs/UPGRADES.md](docs/UPGRADES.md#without-the-app)).
 - **New files arrive from the rollout bot.** Dependabot can change a version, not add a file, so when a kit release adds or changes a file apply writes (for example `security.yml` in v2.1.0), apply has to run in each repo.
@@ -330,6 +330,7 @@ Never use workflow-level `paths` filters for this: a required check from a skipp
 ## Auto-merge for updates
 
 The kit's reusable `auto-merge.yml` merges release-kit updates and Dependabot patch and minor updates (security ones included) on their own once CI passes; a major update always waits for a person.
+A minor update of a dependency below 1.0.0 waits too, since SemVer lets a 0.x minor break: it gets the `needs-review: 0.x minor` label and a comment saying why, while a 0.x patch still merges on its own.
 It turns on GitHub's auto-merge only when the base branch requires status checks, because without one GitHub would merge before CI finishes.
 A repo that can't require checks (a private repo on GitHub Free) gets a "merge when green" fallback that merges once every check on the pull request has passed.
 apply writes the workflow, and `release-kit protect` allows auto-merge on the repo when it requires checks.

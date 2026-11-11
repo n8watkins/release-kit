@@ -1,6 +1,8 @@
 # release-kit: the auto-merge policy. release-kit updates and Dependabot patch
 # and minor updates (security ones included) merge on their own once CI
-# passes; a major update always waits for a person (see docs/AUTO_MERGE.md).
+# passes; a major update always waits for a person, and so does a minor update
+# of a dependency below 1.0.0, which gets the "needs-review: 0.x minor" label
+# and a comment saying why (see docs/AUTO_MERGE.md).
 #
 # Called from a repo's auto-merge.yml:
 #   on:

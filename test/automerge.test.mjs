@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { KIT, attempt, tmp } from './helpers.mjs'
-import { alreadyMergeable, checksState, classifyUpdate, decide, dependabotUpdates, dependabotVersions, kitVersion, semverChange, versionChange } from '../template/scripts/release-kit/automerge.mjs'
+import { REVIEW_LABEL, alreadyMergeable, checksState, classifyUpdate, decide, dependabotUpdates, dependabotVersions, kitVersion, majorOf, reviewComment, semverChange, versionChange } from '../template/scripts/release-kit/automerge.mjs'
 
 // A Dependabot commit message as Dependabot writes it (a grouped update).
 const DEPENDABOT = `build(deps): bump the release-kit group with 2 updates
@@ -30,10 +30,10 @@ updated-dependencies:
 Signed-off-by: dependabot[bot] <support@github.com>`
 
 test('Dependabot metadata, version changes and kit pins are read the way Dependabot and npm write them', () => {
-  assert.deepEqual(dependabotUpdates(DEPENDABOT), [{ name: 'release-kit', type: 'minor' }, { name: 'n8watkins/release-kit', type: 'minor' }])
+  assert.deepEqual(dependabotUpdates(DEPENDABOT), [{ name: 'release-kit', type: 'minor', version: '2.2.0' }, { name: 'n8watkins/release-kit', type: 'minor', version: '2.2.0' }])
   assert.deepEqual(dependabotUpdates(DEPENDABOT.replaceAll('\n', '\r\n')).length, 2)
   // A security update of a dependency whose version jumps a major.
-  assert.deepEqual(dependabotUpdates('fix: bump x\n\n---\nupdated-dependencies:\n- dependency-name: next\n  dependency-type: direct:production\n  update-type: version-update:semver-major\n...\n'), [{ name: 'next', type: 'major' }])
+  assert.deepEqual(dependabotUpdates('fix: bump x\n\n---\nupdated-dependencies:\n- dependency-name: next\n  dependency-type: direct:production\n  update-type: version-update:semver-major\n...\n'), [{ name: 'next', type: 'major', version: null }])
   assert.deepEqual(dependabotUpdates('chore: no metadata'), [])
   assert.equal(semverChange('2.1.0', 'v2.1.3'), 'patch')
   assert.equal(semverChange('v2.1.0', '2.2.0'), 'minor')
@@ -111,12 +111,14 @@ process.stdout.write(JSON.stringify(answer[1]))
 const b64 = (text) => Buffer.from(text).toString('base64')
 const pkg = (version) => ({ content: b64(JSON.stringify({ devDependencies: { 'release-kit': `github:n8watkins/release-kit#v${version}` } })) })
 
-function automerge({ summary, event = 'pull_request', from = '2.1.0', to = '2.2.0', rules = [], allowAutoMerge = true, runs = [], payload, commits, body = null, headRef = 'dependabot/npm_and_yarn/release-kit' } = {}) {
+function automerge({ summary, event = 'pull_request', from = '2.1.0', to = '2.2.0', rules = [], allowAutoMerge = true, runs = [], payload, commits, body = null, headRef = 'dependabot/npm_and_yarn/release-kit', labels = [], comments = [] } = {}) {
   const dir = tmp('automerge')
   writeFileSync(join(dir, 'gh'), FAKE_GH, { mode: 0o755 })
   const state = {
     'repos/o/r/pulls/7/commits': commits ?? [{ commit: { message: DEPENDABOT.replaceAll('semver-minor', semverChange(from, to) ? `semver-${semverChange(from, to)}` : 'semver-minor') } }],
-    'repos/o/r/pulls/7': { number: 7, state: 'open', draft: false, auto_merge: null, body, user: { login: 'dependabot[bot]' }, head: { ref: headRef, sha: 'h'.repeat(40) }, base: { ref: 'main', sha: 'b'.repeat(40), repo: { allow_auto_merge: allowAutoMerge } } },
+    'repos/o/r/issues/7/comments': comments,
+    'repos/o/r/issues/7/labels': [],
+    'repos/o/r/pulls/7': { number: 7, state: 'open', draft: false, auto_merge: null, body, labels: labels.map((name) => ({ name })), user: { login: 'dependabot[bot]' }, head: { ref: headRef, sha: 'h'.repeat(40) }, base: { ref: 'main', sha: 'b'.repeat(40), repo: { allow_auto_merge: allowAutoMerge } } },
     [`repos/o/r/contents/package.json?ref=${'b'.repeat(40)}`]: pkg(from),
     [`repos/o/r/contents/package.json?ref=${'h'.repeat(40)}`]: pkg(to),
     'repos/o/r/rules/branches/main': rules,
@@ -132,8 +134,10 @@ function automerge({ summary, event = 'pull_request', from = '2.1.0', to = '2.2.
     GITHUB_REPOSITORY: 'o/r', GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: join(dir, 'event.json'),
     ...(summary ? { GITHUB_STEP_SUMMARY: summary } : {}),
   })
-  const merges = readFileSync(join(dir, 'log'), 'utf8').split('\n').filter((line) => line.startsWith('pr merge'))
-  return { ...result, merges }
+  const calls = readFileSync(join(dir, 'log'), 'utf8').split('\n')
+  const merges = calls.filter((line) => line.startsWith('pr merge'))
+  const writes = calls.filter((line) => /^api -X (POST|DELETE) /.test(line))
+  return { ...result, merges, writes }
 }
 
 test('end to end: a minor kit update on a repo that requires checks gets auto-merge, a major does not', () => {
@@ -280,4 +284,99 @@ test('a pull request whose required checks already passed is merged directly, si
   // main merges directly only after that refusal, still matching the head commit.
   const source = readFileSync(join(KIT, 'template/scripts/release-kit/automerge.mjs'), 'utf8')
   assert.match(source, /if \(!alreadyMergeable\(error\)\) throw error\n(?: {6}\/\/.*\n)* {6}gh\('pr', 'merge', String\(number\), '--repo', repoName, `--\$\{method\}`, '--match-head-commit', raw\.head\.sha\)/)
+})
+
+// Below 1.0.0 SemVer lets a minor update break (and release-kit's own pre-1.0
+// rule ships breaking changes as minors), so a 0.x minor waits for a person.
+// A Dependabot commit as Dependabot writes it, for one dependency or a group.
+const bump = (...deps) => {
+  const one = deps.length === 1
+  const lines = deps.map(([name, from, to]) => (one ? `Bumps [${name}](u) from ${from} to ${to}.` : `Updates \`${name}\` from ${from} to ${to}`))
+  const entries = deps.map(([name, from, to]) => `- dependency-name: ${name}\n  dependency-version: ${to}\n  dependency-type: direct:production\n  update-type: version-update:semver-${semverChange(from, to)}\n`)
+  return `build(deps): bump ${one ? deps[0][0] : 'the npm-minor-patch group'}\n\n${lines.join('\n\n')}\n\n---\nupdated-dependencies:\n${entries.join('')}...\n\nSigned-off-by: dependabot[bot] <support@github.com>`
+}
+
+test('classifyUpdate: a minor update below 1.0.0 is marked for review, a patch below 1.0.0 and a minor from 1.0.0 on are not', () => {
+  assert.equal(majorOf('v0.13.2'), 0)
+  assert.equal(majorOf('1.0.0'), 1)
+  assert.equal(majorOf('v4'), null)
+  // 0.x patch: auto.
+  const patch = classify([bump(['zod-lite', '0.13.1', '0.13.2'])])
+  assert.deepEqual([patch.type, patch.belowOne], ['patch', []])
+  // 0.x minor: review, with the versions it read.
+  const zeroMinor = classify([bump(['zod-lite', '0.13.2', '0.14.0'])])
+  assert.deepEqual([zeroMinor.type, zeroMinor.belowOne], ['minor', ['zod-lite']])
+  assert.deepEqual([zeroMinor.parts[0].from, zeroMinor.parts[0].to], ['0.13.2', '0.14.0'])
+  assert.match(zeroMinor.parts[0].why, /its update-type \(0\.13\.2 to 0\.14\.0\), below 1\.0\.0/)
+  // 1.x minor: auto, as before.
+  const oneMinor = classify([bump(['next', '1.4.0', '1.5.0'])])
+  assert.deepEqual([oneMinor.type, oneMinor.belowOne], ['minor', []])
+  // A group with a mixed set: one 0.x minor makes the whole group wait.
+  const mixed = classify([bump(['a', '0.4.1', '0.4.2'], ['b', '2.0.0', '2.1.0'], ['c', '0.2.0', '0.3.0'])])
+  assert.deepEqual([mixed.type, mixed.belowOne], ['minor', ['c']])
+  // Without a "from A to B" line, dependency-version alone tells, since a minor keeps the major.
+  assert.deepEqual(classify(['---\nupdated-dependencies:\n- dependency-name: x\n  dependency-version: 0.5.0\n  update-type: version-update:semver-minor\n...\n']).belowOne, ['x'])
+  // Without the update-type, the versions Dependabot names.
+  assert.deepEqual(classify([meta(['x'])], 'Bumps [x](u) from 0.1.0 to 0.2.0.').belowOne, ['x'])
+  // A minor update with no version at all might be below 1.0.0, so it can't be read.
+  const blind = classify(['---\nupdated-dependencies:\n- dependency-name: actions/thing\n  dependency-version: ' + 'b'.repeat(40) + '\n  update-type: version-update:semver-minor\n...\n'])
+  assert.equal(blind.type, null)
+  assert.match(blind.why, /actions\/thing: a minor update with no readable version .* might be below 1\.0\.0/)
+})
+
+test('decide: a minor update below 1.0.0 is left for a person to review, on both events', () => {
+  const zero = { type: 'minor', what: 'a, c', belowOne: ['c'] }
+  for (const [repo, event] of [[protectedRepo, 'pull_request'], [freePrivate, 'workflow_run']]) {
+    const decision = decide({ pr: pr(), update: zero, repo, event, checks: 'green' })
+    assert.equal(decision.action, 'review')
+    assert.match(decision.reason, /c is below 1\.0\.0, where a minor update may break \(SemVer\): a person reviews/)
+  }
+  assert.match(decide({ pr: pr(), update: { ...zero, belowOne: ['b', 'c'] }, repo: protectedRepo, event: 'pull_request' }).reason, /b, c are below 1\.0\.0/)
+  // A major in the same group still reads as the major; patches and 1.x minors still merge.
+  assert.match(decide({ pr: pr(), update: { ...zero, type: 'major' }, repo: protectedRepo, event: 'pull_request' }).reason, /major update/)
+  assert.equal(decide({ pr: pr(), update: { type: 'minor', what: 'next', belowOne: [] }, repo: protectedRepo, event: 'pull_request' }).action, 'enable')
+  assert.equal(decide({ pr: pr(), update: { type: 'patch', what: 'a', belowOne: [] }, repo: freePrivate, event: 'workflow_run', checks: 'green' }).action, 'merge')
+  // A draft or a pull request from someone else is skipped as before, not labeled.
+  assert.equal(decide({ pr: pr({ draft: true }), update: zero, repo: protectedRepo, event: 'pull_request' }).action, 'skip')
+  const comment = reviewComment(classify([bump(['a', '0.4.1', '0.4.2'], ['c', '0.2.0', '0.3.0'])]))
+  assert.match(comment, /^<!-- release-kit: 0\.x minor -->\n/)
+  assert.match(comment, /\| c \| 0\.2\.0 \| 0\.3\.0 \|/)
+  assert.doesNotMatch(comment, /\| a \|/)
+})
+
+test('end to end: 0.x patch and 1.x minor merge on their own; a 0.x minor or a group with one is labeled and explained once', () => {
+  const required = [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI result' }] } }]
+  const enable = [`pr merge 7 --repo o/r --auto --squash --match-head-commit ${'h'.repeat(40)}`]
+  const run = (deps, more = {}) => automerge({ commits: [{ commit: { message: bump(...deps) } }], from: '2.5.2', to: '2.5.2', rules: required, ...more })
+
+  const zeroPatch = run([['zod-lite', '0.13.1', '0.13.2']])
+  assert.equal(zeroPatch.status, 0, zeroPatch.stderr)
+  assert.deepEqual([zeroPatch.merges, zeroPatch.writes], [enable, []])
+
+  const oneMinor = run([['next', '1.4.0', '1.5.0']])
+  assert.deepEqual([oneMinor.merges, oneMinor.writes], [enable, []])
+
+  const zeroMinor = run([['zod-lite', '0.13.2', '0.14.0']])
+  assert.equal(zeroMinor.status, 0, zeroMinor.stderr)
+  assert.deepEqual(zeroMinor.merges, [])
+  assert.match(zeroMinor.stdout, /::notice title=Auto-merge::#7 left for a person, labeled "needs-review: 0\.x minor": zod-lite is below 1\.0\.0/)
+  assert.equal(zeroMinor.writes[0], `api -X POST -f labels[]=${REVIEW_LABEL} repos/o/r/issues/7/labels`)
+  assert.match(zeroMinor.writes[1], /^api -X POST -f body=<!-- release-kit: 0\.x minor -->/)
+
+  // The mixed group, on the merge-when-green fallback with green checks.
+  const summary = join(tmp('automerge-summary'), 'summary.md')
+  const group = run([['a', '0.4.1', '0.4.2'], ['b', '2.0.0', '2.1.0'], ['c', '0.2.0', '0.3.0']], { rules: [], event: 'workflow_run', runs: [{ name: 'CI result', status: 'completed', conclusion: 'success' }], summary })
+  assert.equal(group.status, 0, group.stderr)
+  assert.deepEqual(group.merges, [])
+  assert.equal(group.writes.length, 2)
+  assert.match(readFileSync(summary, 'utf8'), /\| c \| minor \| its update-type \(0\.2\.0 to 0\.3\.0\), below 1\.0\.0 \(Dependabot metadata\) \|/)
+
+  // A later run finds the label and the comment there already and writes neither again.
+  const again = run([['zod-lite', '0.13.2', '0.14.0']], { labels: [REVIEW_LABEL], comments: [{ body: reviewComment(classify([bump(['zod-lite', '0.13.2', '0.14.0'])])) }] })
+  assert.deepEqual([again.merges, again.writes], [[], []])
+
+  // A label left from an earlier version of the pull request goes once it may merge.
+  const cleared = run([['zod-lite', '0.13.1', '0.13.2']], { labels: [REVIEW_LABEL] })
+  assert.deepEqual(cleared.merges, enable)
+  assert.deepEqual(cleared.writes, [`api -X DELETE repos/o/r/issues/7/labels/${encodeURIComponent(REVIEW_LABEL)}`])
 })
