@@ -79,16 +79,6 @@
       "reason": "Needs the App installed. Targets review/tube-vault-v0.3.81, never master, which is frozen at 0.3.80."
     },
     {
-      "repo": "n8watkins/relink",
-      "branch": "master",
-      "visibility": "public",
-      "wave": "public",
-      "merge": "auto-merge",
-      "enabled": false,
-      "reason": "Needs the App installed.",
-      "note": "Its own dependabot.yml: apply leaves it alone and lists what to add."
-    },
-    {
       "repo": "n8watkins/strollz",
       "branch": "main",
       "visibility": "public",
