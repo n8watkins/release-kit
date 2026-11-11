@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { arch, platform } from 'node:os'
 import { join } from 'node:path'
 import { KIT, makeRepo, run, tmp } from './helpers.mjs'
 
@@ -38,28 +39,42 @@ test('the secret scan is a pinned, checksummed gitleaks that skips title edits a
   assert.match(scan, /--redact/)
   assert.match(scan, /--config "\$RELEASE_KIT\/gitleaks\.toml"/)
   assert.match(scan, /--log-opts="\$range"/)
-  // The kit's CI tests the config with the same gitleaks the scan runs.
-  const version = (text) => text.match(/GITLEAKS_VERSION: (\S+)/)[1]
-  const sha = (text) => text.match(/GITLEAKS_SHA256: (\S+)/)[1]
-  const ci = read('.github/workflows/ci.yml')
-  assert.equal(version(ci), version(job))
-  assert.equal(sha(ci), sha(job))
 })
 
-// gitleaks itself, when it is installed (CI installs it).
-const gitleaks = spawnSync('gitleaks', ['version']).status === 0
-const skip = !gitleaks && !process.env.CI && 'gitleaks is not installed'
+// gitleaks itself: the pinned, checksummed release the scan job installs,
+// installed here by that job's own "Install gitleaks" step, so the tests run
+// the same binary wherever npm test runs (CI, the release's verify job, a
+// laptop). The step downloads the linux x64 build; elsewhere the tests use a
+// gitleaks on PATH, and skip, saying why, without one.
+const linux = platform() === 'linux' && arch() === 'x64'
+const onPath = spawnSync('sh', ['-c', 'command -v gitleaks'], { encoding: 'utf8' }).stdout.trim()
+const skip = !linux && !onPath && `the scan step installs the linux x64 gitleaks; on ${platform()} ${arch()}, put gitleaks ${job.match(/GITLEAKS_VERSION: (\S+)/)[1]} on PATH to run this test`
+
+let installed
+/** A directory holding a `gitleaks`, as the scan step finds it in $RUNNER_TEMP. */
+function gitleaksDir() {
+  if (installed) return installed
+  installed = tmp('gitleaks-bin')
+  if (!linux) {
+    symlinkSync(onPath, join(installed, 'gitleaks'))
+    return installed
+  }
+  const env = (name) => job.match(new RegExp(`${name}: (\\S+)`))[1]
+  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', stepScript('Install gitleaks')], {
+    encoding: 'utf8',
+    env: { ...process.env, RUNNER_TEMP: installed, GITLEAKS_VERSION: env('GITLEAKS_VERSION'), GITLEAKS_SHA256: env('GITLEAKS_SHA256') },
+  })
+  assert.equal(result.status, 0, `the "Install gitleaks" step failed:\n${result.stdout}${result.stderr}`)
+  return installed
+}
 
 /** Run the scan step in `repo` on the commits after `base`. */
 function scan(repo, base) {
-  const bin = tmp('gitleaks-bin')
-  const which = spawnSync('sh', ['-c', 'command -v gitleaks'], { encoding: 'utf8' }).stdout.trim()
-  symlinkSync(which, join(bin, 'gitleaks'))
   const head = run(repo, 'git', ['rev-parse', 'HEAD']).trim()
   return spawnSync('bash', ['-e', '-c', stepScript('Scan the new commits for secrets')], {
     cwd: repo,
     encoding: 'utf8',
-    env: { ...process.env, RUNNER_TEMP: bin, RELEASE_KIT: join(KIT, 'template/scripts/release-kit'), BASE: base, BEFORE: '', HEAD_SHA: head },
+    env: { ...process.env, RUNNER_TEMP: gitleaksDir(), RELEASE_KIT: join(KIT, 'template/scripts/release-kit'), BASE: base, BEFORE: '', HEAD_SHA: head },
   })
 }
 
