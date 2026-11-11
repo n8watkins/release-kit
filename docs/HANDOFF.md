@@ -23,7 +23,7 @@ The November 2026 review is in [REVIEW_2026-11.md](REVIEW_2026-11.md), and the p
 ### Who uses it
 
 - The rollout bot covers the eight repos the App is installed on, as listed in [adopters.json](../adopters.json): portfolio-rank (canary), n8builds-web, dev-portfolio, open-ping, scribe, voicedock, tl-dw, and n8builds-admin (private).
-- Listed but `"enabled": false` until the App is installed on them, so Dependabot plus apply is their only source of kit updates: tube-vault (default branch `review/tube-vault-v0.3.81`), relink, strollz, keysready, vibelog, pivot, cutelyaskme, feelium, fitflow7, pr-post, solara, devguard, pass-env.
+- Listed but `"enabled": false` until the App is installed on them, so Dependabot plus apply is their only source of kit updates: tube-vault (default branch `review/tube-vault-v0.3.81`), strollz, keysready, vibelog, pivot, cutelyaskme, feelium, fitflow7, pr-post, solara, devguard, pass-env.
 - pr-post-private (private, no package.json) has only the Direct push alarm caller (with `allow-paths` for the report routine) and the guard installed by `release-kit install-guard` in the owner's WSL clone.
 
 ### v2.6.0 rollout (2026-11-04)
