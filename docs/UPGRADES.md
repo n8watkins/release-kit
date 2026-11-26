@@ -82,6 +82,38 @@ Dependabot applies `allow` to security updates too, so in those repos every secu
 `npm run release:check` says so; rerun `npx release-kit apply .` to get the current file.
 A repo's own `dependabot.yml` with an `allow` list has the same problem, and apply says so.
 
+### Major updates the kit ignores
+
+The weekly npm entry also ignores the major updates of `typescript`, until the owner says otherwise:
+
+```yaml
+    ignore:
+      - dependency-name: release-kit
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+```
+
+Every released `typescript-eslint` (8.74.0 and its canary 8.74.1-alpha.4 included) peer-requires `typescript >=4.8.4 <6.1.0`, and lint stops with "typescript-eslint does not support TS 7.0".
+So the TypeScript 7 pull request Dependabot kept opening every week could never be merged.
+Minor and patch updates of TypeScript 5.x and 6.x still arrive.
+
+- **Security updates:** GitHub's options reference marks `ignore` as applying to security updates as well, and says nothing that exempts `update-types`.
+  So expect that a security update of `typescript` that needs a new major is not opened either (the `allow` documentation says its own `update-types` affects only version updates, which is a different option).
+  The note about `allow` lists above stays true: the kit adds no allow list.
+- **The default list:** `DEFAULT_IGNORE_MAJORS` in [`template/scripts/release-kit/dependabot.mjs`](../template/scripts/release-kit/dependabot.mjs).
+  To start proposing TypeScript majors again in every repo, delete its `'typescript'` line there, release the kit, and let the rollout (or `npx release-kit apply .`) rewrite each repo's `dependabot.yml`.
+- **Per repo**, in `.release.json`:
+
+  ```json
+  "dependabot": { "ignoreMajors": ["@acme/sdk"], "allowMajors": ["typescript"] }
+  ```
+
+  `ignoreMajors` adds packages (exact names) to the kit's list, and `allowMajors` lifts an entry of the kit's list for this repo.
+  Rerun `npx release-kit apply .` afterwards.
+  A value that can't be used keeps the default, and apply names it.
+- **A repo's own `dependabot.yml`:** apply leaves it alone and lists the ignore to add to its npm entry.
+- **`npm run release:check`** warns when the kit's `dependabot.yml` lacks an ignore the settings call for: rerun `npx release-kit apply .`.
+
 ## With the App
 
 On every published release (pre-releases are skipped), [`.github/workflows/rollout.yml`](../.github/workflows/rollout.yml) in release-kit does step 3 for you:

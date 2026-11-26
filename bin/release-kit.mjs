@@ -37,6 +37,7 @@ import { fileURLToPath } from 'node:url'
 import { checkArgs, usageOf } from '../template/scripts/release-kit/cli.mjs'
 import { protectionWarnings } from '../template/scripts/release-kit/protect.mjs'
 import { detectVisibility } from '../template/scripts/release-kit/settings.mjs'
+import { dependabotPolicy, ignoresMajor } from '../template/scripts/release-kit/dependabot.mjs'
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPTS = join(KIT, 'template', 'scripts', 'release-kit')
@@ -139,6 +140,10 @@ function staleFiles() {
     if (kits && entries.some((e) => /^ {4}multi-ecosystem-group:/m.test(e) && /^ {4}commit-message:/m.test(e))) out.push(`${dependabot} is rejected by Dependabot (commit-message belongs on the multi-ecosystem group), so no kit updates arrive: rerun npx release-kit apply .`)
     // Kit 2.0.0 to 2.7.0 allowed only the kit, which Dependabot also applies to security updates.
     if (kits && /^[ \t]+-?[ \t]*allow:/m.test(text)) out.push(`${dependabot} allows only the kit, so Dependabot opens no security updates and no updates for any other dependency: rerun npx release-kit apply .`)
+    // Kit 2.11.0 and earlier didn't ignore the majors of packages the repo can't take yet (typescript 7).
+    const config = existsSync('.release.json') ? JSON.parse(readFileSync('.release.json', 'utf8')) : {}
+    const open = dependabotPolicy(config.dependabot).ignoreMajors.filter((name) => !ignoresMajor(text, name))
+    if (kits && open.length) out.push(`${dependabot} still proposes major updates of ${open.join(', ')}, which the repo can't take yet (typescript-eslint doesn't support TypeScript 7), so Dependabot opens a pull request every week that can't merge: rerun npx release-kit apply .`)
   }
   return out
 }

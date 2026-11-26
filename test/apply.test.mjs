@@ -454,8 +454,10 @@ test('the dependabot.yml apply writes keeps every dependency current, security u
     assert.match(grouped, new RegExp(`\\n {4}patterns: \\["${kit.replace('*', '\\*')}"\\]\\n`))
     // Everything else: weekly, the kit ignored (the grouped entry updates it), a cooldown, and two groups.
     assert.match(rest, /\n {4}schedule:\n {6}interval: weekly\n/)
-    assert.match(rest, new RegExp(`\\n {4}ignore:\\n {6}- dependency-name: ${kit.replace('*', '\\*')}\\n(?: {4}#.*\\n)? {4}cooldown:`))
-    assert.equal(rest.match(/dependency-name:/g).length, 1, 'the kit is the only dependency ignored')
+    const typescript = ecosystem === 'npm' ? ' {6}- dependency-name: typescript\\n {8}update-types: \\["version-update:semver-major"\\]\\n' : ''
+    assert.match(rest, new RegExp(`\\n {4}ignore:\\n {6}- dependency-name: ${kit.replace('*', '\\*')}\\n${typescript}(?: {4}#.*\\n)? {4}cooldown:`))
+    // npm also ignores typescript majors (see the next test); github-actions ignores only the kit.
+    assert.equal(rest.match(/dependency-name:/g).length, ecosystem === 'npm' ? 2 : 1, 'the kit (and for npm, typescript majors) are the only dependencies ignored')
     // Dependabot rejects semver-major-days for github-actions ("not supported for the package ecosystem").
     assert.match(rest, ecosystem === 'npm' ? /\n {4}cooldown:\n {6}default-days: 3\n {6}semver-major-days: 7\n {4}commit-message:/ : /\n {4}cooldown:\n {6}default-days: 3\n {4}commit-message:/)
     assert.match(rest, /\n {4}commit-message:\n {6}prefix: build\n {6}include: scope\n/)
@@ -470,6 +472,89 @@ test('the dependabot.yml apply writes keeps every dependency current, security u
   // A repo's own dependabot.yml with an allow list hears why that blocks security updates.
   writeFileSync(join(repo, '.github/dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n    schedule:\n      interval: weekly\n    allow:\n      - dependency-type: production\n  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n')
   assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml is the repo's own and has an allow list: Dependabot applies it to security updates too/)
+})
+
+// The owner's call, 2026-11: no released typescript-eslint supports TypeScript 7
+// (peer typescript <6.1.0), so the kit's dependabot.yml stops offering
+// TypeScript majors in every adopter until the owner says otherwise.
+test('the dependabot.yml ignores TypeScript major updates by default, and .release.json can add a package or take typescript back', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const npmRest = (repo) => dependabotEntries(readFileSync(join(repo, '.github/dependabot.yml'), 'utf8')).find((e) => /package-ecosystem: npm\n/.test(e) && !/multi-ecosystem-group:/.test(e))
+  const ignores = (repo) => [...npmRest(repo).matchAll(/- dependency-name: (\S+)\n {8}update-types: \["version-update:semver-major"\]/g)].map((m) => m[1])
+
+  const repo = makeRepo(tmp('dependabot-ignore'))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  const text = readFileSync(join(repo, '.github/dependabot.yml'), 'utf8')
+  assert.deepEqual(ignores(repo), ['typescript'], 'only majors of typescript, so minor and patch updates still arrive')
+  assert.match(text, /# Major updates of typescript are ignored/)
+  assert.match(text, /"allowMajors": \["typescript"\]/, 'the file says how to turn it off')
+  assert.match(text, /Don't add an allow list/, 'the note on allow lists and security updates stays')
+  // Only the npm entry: github-actions has no typescript.
+  assert.equal(text.match(/version-update:semver-major/g).length, 1)
+  assert.doesNotMatch(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml/, 're-applying changes nothing')
+
+  // One more package.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), dependabot: { ignoreMajors: ['@acme/sdk'] } }))
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml/)
+  assert.deepEqual(ignores(repo), ['typescript', '@acme/sdk'])
+
+  // Taking typescript back: no ignore, no note, and the other package stays.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), dependabot: { ignoreMajors: ['@acme/sdk'], allowMajors: ['typescript'] } }))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.deepEqual(ignores(repo), ['@acme/sdk'])
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), dependabot: { allowMajors: ['typescript'] } }))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.doesNotMatch(readFileSync(join(repo, '.github/dependabot.yml'), 'utf8'), /version-update:semver-major|Major updates of/)
+})
+
+test('a .release.json "dependabot" value the kit cannot use is named and the safe default kept', async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const { dependabotPolicy } = await import('../template/scripts/release-kit/dependabot.mjs')
+  assert.deepEqual(dependabotPolicy(undefined), { ignoreMajors: ['typescript'], problems: [] })
+  assert.match(dependabotPolicy('typescript').problems[0], /"dependabot" must be an object/)
+  assert.match(dependabotPolicy({ ignoreMajors: 'react' }).problems[0], /"dependabot.ignoreMajors" must be a list of package names/)
+  assert.match(dependabotPolicy({ allowMajors: ['react'] }).problems[0], /"dependabot.allowMajors" names "react", which the kit doesn't ignore \(its list: typescript\)/)
+  assert.match(dependabotPolicy({ ignore: [] }).problems[0], /"dependabot.ignore" is not a setting \(ignoreMajors, allowMajors\)/)
+  for (const bad of [{ ignoreMajors: 'react' }, { allowMajors: [3] }, { allowMajors: ['react'] }, 'off']) assert.deepEqual(dependabotPolicy(bad).ignoreMajors, ['typescript'], JSON.stringify(bad))
+
+  const repo = makeRepo(tmp('dependabot-ignore-bad'))
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), dependabot: { ignoreMajors: 'react' } }))
+  const out = quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.match(out, /\.release\.json "dependabot\.ignoreMajors" must be a list of package names/)
+  assert.match(readFileSync(join(repo, '.github/dependabot.yml'), 'utf8'), /dependency-name: typescript\n {8}update-types: \["version-update:semver-major"\]/)
+})
+
+test("a repo's own dependabot.yml hears that it should ignore TypeScript majors, and check flags a kit file without the ignore", async () => {
+  const { makeRepo, tmp, run: quiet } = await import('./helpers.mjs')
+  const repo = makeRepo(tmp('dependabot-ignore-own'))
+  const path = join(repo, '.github/dependabot.yml')
+  const check = () => spawnSync('node', [join(KIT, 'bin/release-kit.mjs'), 'check'], { cwd: repo, encoding: 'utf8', env: { ...process.env, RELEASE_KIT_OFFLINE: '1' } }).stderr
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  const kits = readFileSync(path, 'utf8')
+  assert.doesNotMatch(check(), /major updates of typescript/)
+
+  // The kit's file from before v2.12.0: apply upgrades it, check says it needs apply.
+  const older = kits.replace(/    ignore:\n      - dependency-name: release-kit\n {6}- dependency-name: typescript\n {8}update-types: \["version-update:semver-major"\]\n/, '    ignore:\n      - dependency-name: release-kit\n')
+  assert.notEqual(older, kits)
+  writeFileSync(path, older)
+  assert.match(check(), /dependabot\.yml still proposes major updates of typescript.*rerun npx release-kit apply \./)
+  quiet(KIT, 'node', ['apply.mjs', repo])
+  assert.equal(readFileSync(path, 'utf8'), kits)
+  // With typescript allowed, the file without the ignore is current.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), dependabot: { allowMajors: ['typescript'] } }))
+  writeFileSync(path, older)
+  assert.doesNotMatch(check(), /major updates of typescript/)
+
+  // The repo's own file: apply leaves it alone and lists the ignore to add.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), dependabot: {} }))
+  const own = 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n    schedule:\n      interval: weekly\n  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n'
+  writeFileSync(path, own)
+  assert.match(quiet(KIT, 'node', ['apply.mjs', repo]), /dependabot\.yml is the repo's own and doesn't ignore major updates of typescript.*dependency-name: typescript, update-types: \["version-update:semver-major"\]/)
+  assert.equal(readFileSync(path, 'utf8'), own)
+  // Once it has the ignore, apply stops listing it.
+  writeFileSync(path, own.replace('      interval: weekly\n  - package-ecosystem: github', '      interval: weekly\n    ignore:\n      - dependency-name: typescript\n        update-types: ["version-update:semver-major"]\n  - package-ecosystem: github'))
+  assert.doesNotMatch(quiet(KIT, 'node', ['apply.mjs', repo]), /doesn't ignore major updates/)
 })
 
 // check-jsonschema (https://github.com/python-jsonschema/check-jsonschema)
