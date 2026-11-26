@@ -77,6 +77,10 @@ npm run release -- --dry-run   # preview the version and the notes
 npm run release -- --push      # check, bump, changelog, commit, tag, push
 ```
 
+- Without `--dry-run` it writes: the bump, the changelog, the commit and the tag.
+  An option it doesn't know (a typo like `--dryrun`) stops it before it changes anything, and `npm run release -- --help` (or `npx release-kit <command> --help`, for any command) prints the options.
+- With no release tag yet it stops instead of listing the whole history as the first release: baseline first (below), or pass `--whole-history` when that is what you want (a new project's first release).
+  `--dry-run` only warns.
 - With no bump given it picks one: major for a breaking change, minor for a feature, otherwise patch.
 - Below 1.0 (a `0.y.z` version) a breaking change is a minor bump instead: 0.13.0 goes to 0.14.0.
 - Force one with `npm run release -- minor` (or `patch`, `major`, or an exact `1.4.0`).
@@ -186,6 +190,8 @@ There protect sets up the free safeguards instead, and says what GitHub still le
 
 - `npm run release -- --baseline` tags the version this repo is already at, without a GitHub Release, so the first real release lists only new work.
 - `npm run release -- --baseline <commit> --publish` tags a past milestone with the version its `package.json` had, and publishes it.
+  A commit whose `package.json` has no version can't be tagged this way; the error prints the `git tag` command that marks it by hand.
+  Pushing a tag on a commit older than the repo's `release.yml` starts no workflow (GitHub reads the workflow from the tagged commit), so nothing verifies or publishes it: that is harmless for a baseline, and for `--publish` run the Release workflow from `main` with the tag as its input.
 - `npx release-kit backfill` adds release tags from before the kit wrote `releases.json` to it, from their commits: a dry run that prints the plan, `--write` to write the file, `--edit-releases` to fill in GitHub Release notes that are empty or only GitHub's generated list.
   Commits that aren't Conventional Commits are counted as `unattributed`, never guessed at, and baseline tags are skipped.
 

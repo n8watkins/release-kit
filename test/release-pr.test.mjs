@@ -47,6 +47,8 @@ if (a === 'pr' && b === 'create') {
   say(readFileSync(dir + '/merged', 'utf8'))
 } else if (a === 'pr' && b === 'view') {
   writeFileSync(dir + '/views', String(views + 1))
+  // Someone keeps working in the clone while the checks run.
+  if (env.FAKE_EDIT) appendFileSync(env.FAKE_EDIT, 'work in progress ' + views + '\\n')
   const now = scenario.frames[Math.min(views, scenario.frames.length - 1)]
   const rollup = [
     ...(now.checks ?? []).filter((c) => c.kind === 'run').map((c) => ({ __typename: 'CheckRun', name: c.name, status: c.status.toUpperCase(), conclusion: (c.conclusion ?? '').toUpperCase() })),
@@ -195,6 +197,28 @@ test('a failing GitHub Actions check closes the release pull request and undoes 
   const slow = release(['--pr-timeout', '0.001'], { FAKE_CHECKS: 'pending' })
   assert.match(slow.stderr, /its checks didn't pass within 0\.001 minutes/)
   assert.equal(run(repo, 'git', ['rev-parse', 'HEAD']).trim(), before)
+})
+
+test('work done in the clone while the checks ran survives a failed release: the undo never resets it away', () => {
+  const { repo, release } = setup()
+  writeFileSync(join(repo, 'work.txt'), 'committed\n')
+  run(repo, 'git', ['add', 'work.txt'])
+  run(repo, 'git', ['commit', '-q', '-m', 'feat: work'])
+  const before = run(repo, 'git', ['rev-parse', 'HEAD']).trim()
+  const result = release(['--via-pr'], { FAKE_CHECKS: 'red', FAKE_EDIT: join(repo, 'work.txt') })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /was closed and the release commit undone; nothing was tagged/)
+  assert.equal(run(repo, 'git', ['rev-parse', 'HEAD']).trim(), before)
+  // A hard reset would have thrown this edit away.
+  assert.match(readFileSync(join(repo, 'work.txt'), 'utf8'), /^committed\nwork in progress \d+\n/)
+
+  // An edit to a file the release commit changed can't be kept by moving HEAD back: the commit stays, and it says so.
+  run(repo, 'git', ['commit', '-q', '-am', 'chore: keep the work'])
+  const changelog = release(['--via-pr'], { FAKE_CHECKS: 'red', FAKE_EDIT: join(repo, 'CHANGELOG.md') })
+  assert.notEqual(changelog.status, 0)
+  assert.match(changelog.stderr, /the release commit left in place: could not take back the release commit [0-9a-f]+ without touching local changes/)
+  assert.match(run(repo, 'git', ['log', '-1', '--format=%s']), /^chore\(release\): v1\.1\.0/)
+  assert.match(readFileSync(join(repo, 'CHANGELOG.md'), 'utf8'), /work in progress/)
 })
 
 test('if main moved while the checks ran, the merged commit is not tagged and the way out is printed', () => {

@@ -34,6 +34,7 @@ import { spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkArgs, usageOf } from '../template/scripts/release-kit/cli.mjs'
 import { protectionWarnings } from '../template/scripts/release-kit/protect.mjs'
 import { detectVisibility } from '../template/scripts/release-kit/settings.mjs'
 
@@ -233,14 +234,19 @@ function verify() {
   process.exit(failed ? 1 : 0)
 }
 
-if (command === 'check') check()
-else if (command === 'verify') verify()
+// check, verify and install-guard take no options: --help prints this file's
+// usage, and anything else stops before they run.
+const own = (name, positionals) => checkArgs(rest, { name: `release-kit ${name}`, url: import.meta.url, positionals })
+
+if (command === 'check') own('check', 0) && check()
+else if (command === 'verify') own('verify', 0) && verify()
 else if (command === 'pre-push') run(join(SCRIPTS, 'guard.mjs'), rest)
-else if (command === 'install-guard') run(join(SCRIPTS, 'guard.mjs'), ['--install', ...rest])
+else if (command === 'install-guard') own('install-guard', 1) && run(join(SCRIPTS, 'guard.mjs'), ['--install', ...rest])
 else if (SCRIPT_COMMANDS.has(command)) run(join(SCRIPTS, `${command}.mjs`), rest)
 else if (command === 'apply') run(join(KIT, 'apply.mjs'), rest)
 else if (command && !command.startsWith('-')) run(join(KIT, 'apply.mjs'), [command, ...rest])
+else if (command === '--help' || command === '-h') process.stdout.write(usageOf(import.meta.url))
 else {
-  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | releases | backfill | train | protect | check | verify | lanes | pre-push | install-guard | alarm | apply <repo>`)
+  console.error(`release-kit ${kitPackage.version}: release | commit-msg | notes | releases | backfill | train | protect | check | verify | lanes | pre-push | install-guard | alarm | apply <repo> (release-kit <command> --help for one)`)
   process.exit(command ? 1 : 0)
 }

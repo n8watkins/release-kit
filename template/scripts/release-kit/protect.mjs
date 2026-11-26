@@ -61,7 +61,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isMain } from './git.mjs'
+import { checkArgs } from './cli.mjs'
+import { MAX_OUTPUT, isMain } from './git.mjs'
 import { HOOK_MARKER } from './guard.mjs'
 
 export const KEY_TITLE = 'release-kit train'
@@ -163,8 +164,9 @@ export function requiredChecksFrom(runs) {
  */
 export function onlySometimes(workflow) {
   if (/^name:\s*["']?auto-merge/im.test(workflow)) return true
-  const trigger = /^ {2}pull_request(?:_target)?:[^\n]*\n((?: {4,}.*\n|\s*\n)*)/m.exec(`${workflow}\n`)?.[1] ?? ''
-  return /^ {4}(paths|paths-ignore):/m.test(trigger)
+  // Any indentation: a workflow indented with four spaces is as common as two.
+  const [, indent = '', trigger = ''] = /^( +)pull_request(?:_target)?:[^\n]*\n((?:\1 +\S.*\n|[ \t]*\n)*)/m.exec(`${workflow}\n`) ?? []
+  return new RegExp(`^${indent} +(paths|paths-ignore):`, 'm').test(trigger)
 }
 
 /** The parts of a ruleset protect.mjs sets, in a form two rulesets can be compared in. */
@@ -207,7 +209,7 @@ export function drift(live, wanted) {
 
 /** A gh-backed GitHub API client; `timeout` in ms. */
 export function client({ timeout = 60_000 } = {}) {
-  const gh = (args, input) => execFileSync('gh', args, { encoding: 'utf8', input, timeout, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+  const gh = (args, input) => execFileSync('gh', args, { encoding: 'utf8', input, timeout, maxBuffer: MAX_OUTPUT, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   const api = (path, { method = 'GET', body } = {}) => {
     const out = gh(['api', '-X', method, '-H', 'Accept: application/vnd.github+json', path, ...(body ? ['--input', '-'] : [])], body && JSON.stringify(body))
     return out ? JSON.parse(out) : null
@@ -433,6 +435,8 @@ function describe(set) {
 
 function main() {
   const args = process.argv.slice(2)
+  // A mistyped --dry-run must never change the repo's rules or keys.
+  checkArgs(args, { name: 'protect', url: import.meta.url, flags: ['dry-run', 'admin-bypass', 'rotate-key', 'no-train-key'], values: ['checks'] })
   const dryRun = args.includes('--dry-run')
   const fail = (message) => {
     console.error(`protect: ${message}`)

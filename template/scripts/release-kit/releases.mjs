@@ -18,6 +18,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { NOTE_SECTIONS, compareVersions, isVersion } from './conventional.mjs'
+import { checkArgs } from './cli.mjs'
 import { isMain } from './git.mjs'
 import { SECTION_IDS, noteItems, noteStyle, plainText } from './notes.mjs'
 
@@ -228,6 +229,7 @@ export function writeReleaseFiles(entries, { config = {}, repository } = {}) {
 
 function main() {
   const args = process.argv.slice(2)
+  checkArgs(args, { name: 'releases', url: import.meta.url, flags: ['check'], values: ['attach', 'dir'] })
   const valueOf = (name) => {
     const at = args.indexOf(`--${name}`)
     return at === -1 ? undefined : args[at + 1]

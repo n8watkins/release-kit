@@ -28,7 +28,8 @@
 //                  its head commit has finished and passed.
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
-import { isMain } from './git.mjs'
+import { checkArgs } from './cli.mjs'
+import { MAX_OUTPUT, isMain } from './git.mjs'
 
 export const UPDATE_TYPES = ['patch', 'minor', 'major']
 const KIT_BRANCH = 'release-kit/'
@@ -45,7 +46,8 @@ export function dependabotUpdates(message) {
   const block = /^updated-dependencies:\n([\s\S]*?)^\.\.\.$/m.exec(message.replace(/\r\n?/g, '\n'))?.[1] ?? ''
   const updates = []
   for (const entry of block.split(/^- /m).slice(1)) {
-    const name = /dependency-name:\s*(\S+)/.exec(entry)?.[1]
+    // A scoped name is quoted in the YAML: dependency-name: "@libsql/client".
+    const name = /dependency-name:\s*['"]?([^\s'"]+)/.exec(entry)?.[1]
     const type = /update-type:\s*version-update:semver-(patch|minor|major)/.exec(entry)?.[1]
     const version = /dependency-version:\s*['"]?([^\s'"]+)/.exec(entry)?.[1]
     if (name) updates.push({ name, type: type ?? null, version: version ?? null })
@@ -275,6 +277,7 @@ export function checksState(runs, statuses = { state: 'success', total_count: 0 
 
 function main() {
   const args = process.argv.slice(2)
+  checkArgs(args, { name: 'automerge', url: import.meta.url, values: ['fallback', 'method', 'bots'] })
   const valueOf = (name, fallback) => {
     const at = args.indexOf(`--${name}`)
     return at === -1 || args[at + 1] === undefined || args[at + 1] === '' ? fallback : args[at + 1]
@@ -286,7 +289,7 @@ function main() {
   const repoName = process.env.GITHUB_REPOSITORY
   const event = process.env.GITHUB_EVENT_NAME
   const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
-  const gh = (...ghArgs) => execFileSync('gh', ghArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const gh = (...ghArgs) => execFileSync('gh', ghArgs, { encoding: 'utf8', maxBuffer: MAX_OUTPUT, stdio: ['ignore', 'pipe', 'pipe'] })
   const api = (path) => JSON.parse(gh('api', '-H', 'Accept: application/vnd.github+json', path))
   // A label or comment that can't be written leaves the pull request unmerged all the same.
   const tryGh = (...ghArgs) => {

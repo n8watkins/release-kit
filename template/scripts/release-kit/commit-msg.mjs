@@ -8,6 +8,7 @@
 //       main; with --pr, as GitHub commits it, with " (#number)" appended)
 import { readFileSync } from 'node:fs'
 import { lint } from './conventional.mjs'
+import { checkArgs } from './cli.mjs'
 import { commitsBetween, git, isBot, isMain } from './git.mjs'
 
 /**
@@ -35,6 +36,7 @@ function commentChar() {
 }
 
 if (isMain(import.meta.url)) {
+  checkArgs(process.argv.slice(2), { name: 'commit-msg', url: import.meta.url, values: ['range', 'title', 'pr'], positionals: 1 })
   const rangeAt = process.argv.indexOf('--range')
   const titleAt = process.argv.indexOf('--title')
   const failures = []

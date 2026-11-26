@@ -4,7 +4,12 @@
 // annotated tag. Pushing the tag runs .github/workflows/release.yml.
 //
 //   npm run release -- [patch|minor|major|x.y.z] [--stable] [--summary "<text>"] [--dry-run] [--push] [--no-check]
+//       Without --dry-run it writes: it bumps the version, writes CHANGELOG.md,
+//       commits and tags (and with --push, pushes). Preview with --dry-run.
 //       --summary puts a line or two, in your words, at the top of the notes.
+//       With no release tag yet it stops (a dry run only warns): baseline
+//       first (--baseline, below), or pass --whole-history to release every
+//       commit since the start as the first release.
 //       --push first checks the branch is up to date with origin and runs
 //       npm run release:check (skip it with --no-check), so a tag is only
 //       pushed for a commit that passes; if the push fails, the release
@@ -37,13 +42,23 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { RELEASE_TAG, isPreOne, isVersion, nextVersion, planRelease, suggestedBump } from './conventional.mjs'
-import { BASELINE_NOTE, commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl } from './git.mjs'
+import { BASELINE_NOTE, MAX_OUTPUT, commitsBetween, git, isAncestor, isCommit, previousTag, releaseTags, repoUrl, undoCommit } from './git.mjs'
 import { noteStyle, renderNotes } from './notes.mjs'
 import { RELEASES_FILE, readDocument, releaseEntry, releasesConfig, slugOf, writeReleaseFiles } from './releases.mjs'
 import { entryLabel, entryPath, readVersion, setVersion, versionFilesProblems } from './versions.mjs'
 import { RULE_REJECTION, releaseThroughPullRequest } from './release-pr.mjs'
+import { checkArgs } from './cli.mjs'
 
 const args = process.argv.slice(2)
+// A mistyped option (--dryrun) must never fall through to a real release.
+checkArgs(args, {
+  name: 'release',
+  url: import.meta.url,
+  flags: ['stable', 'dry-run', 'push', 'no-check', 'via-pr', 'publish', 'whole-history'],
+  values: ['summary', 'pr-timeout', 'verify-tag', 'tag-kind'],
+  optional: ['plan', 'baseline'],
+  positionals: 1,
+})
 const flag = (name) => args.includes(`--${name}`)
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'))
 
@@ -86,7 +101,7 @@ function releasePath(branch) {
   const slug = repoUrl()?.replace('https://github.com/', '')
   let rules
   try {
-    rules = slug && JSON.parse(execFileSync('gh', ['api', `repos/${slug}/rules/branches/${encodeURIComponent(branch)}`], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }))
+    rules = slug && JSON.parse(execFileSync('gh', ['api', `repos/${slug}/rules/branches/${encodeURIComponent(branch)}`], { encoding: 'utf8', timeout: 15000, maxBuffer: MAX_OUTPUT, stdio: ['ignore', 'pipe', 'ignore'] }))
   } catch {}
   if (!Array.isArray(rules)) return `push ${branch} and the tag (or, if ${branch}'s rules want a pull request, release through one)`
   if (flag('via-pr') || rules.some((r) => r.type === 'pull_request')) {
@@ -135,13 +150,20 @@ if (flag('baseline')) {
   const ref = valueOf('baseline') ?? 'HEAD'
   if (!isCommit(ref)) fail(`"${ref}" is not a commit`)
   const commit = git('rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`)
-  const version = JSON.parse(git('show', `${commit}:package.json`)).version
-  if (!isVersion(version)) fail(`package.json at ${ref} has version "${version}", not x.y.z`)
-  const tag = `v${version}`
-  if (git('tag', '--list', tag)) fail(`tag ${tag} already exists`)
   const publish = flag('publish')
   // The workflow reads this marker and skips publishing.
   const note = publish ? 'Backfilled release.' : BASELINE_NOTE
+  let version
+  try {
+    version = JSON.parse(git('show', `${commit}:package.json`)).version
+  } catch {
+    version = undefined
+  }
+  if (!isVersion(version)) {
+    fail(`package.json at ${ref} has ${version === undefined ? 'no version' : `version "${version}"`}, not x.y.z, so there is no version to tag. To mark that commit by hand as version x.y.z:\n  git tag -a vx.y.z ${commit} -m "vx.y.z" -m "${note}"`)
+  }
+  const tag = `v${version}`
+  if (git('tag', '--list', tag)) fail(`tag ${tag} already exists`)
   git('tag', '-a', tag, commit, '-m', `${tag}\n\n${note}`)
   console.log(`release: tagged ${tag} at ${ref}${publish ? '' : ' as a baseline (no GitHub Release)'}`)
   console.log(`release: push it with  git push origin ${tag}`)
@@ -166,7 +188,13 @@ function state({ strict }) {
       fail(`tag ${own} exists but is not on ${branch}'s history (was it moved or made on another branch?); fix the tag before releasing`)
     }
     if (!since) {
-      warn(`no release tag yet: the first release lists the whole history (run npm run release -- --baseline first to start from here)`)
+      // A real release stops too: adopting the kit in a repo with years of
+      // history must not turn all of it into one release and changelog entry.
+      // --whole-history says that is what is wanted (a new project's first release).
+      const count = commitsBetween(null).length
+      const message = `no release tag yet, so the first release would list the whole history (${count} commit${count === 1 ? '' : 's'}): run npm run release -- --baseline first to start from here, or pass --whole-history to release all of it`
+      if (strict || (!flag('dry-run') && !flag('whole-history'))) fail(message)
+      if (!flag('whole-history')) warn(message)
     } else {
       warn(`package.json is ${current} but the newest release tag on ${branch} is ${since}`)
     }
@@ -306,6 +334,7 @@ const files = [...new Set(['package.json', 'CHANGELOG.md', ...releaseFiles, ...v
 if (existsSync('package-lock.json')) files.push('package-lock.json')
 git('add', '--', ...files)
 git('commit', '-m', `chore(release): ${tag}`)
+const releaseSha = git('rev-parse', 'HEAD')
 // Verbatim: git would otherwise drop the notes' headings as # comments.
 git('tag', '-a', '--cleanup=verbatim', tag, '-m', `${tag}\n\n${section}`)
 console.log(`release: committed and tagged ${tag}`)
@@ -337,7 +366,11 @@ if (push) {
     } else {
       // Nothing reached origin: undo the release commit and tag, so a rerun starts clean.
       git('tag', '--delete', tag)
-      git('reset', '--hard', 'HEAD~1')
+      try {
+        undoCommit(releaseSha)
+      } catch (error) {
+        fail(`the push was rejected, and ${tag} was deleted, but ${error.message}:\n${rejected.stderr?.trim() || rejected.message}`)
+      }
       fail(`the push was rejected, so the release commit and ${tag} were undone:\n${rejected.stderr?.trim() || rejected.message}`)
     }
   }

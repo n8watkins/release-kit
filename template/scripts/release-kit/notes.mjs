@@ -11,6 +11,7 @@
 // from the commits.
 import { existsSync, readFileSync } from 'node:fs'
 import { NOTE_SECTIONS, RELEASE_TAG, parse, sectionFor } from './conventional.mjs'
+import { checkArgs } from './cli.mjs'
 import { commitsBetween, git, isBot, isMain, previousTag, repoUrl as originUrl } from './git.mjs'
 
 const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -140,6 +141,7 @@ function arg(name) {
 
 // Run as a command (resolving links, so a symlinked scripts/ folder works too).
 if (isMain(import.meta.url)) {
+  checkArgs(process.argv.slice(2), { name: 'notes', url: import.meta.url, values: ['from', 'to', 'version'] })
   const to = arg('to') ?? 'HEAD'
   const version = arg('version')
   const fromTag = !arg('from') && !version && RELEASE_TAG.test(to) ? notesFromTag(to) : null

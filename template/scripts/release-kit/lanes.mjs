@@ -25,6 +25,7 @@
 //   full  anything else
 import { execFileSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
+import { checkArgs } from './cli.mjs'
 import { isMain } from './git.mjs'
 
 export const LANES = ['docs', 'kit', 'deps', 'full']
@@ -153,6 +154,7 @@ export function flags(lane, { kit = lane === 'kit', ci = false, reasons = [] } =
 
 function main() {
   const args = process.argv.slice(2)
+  checkArgs(args, { name: 'lanes', url: import.meta.url, values: ['event', 'base', 'head'] })
   const valueOf = (name) => {
     const at = args.indexOf(`--${name}`)
     return at === -1 ? '' : (args[at + 1] ?? '')

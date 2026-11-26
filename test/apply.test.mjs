@@ -680,3 +680,31 @@ test("the repo's own workflows that call the kit move to the installed version, 
   quiet(KIT, 'node', ['apply.mjs', vendored, '--vendored'])
   assert.equal(readFileSync(join(vendored, '.github/workflows/ci.yml'), 'utf8'), ci)
 })
+
+test('a repo formatted its own way (four-space package.json and workflows, blank lines in AGENTS.md) is read right and shows no drift', () => {
+  // net_trailers: check reported AGENTS.md, CLAUDE.md and package.json as changed when only the formatting differed,
+  // and its four-space ci.yml was left out of auto-merge's workflow_run list.
+  const repo = mkdtempSync(join(tmpdir(), 'release-kit-format-'))
+  run(repo, 'git', ['init', '-q', '-b', 'main'])
+  writeFileSync(join(repo, 'package.json'), `${JSON.stringify({ name: 'demo', version: '1.0.0', scripts: { test: 'echo test' } }, null, 4)}\n`)
+  writeFileSync(join(repo, 'package-lock.json'), '{}\n')
+  mkdirSync(join(repo, '.github/workflows'), { recursive: true })
+  writeFileSync(join(repo, '.github/workflows/ci.yml'), 'name: CI\n\non:\n    push:\n        branches: [main]\n    pull_request:\n        branches: [main]\n\njobs:\n    test:\n        runs-on: ubuntu-latest\n        steps:\n            - run: echo ok\n')
+  run(repo, 'git', ['add', '-A'])
+  run(repo, 'git', ['commit', '-q', '-m', 'Initial commit'])
+
+  run(KIT, 'node', ['apply.mjs', repo, '--repository', 'o/r', '--visibility', 'public'])
+  assert.match(readFileSync(join(repo, '.github/workflows/auto-merge.yml'), 'utf8'), /workflows: \[[^\]]*"CI"/)
+  const pkg = readFileSync(join(repo, 'package.json'), 'utf8')
+  assert.match(pkg, /^\{\n {4}"name": "demo",\n/)
+  assert.ok(JSON.parse(pkg).devDependencies['release-kit'])
+
+  // A Markdown formatter puts blank lines around the heading inside the kit's block.
+  const agents = readFileSync(join(repo, 'AGENTS.md'), 'utf8').replace('<!-- release-kit -->\n', '<!-- release-kit -->\n\n').replace('\n<!-- /release-kit -->', '\n\n<!-- /release-kit -->')
+  writeFileSync(join(repo, 'AGENTS.md'), agents)
+  run(repo, 'git', ['add', '-A'])
+  run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
+  const check = attempt(KIT, 'node', ['apply.mjs', repo, '--check'])
+  assert.equal(check.status, 0, check.stdout + check.stderr)
+  assert.match(check.stdout, /has every file apply writes, up to date/)
+})

@@ -31,6 +31,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { compareVersions, isBot, isExempt, parse } from './conventional.mjs'
+import { checkArgs } from './cli.mjs'
 import { commitsBetween, git, isBaseline, isCommit, isMain, previousTag, releaseTags, repoUrl } from './git.mjs'
 import { noteItems, noteStyle, notesFromTag, renderNotes } from './notes.mjs'
 import { RELEASES_FILE, readDocument, releaseEntry, releasesConfig, slugOf, writeReleaseFiles } from './releases.mjs'
@@ -207,11 +208,7 @@ function main() {
     console.error(`backfill: ${message}`)
     process.exit(1)
   }
-  const known = new Set(['since', 'write', 'edit-releases', 'json', 'verbose', 'no-github'])
-  for (const [i, a] of args.entries()) {
-    if (a.startsWith('--') && !known.has(a.slice(2))) fail(`unknown option ${a}`)
-    if (!a.startsWith('--') && args[i - 1] !== '--since') fail(`unexpected argument "${a}"`)
-  }
+  checkArgs(args, { name: 'backfill', url: import.meta.url, flags: ['write', 'edit-releases', 'json', 'verbose', 'no-github'], values: ['since'] })
   const since = valueOf('since')
   if (flag('since') && !/^v\d+\.\d+\.\d+$/.test(since ?? '')) fail('--since needs a release tag, like --since v0.5.0')
   if (flag('edit-releases') && flag('no-github')) fail('--edit-releases needs GitHub; drop --no-github')

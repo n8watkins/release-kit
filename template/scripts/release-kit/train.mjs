@@ -27,9 +27,11 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isVersion } from './conventional.mjs'
-import { git } from './git.mjs'
+import { checkArgs } from './cli.mjs'
+import { MAX_OUTPUT, git, undoCommit } from './git.mjs'
 
 const args = process.argv.slice(2)
+checkArgs(args, { name: 'train', url: import.meta.url, values: ['version', 'release-workflow'] })
 const valueOf = (name) => {
   const at = args.indexOf(`--${name}`)
   return at === -1 ? undefined : args[at + 1]
@@ -57,7 +59,7 @@ if (!repo) fail('GITHUB_REPOSITORY is not set (this runs in the release train wo
 const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
 const withKey = process.env.RELEASE_TRAIN_KEY === 'true'
 
-const gh = (...ghArgs) => execFileSync('gh', [...ghArgs, '--repo', repo], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+const gh = (...ghArgs) => execFileSync('gh', [...ghArgs, '--repo', repo], { encoding: 'utf8', maxBuffer: MAX_OUTPUT, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
 /** Starts `workflow` on `ref`; returns why it couldn't, or null. */
 function start(workflow, ref) {
@@ -88,7 +90,7 @@ if (cut.status !== 0) fail('could not cut the release')
 const sha = git('rev-parse', 'HEAD')
 const undo = () => {
   git('tag', '--delete', tag)
-  git('reset', '--hard', 'HEAD~1')
+  undoCommit(sha)
 }
 
 // 2. The required checks, on the release commit.
