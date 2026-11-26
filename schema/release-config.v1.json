@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/n8watkins/release-kit/main/schema/release-config.v1.json",
+  "title": "release-kit .release.json, schema version 1",
+  "description": "A repo's release-kit settings. apply writes it and keeps the choices; every key is optional. Keys the kit doesn't know are allowed, so a newer kit's file still validates against an older schema.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "versionFiles": {
+      "description": "Other files that carry the version: a path, or { path, pattern } with one capture group for the version.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["path", "pattern"],
+            "properties": { "path": { "type": "string", "minLength": 1 }, "pattern": { "type": "string", "minLength": 1 } },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "workflows": { "description": "How the workflows reach the kit.", "enum": ["package", "reusable", "vendored"] },
+    "train": {
+      "description": "The release train: when it runs (UTC cron) and the workflows it runs on its release commit.",
+      "type": "object",
+      "properties": {
+        "schedule": { "type": "string" },
+        "checks": { "type": "array", "items": { "type": "string", "pattern": "^[\\w.-]+\\.ya?ml$" } }
+      }
+    },
+    "repository": { "description": "owner/repo: the one repo whose Release and train jobs run.", "type": "string", "pattern": "^[\\w.-]+/[\\w.-]+$" },
+    "visibility": { "enum": ["public", "private"] },
+    "branches": { "description": "The branches releases are cut from (default main, master).", "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "stable": { "description": "true: a 0.y.z repo may reach 1.0.0, and breaking changes bump major.", "type": "boolean" },
+    "node": { "description": "The Node version for the workflows.", "type": ["string", "number"] },
+    "timeZone": { "description": "The IANA time zone for changelog dates.", "type": "string" },
+    "notes": {
+      "type": "object",
+      "properties": {
+        "style": { "description": "\"classic\" keeps commit-type headings and scopes; anything else reads New, Fixed, Faster, Safer.", "type": "string" },
+        "headings": { "type": "object", "additionalProperties": { "type": "string" } },
+        "scopes": { "oneOf": [{ "enum": ["show", "hide"] }, { "type": "object", "additionalProperties": { "type": "string" } }] }
+      }
+    },
+    "releases": {
+      "description": "true (default) writes releases.json; false turns it off; { feed: true } adds releases.xml.",
+      "oneOf": [{ "type": "boolean" }, { "type": "object", "properties": { "feed": { "type": "boolean" } }, "additionalProperties": false }]
+    },
+    "lanes": {
+      "type": "object",
+      "properties": {
+        "docs": { "type": "array", "items": { "type": "string" } },
+        "fullFor": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "protect": {
+      "type": "object",
+      "properties": { "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } } }
+    },
+    "security": { "type": "object", "properties": { "onPullRequest": { "type": "boolean" } } },
+    "attest": { "type": "boolean" },
+    "autoMerge": {
+      "description": "false: apply writes no auto-merge.yml. An object tightens the auto-merge policy (docs/AUTO_MERGE.md); a value the kit can't use keeps its safe default.",
+      "oneOf": [
+        { "const": false },
+        {
+          "type": "object",
+          "properties": {
+            "minorWaitDays": { "description": "Days a Dependabot minor update (and any Dependabot update of release-kit) waits after its pull request opens before it may merge on its own. 0 turns the wait off.", "type": "integer", "minimum": 0, "maximum": 90, "default": 3 },
+            "patchWaitDays": { "description": "The same for a patch update.", "type": "integer", "minimum": 0, "maximum": 90, "default": 0 },
+            "hold": { "description": "More packages that always wait for a person, added to the kit's list: exact names, or a prefix ending in * like \"@acme/*\".", "type": "array", "items": { "type": "string", "pattern": "^[@\\w./-]+\\*?$" }, "default": [] },
+            "unhold": { "description": "Entries of the kit's hold list this repo doesn't hold, written as they are there.", "type": "array", "items": { "type": "string", "pattern": "^[@\\w./-]+\\*?$" }, "default": [] }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

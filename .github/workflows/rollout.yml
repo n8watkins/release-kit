@@ -4,11 +4,18 @@
 # Waves run in order (canary, public, private), and a wave starts only when the
 # one before it succeeded.
 #
-# A patch or minor release needs no one: after the canary wave, the gate waits
-# (up to an hour) for the canary's update pull request to pass CI and merge,
-# and only then do the public and private waves start. A major release waits
-# for the owner's approval in the `rollout-major` environment before each wave
-# instead, since its update pull requests wait for a person anyway.
+# A patch or minor release needs no one, and it soaks on the canary first:
+# after the canary wave, the gate waits (up to an hour) for the canary's update
+# pull request to pass CI and merge, and the run ends there (the job "Later
+# waves wait for the soak"). rollout-resume.yml looks every hour, and once the
+# canary has run the release for adopters.json "soakHours" (default 24) and
+# is healthy (its branch still pins the release and every check on its head
+# commit passed), it starts this workflow again with stage "later": the
+# public and private waves, after the same soak and health check. "Run
+# workflow" with skip_soak on starts them right after the canary merges, for
+# an urgent fix. A major release waits for the owner's approval in the
+# `rollout-major` environment before each wave instead, since its update pull
+# requests wait for a person anyway.
 # Any failure stops the waves after it, and the report job opens (or comments
 # on) an issue labeled "release-kit: rollout" naming the failed jobs.
 #
@@ -22,7 +29,7 @@
 # tag that already rolled out.
 name: Rollout
 # The tag in the name lets rollout-start.yml see that a tag already rolled out.
-run-name: Rollout ${{ inputs.tag || github.event.release.tag_name }}${{ inputs.dry_run && ' (dry run)' || '' }}
+run-name: Rollout ${{ inputs.tag || github.event.release.tag_name }}${{ inputs.stage == 'later' && ' (later waves)' || '' }}${{ inputs.dry_run && ' (dry run)' || '' }}
 
 on:
   release:
@@ -41,6 +48,15 @@ on:
         description: "Dry run: run apply and show each pull request, but push nothing"
         type: boolean
         default: true
+      stage:
+        description: "auto: the canary, then the later waves after the soak (a major: every wave, each approved). later: only the public and private waves, once the canary has soaked"
+        type: choice
+        options: [auto, later]
+        default: auto
+      skip_soak:
+        description: "Urgent fix: start the public and private waves without waiting for the canary's soak"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,6 +79,11 @@ jobs:
       public: ${{ steps.plan.outputs.public }}
       private: ${{ steps.plan.outputs.private }}
       major: ${{ steps.plan.outputs.major }}
+      later: ${{ steps.plan.outputs.later }}
+      soak-hours: ${{ steps.plan.outputs.soak-hours }}
+      canaries: ${{ steps.plan.outputs.canaries }}
+      canary-owner: ${{ steps.plan.outputs.canary-owner }}
+      canary-names: ${{ steps.plan.outputs.canary-names }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,8 +113,11 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
           REPOS: ${{ inputs.repos || '' }}
           DRY_RUN: ${{ steps.tag.outputs.dry-run }}
+          STAGE: ${{ inputs.stage || 'auto' }}
+          SKIP_SOAK: ${{ inputs.skip_soak == true }}
         run: |
-          set -- --tag "$TAG" --repos "$REPOS"
+          set -- --tag "$TAG" --repos "$REPOS" --stage "$STAGE"
+          if [ "$SKIP_SOAK" = "true" ]; then set -- "$@" --skip-soak; fi
           if [ "$DRY_RUN" = "true" ]; then set -- "$@" --dry-run; fi
           node scripts/rollout.mjs plan "$@"
 
@@ -154,15 +178,71 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
         run: node scripts/rollout.mjs wait-merge --adopter "$ADOPTER" --tag "$TAG" --timeout-minutes 60
 
+  # A patch or minor release soaks on the canary: this run ends here, and
+  # rollout-resume.yml starts the later waves once the soak is over and the
+  # canary is healthy. It finds this run by this job's name.
+  defer:
+    name: Later waves wait for the soak
+    needs: [plan, canary-merged]
+    if: >-
+      !cancelled() && needs.canary-merged.result == 'success' && needs.plan.outputs.later == 'deferred'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Say when the later waves start
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          HOURS: ${{ needs.plan.outputs.soak-hours }}
+        run: echo "The canary took $TAG. The public and private waves start once it has run it for $HOURS hours and is healthy (rollout-resume.yml looks every hour); run Rollout with stage later and skip_soak to start them now." >> "$GITHUB_STEP_SUMMARY"
+
+  # The later waves' own run (stage later): the canary must have soaked and be
+  # healthy, unless the owner skipped the soak.
+  soak:
+    name: Soak and canary health
+    needs: plan
+    if: needs.plan.outputs.later == 'check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: rollout
+    permissions:
+      contents: read
+    steps:
+      # Read-only, for the canary repos: their pin, update pull request and checks.
+      - name: Mint a token for the canary
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_KIT_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_KIT_BOT_KEY }}
+          owner: ${{ needs.plan.outputs.canary-owner }}
+          repositories: ${{ needs.plan.outputs.canary-names }}
+          permission-contents: read
+          permission-pull-requests: read
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Check the soak and the canary's health
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          CANARIES: ${{ needs.plan.outputs.canaries }}
+          HOURS: ${{ needs.plan.outputs.soak-hours }}
+        run: node scripts/rollout.mjs soak-check --tag "$TAG" --canaries "$CANARIES" --soak-hours "$HOURS" --require-ready
+
   public:
     name: Public
-    needs: [plan, canary, canary-merged]
-    # A failed canary, or one whose update didn't merge, stops the rollout; a
-    # skipped one (none picked, a dry run, or a major) doesn't.
+    needs: [plan, canary, canary-merged, soak]
+    # A failed canary, one whose update didn't merge, or a soak that isn't
+    # over stops the rollout; a skipped one (none picked, a dry run, or a
+    # major) doesn't. A deferred run leaves them to rollout-resume.yml.
     if: >-
-      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.public != '[]'
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.public != '[]' && needs.plan.outputs.later != 'deferred'
       && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
       && (needs.canary-merged.result == 'success' || needs.canary-merged.result == 'skipped')
+      && (needs.soak.result == 'success' || needs.soak.result == 'skipped')
     uses: ./.github/workflows/rollout-wave.yml
     # The wave reads the App key from the `rollout` environment; a called
     # workflow sees no secrets unless the caller passes them on.
@@ -175,11 +255,12 @@ jobs:
 
   private:
     name: Private
-    needs: [plan, canary, canary-merged, public]
+    needs: [plan, canary, canary-merged, soak, public]
     if: >-
-      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.private != '[]'
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.private != '[]' && needs.plan.outputs.later != 'deferred'
       && (needs.canary.result == 'success' || needs.canary.result == 'skipped')
       && (needs.canary-merged.result == 'success' || needs.canary-merged.result == 'skipped')
+      && (needs.soak.result == 'success' || needs.soak.result == 'skipped')
       && (needs.public.result == 'success' || needs.public.result == 'skipped')
     uses: ./.github/workflows/rollout-wave.yml
     # The wave reads the App key from the `rollout` environment; a called
@@ -194,7 +275,7 @@ jobs:
   # Any failure, in a real rollout, reaches the owner as an issue here.
   report:
     name: Report a failure
-    needs: [plan, canary, canary-merged, public, private]
+    needs: [plan, canary, canary-merged, defer, soak, public, private]
     if: failure() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
     runs-on: ubuntu-latest
     timeout-minutes: 5

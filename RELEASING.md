@@ -78,6 +78,9 @@ npm run release -- --push      # check, bump, changelog, commit, tag, push
 ```
 
 - Without `--dry-run` it writes: the bump, the changelog, the commit and the tag.
+  First it shows the version and the notes and asks you to confirm (`y`); anything else stops it with nothing written.
+  Where nobody can answer (CI, a script, a pipe) it stops instead of asking, unless `--yes` says to go ahead: the release train passes it.
+  `--dry-run` never asks.
   An option it doesn't know (a typo like `--dryrun`) stops it before it changes anything, and `npm run release -- --help` (or `npx release-kit <command> --help`, for any command) prints the options.
 - With no release tag yet it stops instead of listing the whole history as the first release: baseline first (below), or pass `--whole-history` when that is what you want (a new project's first release).
   `--dry-run` only warns.
@@ -104,7 +107,7 @@ Pushing the tag runs `.github/workflows/release.yml`:
 4. The GitHub Release is created with the generated notes and the files (`releases.json`, and `releases.xml` with the feed on, among them), and the uploaded files are re-downloaded and checked.
 
 In release-kit itself, a published release then starts the rollout bot: [`rollout-start.yml`](.github/workflows/rollout-start.yml) runs `.github/workflows/rollout.yml` for the tag, for real ([docs/UPGRADES.md](docs/UPGRADES.md#with-the-app)).
-A patch or minor release rolls out with no clicks, gated on the canary's update pull request merging; a major release waits for the owner's approval in the `rollout-major` environment before each wave; a failure opens a `release-kit: rollout` issue.
+A patch or minor release rolls out with no clicks: the canary first, and the other waves once the canary's update has merged and run for `soakHours` (in `adopters.json`, default 24) with every check green, started by the hourly `rollout-resume.yml`; a major release waits for the owner's approval in the `rollout-major` environment before each wave; a failure opens a `release-kit: rollout` issue.
 It skips a baseline, a pre-release, and a tag that already had a real rollout.
 
 If a Release run fails after the tag is pushed (a flaky check, an outage), fix the cause and retry; the workflow is safe to run again:
@@ -134,7 +137,9 @@ Its schedule is in `.release.json` (`train.schedule`, a cron line in UTC).
 
 GitHub doesn't count checks from runs started with `workflow_dispatch`, the only runs the train's token can start.
 So on a `main` protected by required checks, the train's push is rejected even though `train.checks` passed on that exact commit.
-The fix is a deploy key that the branch's rules let through, stored as the `RELEASE_TRAIN_KEY` secret; the train's checkout pushes with it when it exists.
+The fix is a deploy key that the branch's rules let through, stored as the `RELEASE_TRAIN_KEY` secret of the `release-train` environment; the train's checkout pushes with it when it exists.
+Only runs on the default branch may use that environment, and the train's cut job is the one job that declares it, so a workflow someone pushes on another branch, or adds in a pull request, can't read the key.
+A key an older protect kept as a repository secret, which any workflow on any branch can read, still works until `npx release-kit protect` moves it: protect makes a new key (a secret can't be read back), stores it in the environment and deletes the repository secret, and `npm run release:check` warns until then.
 The train still runs `train.checks` first and pushes only when they pass, so the key never lets an unchecked commit onto `main`.
 A tag pushed with the key starts the Release workflow by itself, and pushing `main` with it runs CI there as usual.
 `node scripts/release-kit/protect.mjs` (see [Protecting the branch and the tags](#protecting-the-branch-and-the-tags)) makes the key, once, in a repo with a train.
@@ -171,6 +176,7 @@ Releases still work:
   If a gating check fails, or a required check never reports before `--pr-timeout`, it closes the pull request and undoes the release commit, so nothing is tagged.
   `--via-pr` goes straight to the pull request, and `npm run release -- --dry-run --push` says which path it will take.
 - With a release train, the train's deploy key may bypass the branch rules (see [A protected main](#a-protected-main)); `--rotate-key` replaces the key.
+  GitHub lets every deploy key with write access bypass, not only the train's, so protect and `npm run release:check` name any other write deploy key on the repo: make it read-only or delete it unless it must push to `main`.
 - `--admin-bypass` lets repository admins push straight to the branch again, for a repo that wants that trade-off.
 
 `npm run release:check` warns when the rulesets drift from what protect would set (a rule removed by hand, a different bypass list, other required checks than `.release.json` names), whenever gh can read them.
@@ -191,7 +197,9 @@ There protect sets up the free safeguards instead, and says what GitHub still le
 
 - `npm run release -- --baseline` tags the version this repo is already at, without a GitHub Release, so the first real release lists only new work.
 - `npm run release -- --baseline <commit> --publish` tags a past milestone with the version its `package.json` had, and publishes it.
-  A commit whose `package.json` has no version can't be tagged this way; the error prints the `git tag` command that marks it by hand.
+  For a commit whose `package.json` has no version (or that has no `package.json`), name the version: `npm run release -- --baseline <commit> --as 1.6.0`.
+  `--as` never overrides a version that is there: it is refused when that commit's `package.json` says another one.
+  The tag carries the same baseline marker either way, and a baseline asks before it tags, like a release (`--yes` skips the question).
   Pushing a tag on a commit older than the repo's `release.yml` starts no workflow (GitHub reads the workflow from the tagged commit), so nothing verifies or publishes it: that is harmless for a baseline, and for `--publish` run the Release workflow from `main` with the tag as its input.
 - `npx release-kit backfill` adds release tags from before the kit wrote `releases.json` to it, from their commits: a dry run that prints the plan, `--write` to write the file, `--edit-releases` to fill in GitHub Release notes that are empty or only GitHub's generated list.
   Commits that aren't Conventional Commits are counted as `unattributed`, never guessed at, and baseline tags are skipped.

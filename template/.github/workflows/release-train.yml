@@ -14,7 +14,12 @@
 #
 # Branch protection doesn't count checks from workflow_dispatch runs, so on a
 # protected main the push needs the RELEASE_TRAIN_KEY secret: a deploy key the
-# branch's ruleset lets through. scripts/release-kit/protect.mjs sets up both.
+# branch's ruleset lets through. scripts/release-kit/protect.mjs sets up both,
+# and keeps the secret in the "release-train" environment, which only runs on
+# the default branch may use: the cut job declares it, so a workflow someone
+# pushes on another branch can't read the key. A key an older protect kept as
+# a repository secret still works here (passed in by the caller) until protect
+# moves it.
 #
 # Turned on with apply.mjs --train (the schedule comes from .release.json), or
 # called from n8watkins/release-kit:
@@ -51,7 +56,7 @@ on:
         default: release.yml
     secrets:
       RELEASE_TRAIN_KEY:
-        description: "SSH deploy key that may bypass main's protection (protect.mjs); without it the train pushes with the workflow token"
+        description: "SSH deploy key that may bypass main's protection, for a repo where it is still a repository secret; the release-train environment's own secret wins (protect.mjs). Without either the train pushes with the workflow token"
         required: false
 
 permissions:
@@ -168,6 +173,9 @@ jobs:
     if: needs.plan.outputs.release == 'true' && !inputs.dry-run
     runs-on: ubuntu-latest
     timeout-minutes: 90 # it waits for train.checks
+    # The key's secret is in this environment, which only the default branch may
+    # use (protect.mjs); GitHub creates it, empty, in a repo protect hasn't set up.
+    environment: release-train
     permissions:
       contents: write # push the release commit, the tag and the temporary check branch
       actions: write # start train.checks and the Release workflow

@@ -5,6 +5,20 @@
 // dependency below 1.0.0 (0.y.z) waits for a person too, since SemVer lets a
 // 0.x minor break: it gets the REVIEW_LABEL label and a comment saying why.
 //
+// The repo's .release.json "autoMerge" (read from the base branch, so a pull
+// request can't loosen it) tightens that:
+//   minorWaitDays  a Dependabot minor update merges only once its pull request
+//                  has been open this many days (default 3; 0 turns it off),
+//                  and so does a Dependabot update of release-kit itself
+//   patchWaitDays  the same for a patch update (default 0: on green)
+//   hold           packages that always wait for a person, whatever the size
+//                  of the update, added to DEFAULT_HOLD ("name" or "@scope/*")
+//   unhold         patterns of DEFAULT_HOLD this repo doesn't hold
+// A GitHub Actions update waits for a person unless every action it changes is
+// pinned to a commit SHA. Held pull requests get HOLD_LABEL, waiting ones
+// WAIT_LABEL, each with one comment saying why; GitHub's auto-merge is turned
+// off on them if it was on.
+//
 //   node scripts/release-kit/automerge.mjs [--fallback true|false] [--method squash|merge|rebase] [--bots "dependabot[bot],my-app[bot]"]
 //
 // Reads the event from GITHUB_EVENT_NAME and GITHUB_EVENT_PATH, and asks the
@@ -26,6 +40,10 @@
 //                  rulesets or branch protection): when a listed workflow
 //                  completes, it merges the pull request once every check on
 //                  its head commit has finished and passed.
+//   schedule,      Looks again at every open update pull request, so one that
+//   workflow_dispatch  has waited long enough merges without a new push: the
+//                  way pull_request does where checks are required, else the
+//                  way workflow_run does.
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { checkArgs } from './cli.mjs'
@@ -36,6 +54,125 @@ const KIT_BRANCH = 'release-kit/'
 /** The label on a pull request left for a person because it is a minor update below 1.0.0. */
 export const REVIEW_LABEL = 'needs-review: 0.x minor'
 const REVIEW_MARKER = '<!-- release-kit: 0.x minor -->'
+/** The label on a pull request left for a person because it updates a held package or an action not pinned to a SHA. */
+export const HOLD_LABEL = 'needs-review: held dependency'
+const HOLD_MARKER = '<!-- release-kit: held -->'
+/** The label on a pull request that will merge on its own once it has waited long enough. */
+export const WAIT_LABEL = 'auto-merge: waiting'
+const WAIT_MARKER = '<!-- release-kit: waiting -->'
+const DAY_MS = 24 * 60 * 60 * 1000
+const ACTIONS_BRANCH = 'dependabot/github_actions/'
+const KIT_NAMES = ['release-kit', 'n8watkins/release-kit']
+
+/**
+ * Packages that always wait for a person: each runs on every request, or
+ * builds or deploys what is shipped, so a bad minor or patch breaks the live
+ * app in ways CI rarely sees (net_trailers #74: a grouped update broke cookie
+ * requests with CI green).
+ */
+export const DEFAULT_HOLD = [
+  'next', // the framework that serves every request
+  'react', // renders every page, on the server and in the browser
+  'react-dom',
+  '@opennextjs/*', // turns the Next.js build into the Cloudflare Worker
+  'wrangler', // builds and deploys the Worker
+  '@cloudflare/*', // the Workers runtime's bindings, types and build plugins
+  'vite', // builds what the Vite apps and extensions ship
+  '@vitejs/*',
+  'hono', // routes every request of the Worker APIs
+  'next-auth', // sessions and cookies on every signed-in request
+  '@auth/*',
+  'better-auth',
+  '@clerk/*',
+]
+
+/** Whether `name` matches a hold pattern: an exact name, or "prefix*" for anything starting with prefix. */
+export const matchesHold = (name, pattern) => (pattern.endsWith('*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern)
+
+/**
+ * The repo's auto-merge settings from .release.json "autoMerge", with the
+ * defaults filled in: { minorWaitDays, patchWaitDays, hold, problems }.
+ * A setting that can't be read keeps its default (the safe one) and is named
+ * in `problems`; `false` (no auto-merge workflow) reads as the defaults.
+ */
+export function autoMergePolicy(setting) {
+  const problems = []
+  const policy = { minorWaitDays: 3, patchWaitDays: 0, hold: [...DEFAULT_HOLD], problems }
+  if (setting === undefined || setting === false || setting === true) return policy
+  if (typeof setting !== 'object' || setting === null || Array.isArray(setting)) {
+    problems.push('"autoMerge" must be false or an object like { "minorWaitDays": 3, "hold": ["my-sdk"] }')
+    return policy
+  }
+  const known = ['minorWaitDays', 'patchWaitDays', 'hold', 'unhold']
+  for (const key of Object.keys(setting)) if (!known.includes(key)) problems.push(`"autoMerge.${key}" is not a setting (${known.join(', ')})`)
+  for (const key of ['minorWaitDays', 'patchWaitDays']) {
+    if (setting[key] === undefined) continue
+    if (Number.isInteger(setting[key]) && setting[key] >= 0 && setting[key] <= 90) policy[key] = setting[key]
+    else problems.push(`"autoMerge.${key}" must be a whole number of days from 0 to 90, not ${JSON.stringify(setting[key])}; using ${policy[key]}`)
+  }
+  const patterns = (key) => {
+    const list = setting[key] ?? []
+    if (!Array.isArray(list) || list.some((p) => typeof p !== 'string' || !/^[@\w./-]+\*?$/.test(p))) {
+      problems.push(`"autoMerge.${key}" must be a list of package names, or "prefix*" patterns like "@cloudflare/*"`)
+      return []
+    }
+    return list
+  }
+  const unhold = patterns('unhold')
+  for (const p of unhold) if (!DEFAULT_HOLD.includes(p)) problems.push(`"autoMerge.unhold" names "${p}", which the kit doesn't hold (its list: ${DEFAULT_HOLD.join(', ')})`)
+  policy.hold = [...new Set([...DEFAULT_HOLD.filter((p) => !unhold.includes(p)), ...patterns('hold')])]
+  return policy
+}
+
+/**
+ * Why a pull request waits for a person whatever its checks say: the held
+ * packages it updates, and in a GitHub Actions update every action it doesn't
+ * pin to a commit SHA. [{ name, from, to, why }]
+ *   actionRefs  for a github_actions branch, the `uses:` refs the pull request
+ *               adds ([{ action, ref }]), or null when they can't be read
+ */
+export function heldBy({ pr, update, policy, actionRefs = null }) {
+  if (pr.author !== 'dependabot[bot]') return []
+  const held = []
+  for (const part of update.parts ?? []) {
+    const pattern = policy.hold.find((p) => matchesHold(part.name, p))
+    if (pattern) held.push({ name: part.name, from: part.from, to: part.to, why: pattern === part.name ? 'held for a person' : `held for a person (${pattern})` })
+  }
+  if (pr.headRef.startsWith(ACTIONS_BRANCH)) {
+    if (!actionRefs?.length) held.push({ name: update.what || 'the actions', from: null, to: null, why: 'a GitHub Actions update whose new refs could not be read, so it may not be pinned to a commit SHA' })
+    for (const { action, ref } of actionRefs ?? []) {
+      if (!/^[0-9a-f]{40}$/.test(ref)) held.push({ name: action, from: null, to: ref, why: 'a GitHub Action pinned to a tag or branch, not a commit SHA' })
+    }
+  }
+  return held
+}
+
+/**
+ * How long a Dependabot pull request waits before it may merge on its own:
+ * { days, until } (until: the time it may merge, ms), or null with no wait.
+ * A minor update waits minorWaitDays, a patch patchWaitDays, counted from when
+ * the pull request was opened; a Dependabot update of release-kit waits the
+ * minor wait either way, so it can't outrun the kit's own rollout soak.
+ */
+export function waitFor({ pr, update, policy, now = Date.now() }) {
+  if (pr.author !== 'dependabot[bot]') return null
+  const days = Math.max(0, ...(update.parts ?? []).map((p) => (KIT_NAMES.includes(p.name) || p.type === 'minor' ? policy.minorWaitDays : p.type === 'patch' ? policy.patchWaitDays : 0)))
+  if (!days) return null
+  // An opening time that can't be read counts as now: the wait starts over rather than being skipped.
+  const opened = Date.parse(pr.createdAt ?? '')
+  return { days, until: (Number.isNaN(opened) ? now : opened) + days * DAY_MS }
+}
+
+/** The `uses:` refs a pull request's diff adds, from its files' patches; null when a patch is missing. */
+export function addedActionRefs(files) {
+  const refs = []
+  for (const file of files) {
+    if (!/^\.github\//.test(file.filename ?? '')) continue
+    if (typeof file.patch !== 'string') return null
+    for (const m of file.patch.matchAll(/^\+\s*(?:-\s*)?uses:\s*["']?([^@\s"']+)@([^\s"'#]+)/gm)) refs.push({ action: m[1], ref: m[2] })
+  }
+  return refs
+}
 
 /**
  * The dependencies in a Dependabot commit message's "updated-dependencies"
@@ -196,12 +333,17 @@ export const kitVersion = (spec) => /#v?(\d+\.\d+\.\d+)$/.exec(spec ?? '')?.[1] 
  *   pr        { author, headRef, state, draft, autoMerge }
  *   update    { type: 'patch' | 'minor' | 'major' | 'downgrade' | null, what: text, why: text, belowOne: [names] }
  *   repo      { requiredChecks, allowAutoMerge }
- *   event     'pull_request' or 'workflow_run'
- *   checks    'green' | 'pending' | 'red' (workflow_run only)
- * Returns { action: 'enable' | 'merge' | 'skip' | 'review', reason }: 'review'
- * leaves it for a person like 'skip' and also labels it REVIEW_LABEL and says why.
+ *   event     'pull_request', 'workflow_run', or 'schedule' (a scheduled or
+ *             manual look again: like pull_request where the branch requires
+ *             checks and allows auto-merge, else like workflow_run)
+ *   checks    'green' | 'pending' | 'red' (workflow_run, and schedule without required checks)
+ *   held      what heldBy found; wait: what waitFor found; now: the time (ms)
+ * Returns { action: 'enable' | 'merge' | 'skip' | 'review' | 'wait', reason }:
+ * 'review' leaves it for a person like 'skip' and also labels it (REVIEW_LABEL
+ * for a 0.x minor, HOLD_LABEL for a held one) and says why; 'wait' leaves it
+ * until `until` and labels it WAIT_LABEL.
  */
-export function decide({ pr, update, repo, event, fallback = true, bots = ['dependabot[bot]'], checks }) {
+export function decide({ pr, update, repo, event, fallback = true, bots = ['dependabot[bot]'], checks, held = [], wait = null, now = Date.now() }) {
   const skip = (reason) => ({ action: 'skip', reason })
   if (pr.state !== 'open' || pr.draft) return skip('the pull request is not open, or is a draft')
   const dependabot = pr.author === 'dependabot[bot]'
@@ -210,10 +352,22 @@ export function decide({ pr, update, repo, event, fallback = true, bots = ['depe
   if (!update.type) return skip(`could not tell what kind of update this is (${update.why || update.what || 'no version change found'})`)
   if (update.type === 'downgrade') return skip(`${update.what} would move to an older version (${update.why || 'a downgrade'}): close it (see "Dependabot proposes an older kit" in docs/AUTO_MERGE.md)`)
   if (update.type === 'major') return skip(`${update.what} is a major update: a person reviews and merges it`)
+  const reasons = []
+  const labels = []
   if (update.belowOne?.length) {
     const one = update.belowOne.length === 1
-    return { action: 'review', reason: `${update.belowOne.join(', ')} ${one ? 'is' : 'are'} below 1.0.0, where a minor update may break (SemVer): a person reviews and merges it` }
+    reasons.push(`${update.belowOne.join(', ')} ${one ? 'is' : 'are'} below 1.0.0, where a minor update may break (SemVer)`)
+    labels.push(REVIEW_LABEL)
   }
+  if (held.length) {
+    reasons.push(`it updates ${[...new Set(held.map((h) => h.name))].join(', ')}, which ${held.length === 1 ? 'waits' : 'wait'} for a person (${[...new Set(held.map((h) => h.why))].join('; ')})`)
+    labels.push(HOLD_LABEL)
+  }
+  if (reasons.length) return { action: 'review', reason: `${reasons.join(', and ')}: a person reviews and merges it`, labels }
+  if (wait && now < wait.until) {
+    return { action: 'wait', until: wait.until, reason: `${update.what} is a ${update.type} update, which merges on its own only once its pull request has been open ${wait.days} day${wait.days === 1 ? '' : 's'} (from ${new Date(wait.until).toISOString()}); a scheduled run looks again` }
+  }
+  if (event === 'schedule') event = repo.requiredChecks && repo.allowAutoMerge ? 'pull_request' : 'workflow_run'
   if (event === 'pull_request') {
     if (!repo.requiredChecks) {
       return skip(`the base branch requires no status checks, so auto-merge would merge before CI finishes${fallback ? '; the merge-when-green fallback merges it once every check passes' : ''}`)
@@ -246,6 +400,33 @@ export function reviewComment(update) {
     'Under SemVer anything may change before 1.0.0, so a 0.x minor update can carry breaking changes (release-kit itself ships breaking changes as a minor before 1.0).',
     'Check the release notes, then merge it by hand.',
     'Patch updates below 1.0.0, and minor updates from 1.0.0 on, still merge on their own once CI passes.',
+  ].join('\n')
+}
+
+/** The comment on a pull request held for a person: which dependency held it, and why. */
+export function holdComment(held) {
+  return [
+    HOLD_MARKER,
+    '**Auto-merge left this for a person.** It updates something this repo never merges without one, whatever the size of the update:',
+    '',
+    '| Dependency | From | To | Why |',
+    '|---|---|---|---|',
+    ...held.map((h) => `| ${h.name} | ${h.from ?? '?'} | ${h.to ?? '?'} | ${h.why} |`),
+    '',
+    'Held packages run on every request or build what is shipped, so a bad update breaks the live app in ways CI rarely catches; a GitHub Action pinned to a tag can change under the same tag, while one pinned to a commit SHA can\'t.',
+    'Check the release notes, try it where it runs if you can, then merge it by hand.',
+    'The list is the kit\'s defaults plus `.release.json` `autoMerge.hold`, minus `autoMerge.unhold` (docs/AUTO_MERGE.md in release-kit).',
+  ].join('\n')
+}
+
+/** The comment on a pull request that waits before it may merge on its own. */
+export function waitComment(update, wait) {
+  return [
+    WAIT_MARKER,
+    `**Auto-merge is waiting.** This ${update.type} update merges on its own once the pull request has been open ${wait.days} day${wait.days === 1 ? '' : 's'}, from ${new Date(wait.until).toISOString().replace(/:\d\d\.\d+Z$/, ' UTC').replace('T', ' ')}, and its checks pass.`,
+    '',
+    'The wait gives a bad release time to be found and pulled before it reaches this repo; the auto-merge workflow looks again every day.',
+    'Merge it by hand to skip the wait, or set `.release.json` `autoMerge.minorWaitDays` (or `patchWaitDays`) to change it; 0 turns it off.',
   ].join('\n')
 }
 
@@ -315,6 +496,130 @@ function main() {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, ['## Auto-merge', '', text, '', ...(rows.length ? ['| Dependency | Update | Read from |', '|---|---|---|', ...rows, ''] : [])].join('\n') + '\n')
   }
 
+  const fileAt = (path, ref) => {
+    const content = tryApi(`repos/${repoName}/contents/${path}?ref=${encodeURIComponent(ref)}`, null)?.content
+    return content ? Buffer.from(content, 'base64').toString('utf8') : null
+  }
+  // The repo's settings, from the base branch: a pull request can't change what governs its own merge.
+  const policies = new Map()
+  const policyAt = (ref) => {
+    if (policies.has(ref)) return policies.get(ref)
+    let setting
+    try {
+      setting = JSON.parse(fileAt('.release.json', ref) ?? '{}').autoMerge
+    } catch {
+      console.log(`::warning title=Auto-merge::.release.json on ${ref} is not valid JSON, so the default auto-merge settings apply`)
+    }
+    const policy = autoMergePolicy(setting)
+    for (const problem of policy.problems) console.log(`::warning title=Auto-merge::.release.json ${problem}`)
+    policies.set(ref, policy)
+    return policy
+  }
+
+  /** Applies the policy to one pull request; `event` is pull_request, workflow_run or schedule. */
+  const handle = (number, event) => {
+    const raw = api(`repos/${repoName}/pulls/${number}`)
+    const labels = (raw.labels ?? []).map((l) => l.name)
+    const pr = { author: raw.user.login, headRef: raw.head.ref, state: raw.state, draft: raw.draft, autoMerge: Boolean(raw.auto_merge), createdAt: raw.created_at }
+
+    // What it updates: the release-kit pin in package.json, and Dependabot's metadata.
+    const pinAt = (ref) => {
+      try {
+        return kitVersion(JSON.parse(fileAt('package.json', ref) ?? '{}').devDependencies?.['release-kit'])
+      } catch {
+        return null
+      }
+    }
+    const dependabot = pr.author === 'dependabot[bot]'
+    const messages = dependabot ? api(`repos/${repoName}/pulls/${number}/commits?per_page=100`).map((c) => c.commit.message) : []
+    const update = classifyUpdate({ kit: [pinAt(raw.base.sha), pinAt(raw.head.sha)], dependabot, messages, body: raw.body ?? '' })
+    const policy = policyAt(raw.base.ref)
+    // A GitHub Actions update: the refs its diff adds, read from the patches (metadata, not code).
+    const actionRefs = dependabot && pr.headRef.startsWith('dependabot/github_actions/')
+      ? addedActionRefs(tryApi(`repos/${repoName}/pulls/${number}/files?per_page=100`, null) ?? [{ filename: '.github/?' }])
+      : null
+    const held = heldBy({ pr, update, policy, actionRefs })
+    const wait = waitFor({ pr, update, policy })
+
+    // The repo: does the base branch require checks, and is auto-merge allowed?
+    const rules = tryApi(`repos/${repoName}/rules/branches/${encodeURIComponent(raw.base.ref)}`, [])
+    const branch = tryApi(`repos/${repoName}/branches/${encodeURIComponent(raw.base.ref)}`, {})
+    const classic = branch.protection?.required_status_checks
+    const requiredChecks = rules.some((rule) => rule.type === 'required_status_checks')
+      || Boolean(classic && ((classic.contexts ?? []).length || (classic.checks ?? []).length))
+    const repo = { requiredChecks, allowAutoMerge: Boolean(raw.base.repo?.allow_auto_merge ?? tryApi(`repos/${repoName}`, {}).allow_auto_merge) }
+
+    let checks
+    if (['workflow_run', 'schedule'].includes(event) && !(requiredChecks && repo.allowAutoMerge) && fallback) {
+      const runs = api(`repos/${repoName}/commits/${raw.head.sha}/check-runs?per_page=100`).check_runs
+      const statuses = api(`repos/${repoName}/commits/${raw.head.sha}/status`)
+      checks = checksState(runs, statuses, ['Auto-merge', 'auto-merge / Auto-merge'])
+    }
+
+    const decision = decide({ pr, update, repo, event, fallback, bots, checks, held, wait })
+    // Labels from an earlier version of the pull request go once they no longer apply.
+    const keep = decision.action === 'review' ? decision.labels : decision.action === 'wait' ? [WAIT_LABEL] : ['enable', 'merge'].includes(decision.action) ? [] : null
+    if (keep) {
+      for (const label of [REVIEW_LABEL, HOLD_LABEL, WAIT_LABEL]) {
+        if (labels.includes(label) && !keep.includes(label)) tryGh('api', '-X', 'DELETE', `repos/${repoName}/issues/${number}/labels/${encodeURIComponent(label)}`)
+      }
+    }
+    // Held or waiting: GitHub's auto-merge, if an earlier run turned it on, must not merge it meanwhile.
+    if (['review', 'wait'].includes(decision.action) && pr.autoMerge) tryGh('pr', 'merge', String(number), '--repo', repoName, '--disable-auto')
+    /** Labels it (creating the label in a repo without one) and writes the comment once. */
+    const explain = (wanted, comments) => {
+      for (const label of wanted) if (!labels.includes(label)) tryGh('api', '-X', 'POST', '-f', `labels[]=${label}`, `repos/${repoName}/issues/${number}/labels`)
+      const existing = tryApi(`repos/${repoName}/issues/${number}/comments?per_page=100`, null)
+      for (const [marker, body] of comments) {
+        if (existing && !existing.some((c) => c.body?.includes(marker))) tryGh('api', '-X', 'POST', '-f', `body=${body}`, `repos/${repoName}/issues/${number}/comments`)
+      }
+    }
+
+    if (decision.action === 'enable') {
+      try {
+        gh('pr', 'merge', String(number), '--repo', repoName, '--auto', `--${method}`, '--match-head-commit', raw.head.sha)
+        notice(`auto-merge on for #${number}: ${decision.reason}`, update.parts)
+      } catch (error) {
+        if (!alreadyMergeable(error)) throw error
+        // voicedock, v2.7.0 rollout: the required checks had already passed.
+        gh('pr', 'merge', String(number), '--repo', repoName, `--${method}`, '--match-head-commit', raw.head.sha)
+        notice(`merged #${number}: its required checks had already passed, so GitHub would not turn on auto-merge; ${decision.reason}`, update.parts)
+      }
+    } else if (decision.action === 'merge') {
+      gh('pr', 'merge', String(number), '--repo', repoName, `--${method}`, '--match-head-commit', raw.head.sha)
+      notice(`merged #${number}: ${decision.reason}`, update.parts)
+    } else if (decision.action === 'review') {
+      explain(decision.labels, [
+        ...(decision.labels.includes(REVIEW_LABEL) ? [[REVIEW_MARKER, reviewComment(update)]] : []),
+        ...(decision.labels.includes(HOLD_LABEL) ? [[HOLD_MARKER, holdComment(held)]] : []),
+      ])
+      notice(`#${number} left for a person, labeled "${decision.labels.join('", "')}": ${decision.reason}`, update.parts)
+    } else if (decision.action === 'wait') {
+      explain([WAIT_LABEL], [[WAIT_MARKER, waitComment(update, wait)]])
+      notice(`#${number} is waiting, labeled "${WAIT_LABEL}": ${decision.reason}`, update.parts)
+    } else {
+      notice(`#${number} left for a person: ${decision.reason}`, update.parts)
+    }
+  }
+
+  // A scheduled or manual run looks again at every open update pull request.
+  if (['schedule', 'workflow_dispatch'].includes(event)) {
+    const open = api(`repos/${repoName}/pulls?state=open&per_page=100`)
+      .filter((p) => bots.includes(p.user?.login) && (p.user.login === 'dependabot[bot]' || p.head?.ref?.startsWith(KIT_BRANCH)))
+    if (!open.length) return notice('no open update pull requests')
+    let failed = 0
+    for (const p of open) {
+      try {
+        handle(p.number, 'schedule')
+      } catch (error) {
+        failed += 1
+        console.log(`::error title=Auto-merge::#${p.number}: ${String(error.stderr ?? error.message).trim().replace(/\r?\n/g, ' ')}`)
+      }
+    }
+    if (failed) process.exitCode = 1
+    return
+  }
+
   // The pull request.
   let number = payload.pull_request?.number
   if (event === 'workflow_run') {
@@ -324,69 +629,7 @@ function main() {
       ?? tryApi(`repos/${repoName}/commits/${run.head_sha}/pulls`, []).find((p) => p.state === 'open' && p.head.sha === run.head_sha)?.number
   }
   if (!number) return notice('no open pull request for this run')
-  const raw = api(`repos/${repoName}/pulls/${number}`)
-  const labels = (raw.labels ?? []).map((l) => l.name)
-  const pr = { author: raw.user.login, headRef: raw.head.ref, state: raw.state, draft: raw.draft, autoMerge: Boolean(raw.auto_merge) }
-
-  // What it updates: the release-kit pin in package.json, and Dependabot's metadata.
-  const fileAt = (path, ref) => {
-    const content = tryApi(`repos/${repoName}/contents/${path}?ref=${ref}`, null)?.content
-    return content ? Buffer.from(content, 'base64').toString('utf8') : null
-  }
-  const pinAt = (ref) => {
-    try {
-      return kitVersion(JSON.parse(fileAt('package.json', ref) ?? '{}').devDependencies?.['release-kit'])
-    } catch {
-      return null
-    }
-  }
-  const messages = pr.author === 'dependabot[bot]' ? api(`repos/${repoName}/pulls/${number}/commits?per_page=100`).map((c) => c.commit.message) : []
-  const update = classifyUpdate({ kit: [pinAt(raw.base.sha), pinAt(raw.head.sha)], dependabot: pr.author === 'dependabot[bot]', messages, body: raw.body ?? '' })
-
-  // The repo: does the base branch require checks, and is auto-merge allowed?
-  const rules = tryApi(`repos/${repoName}/rules/branches/${encodeURIComponent(raw.base.ref)}`, [])
-  const branch = tryApi(`repos/${repoName}/branches/${encodeURIComponent(raw.base.ref)}`, {})
-  const classic = branch.protection?.required_status_checks
-  const requiredChecks = rules.some((rule) => rule.type === 'required_status_checks')
-    || Boolean(classic && ((classic.contexts ?? []).length || (classic.checks ?? []).length))
-  const repo = { requiredChecks, allowAutoMerge: Boolean(raw.base.repo?.allow_auto_merge ?? tryApi(`repos/${repoName}`, {}).allow_auto_merge) }
-
-  let checks
-  if (event === 'workflow_run' && !(requiredChecks && repo.allowAutoMerge) && fallback) {
-    const runs = api(`repos/${repoName}/commits/${raw.head.sha}/check-runs?per_page=100`).check_runs
-    const statuses = api(`repos/${repoName}/commits/${raw.head.sha}/status`)
-    checks = checksState(runs, statuses, ['Auto-merge', 'auto-merge / Auto-merge'])
-  }
-
-  const decision = decide({ pr, update, repo, event, fallback, bots, checks })
-  // A label from an earlier version of the pull request goes once it may merge on its own.
-  if (['enable', 'merge'].includes(decision.action) && labels.includes(REVIEW_LABEL)) {
-    tryGh('api', '-X', 'DELETE', `repos/${repoName}/issues/${number}/labels/${encodeURIComponent(REVIEW_LABEL)}`)
-  }
-  if (decision.action === 'enable') {
-    try {
-      gh('pr', 'merge', String(number), '--repo', repoName, '--auto', `--${method}`, '--match-head-commit', raw.head.sha)
-      notice(`auto-merge on for #${number}: ${decision.reason}`, update.parts)
-    } catch (error) {
-      if (!alreadyMergeable(error)) throw error
-      // voicedock, v2.7.0 rollout: the required checks had already passed.
-      gh('pr', 'merge', String(number), '--repo', repoName, `--${method}`, '--match-head-commit', raw.head.sha)
-      notice(`merged #${number}: its required checks had already passed, so GitHub would not turn on auto-merge; ${decision.reason}`, update.parts)
-    }
-  } else if (decision.action === 'merge') {
-    gh('pr', 'merge', String(number), '--repo', repoName, `--${method}`, '--match-head-commit', raw.head.sha)
-    notice(`merged #${number}: ${decision.reason}`, update.parts)
-  } else if (decision.action === 'review') {
-    // Labeling creates the label in a repo without one; the comment is written once.
-    if (!labels.includes(REVIEW_LABEL)) tryGh('api', '-X', 'POST', '-f', `labels[]=${REVIEW_LABEL}`, `repos/${repoName}/issues/${number}/labels`)
-    const comments = tryApi(`repos/${repoName}/issues/${number}/comments?per_page=100`, null)
-    if (comments && !comments.some((c) => c.body?.includes(REVIEW_MARKER))) {
-      tryGh('api', '-X', 'POST', '-f', `body=${reviewComment(update)}`, `repos/${repoName}/issues/${number}/comments`)
-    }
-    notice(`#${number} left for a person, labeled "${REVIEW_LABEL}": ${decision.reason}`, update.parts)
-  } else {
-    notice(`#${number} left for a person: ${decision.reason}`, update.parts)
-  }
+  handle(number, event)
 }
 
 if (isMain(import.meta.url)) main()

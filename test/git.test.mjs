@@ -63,13 +63,13 @@ test('tag names and refs are checked before git or the shell sees them', () => {
   const missing = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--verify-tag'])
   assert.match(missing.stderr, /is not a release tag/)
   // A baseline ref that looks like an option is a ref, not an option.
-  const option = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '-p'])
+  const option = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '-p', '--yes'])
   assert.notEqual(option.status, 0)
   assert.match(option.stderr, /"-p" is not a commit/)
   // A version that isn't x.y.z never becomes a tag.
   const odd = makeRepo(tmp('odd'), { version: '1.0.0-rc.1' })
   run(KIT, 'node', ['apply.mjs', odd, '--vendored'])
-  assert.match(attempt(odd, 'node', [`${SCRIPTS}/release.mjs`, '--baseline']).stderr, /has version "1\.0\.0-rc\.1", not x\.y\.z/)
+  assert.match(attempt(odd, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '--yes']).stderr, /has version "1\.0\.0-rc\.1", not x\.y\.z/)
   assert.equal(run(odd, 'git', ['tag', '--list']), '')
 })
 
@@ -99,12 +99,12 @@ test('the hook accepts CRLF and BOM messages, and git commit -v', () => {
 
 test('only a real baseline tag is skipped by the Release workflow', () => {
   const repo = applied({ version: '1.0.0' })
-  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
+  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '--yes'])
   assert.equal(run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--tag-kind', 'v1.0.0']), 'baseline=true\n')
   // A release whose notes mention the phrase is still a release.
   commit(repo, 'fix: say "release-kit baseline: tagged when adopting" in the docs')
   commit(repo, 'docs: x\n\nrelease-kit baseline: tagged when adopting release-kit; no GitHub Release.')
-  run(repo, 'node', [`${SCRIPTS}/release.mjs`])
+  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--yes'])
   assert.match(run(repo, 'git', ['tag', '-l', '--format=%(contents)', 'v1.0.1']), /release-kit baseline/)
   assert.equal(run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--tag-kind', 'v1.0.1']), 'baseline=false\n')
   assert.match(attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--tag-kind', 'v1;id']).stderr, /not a release tag/)
@@ -127,9 +127,9 @@ test('the changelog date is in .release.json timeZone', () => {
 
 test('a 0.y.z repo releases a breaking change as a minor, and reaches 1.0.0 only with --stable or "stable"', () => {
   const repo = applied({ version: '0.13.0' })
-  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
+  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '--yes'])
   commit(repo, 'feat!: settings live in one file now')
-  const release = (...args) => attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, ...args])
+  const release = (...args) => attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, ...args, '--yes'])
   assert.match(release('--dry-run').stdout, /0\.13\.0 -> 0\.14\.0 \(minor\)/)
   assert.match(outputs(release('--plan').stdout).version, /^0\.14\.0$/)
   // An explicit major, or a 1.x version, is refused: going stable is its own step.
@@ -174,7 +174,7 @@ test('--push checks origin and release:check first, and undoes the release if th
   const remote = join(root, 'remote.git')
   const repo = applied({ version: '1.0.0', scripts: { build: 'echo build' } })
   run(repo, 'git', ['remote', 'add', 'origin', remote])
-  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
+  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '--yes'])
   run(repo, 'git', ['push', '-q', '--atomic', 'origin', 'main', 'v1.0.0'])
   const state = () => [run(repo, 'git', ['rev-parse', 'HEAD']).trim(), run(repo, 'git', ['tag', '--list']).trim(), JSON.parse(run(repo, 'git', ['show', 'HEAD:package.json'])).version]
 
@@ -185,7 +185,7 @@ test('--push checks origin and release:check first, and undoes the release if th
   run(other, 'git', ['push', '-q', 'origin', 'main'])
   commit(repo, 'fix: local')
   const before = state()
-  const behind = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push'])
+  const behind = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--yes'])
   assert.notEqual(behind.status, 0)
   assert.match(behind.stderr, /main is behind origin\/main; pull/)
   assert.deepEqual(state(), before)
@@ -197,7 +197,7 @@ test('--push checks origin and release:check first, and undoes the release if th
   writeFileSync(join(repo, 'package.json'), JSON.stringify(pkg, null, 2))
   run(repo, 'git', ['commit', '-q', '-am', 'chore: a check that fails'])
   const red = state()
-  const failing = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push'])
+  const failing = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--yes'])
   assert.match(failing.stderr, /release:check failed; nothing was committed or tagged/)
   assert.deepEqual(state(), red)
 
@@ -206,7 +206,7 @@ test('--push checks origin and release:check first, and undoes the release if th
   // would otherwise send the release through a pull request.)
   run(repo, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
   writeFileSync(join(remote, 'hooks', 'pre-receive'), '#!/bin/sh\necho "protected branch" >&2\nexit 1\n', { mode: 0o755 })
-  const rejected = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--no-check'])
+  const rejected = attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--no-check', '--yes'])
   assert.notEqual(rejected.status, 0)
   assert.match(rejected.stderr, /the push was rejected, so the release commit and v1\.0\.1 were undone/)
   assert.match(rejected.stderr, /protected branch/)
@@ -214,5 +214,5 @@ test('--push checks origin and release:check first, and undoes the release if th
   assert.equal(run(repo, 'git', ['status', '--porcelain']), '')
   // And the rerun works once the remote accepts it.
   run(repo, 'rm', [join(remote, 'hooks', 'pre-receive')])
-  assert.match(run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--no-check']), /pushed v1\.0\.1/)
+  assert.match(run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--no-check', '--yes']), /pushed v1\.0\.1/)
 })

@@ -1,5 +1,7 @@
 {
+  "$schema": "./schema/adopters.v1.json",
   "bot": "release-kit-bot-n8watkins[bot]",
+  "soakHours": 24,
   "adopters": [
     {
       "repo": "n8watkins/portfolio-rank",

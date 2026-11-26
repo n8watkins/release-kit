@@ -25,6 +25,7 @@ Without it, `release:check` and CI tell you when a release added or changed a fi
    The same file keeps the repo's other dependencies current; see [Everything else Dependabot updates](#everything-else-dependabot-updates).
 2. **`auto-merge.yml` merges it.**
    apply writes this workflow in every repo, and it merges a patch or minor kit update once the required checks pass, or once every check passes in a repo that can't require checks (merge when green).
+   Dependabot's kit update first waits 3 days after it opens, so a kit release can't reach a repo through Dependabot faster than through the rollout's canary soak.
    A major update or a downgrade waits for you.
    The policy is in [AUTO_MERGE.md](AUTO_MERGE.md).
 3. **When the release adds or changes files, you run apply.**
@@ -63,13 +64,14 @@ The first covers only the kit, in the `release-kit` group above.
 The second covers every other dependency:
 
 - **Version updates, weekly, in two pull requests per ecosystem.**
-  `npm-minor-patch` and `actions-minor-patch` hold the patch and minor updates, which `auto-merge.yml` merges once CI passes, unless one of them is a minor update of a dependency below 1.0.0: then the pull request waits for you with the `needs-review: 0.x minor` label ([AUTO_MERGE.md](AUTO_MERGE.md#the-policy)).
+  `npm-minor-patch` and `actions-minor-patch` hold the patch and minor updates, which `auto-merge.yml` merges once CI passes, unless one of them is a minor update of a dependency below 1.0.0 or an update of a held package (`next`, `wrangler`, ...): then the pull request waits for you with the `needs-review: 0.x minor` or `needs-review: held dependency` label ([AUTO_MERGE.md](AUTO_MERGE.md#the-policy)).
+  A group with a minor update in it first waits until it has been open 3 days ([AUTO_MERGE.md](AUTO_MERGE.md#the-wait)), and an actions group merges only when every action it changes is pinned to a commit SHA.
   `npm-major` and `actions-major` hold the major updates, which wait for you.
   Dependabot proposes each dependency's newest version, so a dependency with a new major is in the major pull request only, not also in the minor one at its newest minor.
   Their commits read `build(deps): ...` (`build(deps-dev): ...` for a dev dependency), like the kit's.
 - **A cooldown:** a new release is proposed after 3 days, and a new npm major after 7 (Dependabot has no per-level cooldown for GitHub Actions), so a broken or malicious release has time to be pulled first.
 - **Security updates as soon as an alert appears**, one pull request per vulnerable dependency, direct or transitive, with no cooldown.
-  `auto-merge.yml` merges a patch or minor one; a major one, or a minor one below 1.0.0, waits for you.
+  `auto-merge.yml` merges a patch one, and a minor one after the 3-day wait; a major one, a minor one below 1.0.0, or one of a held package waits for you.
 
 This matters for transitive vulnerabilities too.
 When a fix needs a new major of a transitive dependency (minimatch 11, say), Dependabot's security update can't force it, and the fix arrives only once the direct dependency that pulls it in releases a version that accepts it.
@@ -92,9 +94,18 @@ On every published release (pre-releases are skipped), [`.github/workflows/rollo
 - **In waves:** the canary repo, then the public repos, then the private ones.
   A wave starts only when every repo in the waves before it succeeded, so a red canary stops the rollout.
 - **Gated on the canary, with no clicks, for a patch or minor release:** after the canary wave, the "Canary merged" job waits up to an hour for the canary's update pull request to pass its checks and merge (it checks that the canary's branch pins the new tag).
-  Only then do the public and private waves start.
   A failed check on that pull request, the pull request closed without merging, or the hour running out stops the rollout.
   On a private canary the App can't read checks, so only the merge or the timeout decides there.
+- **A soak before the other waves:** the rollout run then ends with the job "Later waves wait for the soak".
+  Every hour `rollout-resume.yml` looks at the newest such release, and once the canary has run it for `soakHours` (at the top of `adopters.json`, default 24, 0 for none) and is healthy, it starts Rollout again with stage `later`: the public and private waves.
+  Healthy means the canary's branch still pins the release, and every check on the branch's head commit, the merge or a later commit, has passed.
+  A failed check or a pin that moved away keeps the waves back and opens a `release-kit: rollout` issue (once); fixing the canary is enough, since it keeps looking every hour.
+  Checks still pending, or unreadable (a private canary), a day after the soak count as unhealthy too, so you hear about it.
+  The later waves' run checks the soak and the canary's health again before it opens anything.
+  Nothing is stored: the rollout runs' names and jobs, and the canary's pull request and checks, are the state, and a newer release supersedes an older one still waiting.
+- **When the canary's update never merges:** the run stops at the gate and opens the rollout issue, and the later waves don't start on their own.
+  Fix the cause, merge the canary's pull request, and run Rollout for the tag with stage `later` and dry run off; the soak counts from that merge.
+- **An urgent fix skips the soak:** "Run workflow" with `skip_soak` on runs every wave in one go, the later ones right after the canary merges (or, with stage `later`, at once).
 - **With your approval for a major release:** each wave first waits for one click in the `rollout-major` environment, up to three per release.
   Its update pull requests wait for you to merge them anyway, so there is no merge gate: merge the canary's, then approve the next wave.
 - **Failures come to you as an issue:** when a job in a real rollout fails, the "Report a failure" job opens an issue labeled `release-kit: rollout` in release-kit, or comments on the open one, naming each failed job (a wave's job is named for its repo) with a link to its log.
@@ -137,7 +148,7 @@ A reusable rollout for your own repos, with your own App and a configured bot id
 |---|---|---|
 | Version pins | Dependabot's pull request | Dependabot's pull request, and the bot's |
 | New or changed files | You run `npx release-kit apply .` in each repo | The bot's pull request, one per repo |
-| Merging | `auto-merge.yml`: patch and minor on their own, major and a 0.x minor wait | The same policy |
+| Merging | `auto-merge.yml`: patch on green, minor after 3 days, major, a 0.x minor and held packages wait for you | The bot's pull requests merge on green; the waves after the canary wait out the soak |
 | Your part | Merge majors, run apply when a release adds files | Approve each wave of a major and merge its pull requests; read a `release-kit: rollout` issue if one opens |
 | Setup | Nothing beyond apply | The App, its installs and the `rollout` and `rollout-major` environments |
 | Available to | Anyone | Repos in release-kit's `adopters.json` |

@@ -54,6 +54,7 @@ What the standard changes:
 ### Releases
 
 - `npm run release -- --push` from a clean main that isn't behind origin: `release:check`, bump, changelog section, `chore(release): vX.Y.Z` commit, annotated tag, one atomic push of the branch and the tag. A rejected push undoes the commit and the tag.
+- A release, and a baseline tag, write only after a yes: at a terminal the command shows the version and the notes and asks; with no terminal it stops unless `--yes` is passed (the release train passes it). `--dry-run` never asks.
 - Changelog dates are in the repo's `.release.json` `timeZone` (the machine's zone if unset).
 - The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the notes the release wrote into the tag (the same section as `CHANGELOG.md`), download-and-verify.
 - The same release is written to `releases.json` as data (version, date, tag, structured notes with type, PR and breaking flags), in the release commit, and attached to the GitHub Release; the format is versioned by `schema/releases.v1.json`, so the build log reads it instead of scraping the notes.
@@ -74,7 +75,7 @@ Repos that ship continuously (a website deploying every merge) turn it on with `
 - It runs `release:check` on the exact commit before tagging it, so a red main is never released.
 - It never guesses: no release tag yet, a moved tag or a `package.json` that doesn't match the last tag stops it.
 - GitHub doesn't start workflows from pushes made with a workflow's own token. So the train, as `github-actions[bot]`, pushes its release commit to a temporary branch, starts the workflows listed in `.release.json` `train.checks` there with `workflow_dispatch` (the one trigger that token may use) and waits for them, then pushes `main` and the tag together and makes sure the Release workflow runs on the tag. The full CI runs on exactly what is released.
-- Branch protection doesn't count those `workflow_dispatch` checks, so a protected `main` gets a ruleset that one deploy key may bypass, and the train pushes with that key (`RELEASE_TRAIN_KEY`, set up by `npx release-kit protect`). The train still pushes only after `train.checks` pass.
+- Branch protection doesn't count those `workflow_dispatch` checks, so a protected `main` gets a ruleset that one deploy key may bypass, and the train pushes with that key (`RELEASE_TRAIN_KEY`, set up by `npx release-kit protect`). The train still pushes only after `train.checks` pass. The key's secret lives in the `release-train` environment, which only runs on the default branch may use, never in the repository's secrets, which a workflow on any branch can read; protect and `release-kit check` name any other deploy key that can write, since the bypass covers it too.
 - The train runs only on a schedule or by hand, so nothing it pushes starts it again. The commit check skips bot commits anyway.
 - If main moves while it runs, or a check fails, nothing is released.
 

@@ -50,7 +50,7 @@ test('workflows read by default and grant write only to the jobs that need it', 
   // Only the auto-merge policy touches pull requests.
   for (const file of files) if (!/auto-merge\.yml$/.test(file)) assert.doesNotMatch(read(file), /pull-requests: write/, file)
   // Only the Direct push alarm and the rollout's failure report open issues.
-  for (const file of files) if (!/(direct-push|\/rollout)\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
+  for (const file of files) if (!/(direct-push|\/rollout|\/rollout-resume)\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
 })
 
 test('the auto-merge callers grant every permission the reusable job asks for', () => {
@@ -212,4 +212,16 @@ test('the publish and auto-merge jobs check out the kit scripts the same way', (
   const copies = ['template/.github/workflows/release.yml', '.github/workflows/auto-merge.yml'].flatMap((file) => read(file).match(step))
   assert.equal(copies.length, 2)
   assert.equal(copies[0], copies[1])
+})
+
+test("only the train's cut job may read its key: it alone declares the release-train environment, which protect limits to the default branch", () => {
+  for (const file of ['template/.github/workflows/release-train.yml', '.github/workflows/release-train.yml']) {
+    const jobs = read(file).split(/^jobs:\n/m)[1].split(/^(?= {2}[\w-]+:\n)/m)
+    const declaring = jobs.filter((job) => /^ {4}environment: release-train$/m.test(job)).map((job) => job.split(':')[0].trim())
+    assert.deepEqual(declaring, ['cut'], file)
+    // The key is read only in that job, by the checkout and the push step.
+    for (const job of jobs.filter((j) => !j.startsWith('  cut:'))) assert.doesNotMatch(job, /secrets\.RELEASE_TRAIN_KEY/, file)
+  }
+  // A repo whose key is still a repository secret keeps working: the caller passes it in.
+  assert.match(read('reusable/release-train.yml'), /^ {6}RELEASE_TRAIN_KEY: \$\{\{ secrets\.RELEASE_TRAIN_KEY \}\}$/m)
 })

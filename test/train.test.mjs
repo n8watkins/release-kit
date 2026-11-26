@@ -16,7 +16,7 @@ function adopted() {
   run(KIT, 'node', ['apply.mjs', dev, '--vendored', '--train'])
   run(dev, 'git', ['add', '-A'])
   run(dev, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
-  run(dev, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
+  run(dev, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '--yes'])
   run(dev, 'git', ['remote', 'add', 'origin', join(root, 'remote.git')])
   run(dev, 'git', ['push', '-q', '--no-verify', '--atomic', 'origin', 'main', 'v1.1.0'])
   return { root, dev, remote: join(root, 'remote.git') }

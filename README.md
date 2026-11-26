@@ -108,6 +108,8 @@ npm run release -- --push         # check, bump, changelog, commit, tag and push
 npm run release -- --plan         # what the release train would do now
 ```
 
+`npm run release` shows the version and the notes and asks before it writes anything; with no terminal to ask on (CI, a script) it stops unless you pass `--yes`.
+
 If the repo squash-merges pull requests, make the pull request title the squash commit's message (apply prints the `gh` command; see [template/RELEASING.md](template/RELEASING.md#pull-requests)): the title is what lands on main, and CI checks it.
 
 ## How upgrades reach your repos
@@ -137,8 +139,11 @@ On every published release, `.github/workflows/rollout.yml` in release-kit runs 
 - **Who gets it:** the repos in [adopters.json](adopters.json) with `"enabled": true`, each with the branch to target, its visibility, its wave and how its pull requests merge (`auto-merge`, `merge-when-green` or `person`).
   A repo the bot's GitHub App isn't installed on stays listed with `"enabled": false` and the reason.
 - **In waves:** the canary repo first, then the public repos, then the private ones; a wave starts only when the one before it succeeded, so a red canary stops the rollout.
-- **No clicks for a patch or minor release:** after the canary wave, a gate waits up to an hour for the canary's update pull request to pass its checks and merge, and only then do the other waves start.
-  A failed check, a pull request closed without merging, or the timeout stops the rollout.
+- **No clicks for a patch or minor release, after a soak on the canary:** after the canary wave, a gate waits up to an hour for the canary's update pull request to pass its checks and merge, and the run ends there.
+  `.github/workflows/rollout-resume.yml` looks every hour, and once the canary has run the release for `soakHours` (at the top of `adopters.json`, default 24; 0 turns the soak off) and is healthy, it starts Rollout again for the public and private waves.
+  Healthy means the canary's branch still pins the release and every check on its head commit (the merge, or anything after it) has passed; a failed check or a pin that moved away holds the waves back and opens a `release-kit: rollout` issue.
+  A failed check on the update pull request, a pull request closed without merging, or the hour running out stops the rollout at the canary, and the later waves never start on their own: fix it, merge the canary's pull request, and run Rollout with stage `later` (the soak counts from that merge).
+  For an urgent fix, "Run workflow" with `skip_soak` starts the later waves right after the canary merges.
 - **The owner's approval for a major release:** each wave first waits for one click in the `rollout-major` environment, since a major update waits for a person to merge it anyway.
 - **Failures reach the owner:** when anything in a real rollout fails, a last job opens an issue labeled `release-kit: rollout` in release-kit (or comments on the open one), naming each failed job, which names its repo, with a link to its log.
 - **The key stays put:** the App's ID and key live in the `rollout` environment, which only `main` and `v*` tags may use; `rollout-major` holds only the required reviewer.
@@ -146,7 +151,7 @@ On every published release, `.github/workflows/rollout.yml` in release-kit runs 
   A repo with its own `dependabot.yml` keeps it; apply's notes in the pull request say what to add.
   A rerun updates the same pull request.
 - **Merging:** pull requests opened with an App token run CI like any other, and the `auto-merge.yml` apply writes lists the bot (`release-kit-bot-n8watkins[bot]`) next to Dependabot, so its update merges under the same policy.
-- **By hand:** Actions, Rollout, "Run workflow" takes a tag, an optional list of repos and a dry-run switch (on by default), which shows each pull request in the run summary and pushes nothing.
+- **By hand:** Actions, Rollout, "Run workflow" takes a tag, an optional list of repos, a dry-run switch (on by default), which shows each pull request in the run summary and pushes nothing, a stage (`auto`, or `later` for only the public and private waves once the canary has soaked) and `skip_soak`.
   A dry run that names a disabled adopter checks it too, which shows whether the App is installed there.
 
 Whether a repo needs it, and the App's setup steps, are in [docs/UPGRADES.md](docs/UPGRADES.md).
@@ -164,7 +169,8 @@ Its design is in [docs/ROADMAP.md](docs/ROADMAP.md#8-the-rollout-bot), along wit
   A `versionFiles` entry is a path whose kind comes from its name: a JSON file's top-level `version`, `package-lock.json`, `Cargo.toml` (its `[package]` version) and `Cargo.lock`, `pyproject.toml` (its `[project]` version only, never `[tool.*]` tables) and `uv.lock` (the project's own entry: the one with source editable or virtual `"."`, found by the project's name, or the only such entry when the lock still has an old name).
   Any other file takes `{ "path": "src/app/__init__.py", "pattern": "__version__ = \"(.*)\"" }`: a regular expression with exactly one capture group, the version, which must match the file exactly once (`^` and `$` match at each line); only the captured text changes.
   A release and the tag check stop, before changing anything, on a malformed entry, a pattern that matches nowhere or more than once, or a listed `pyproject.toml` whose `uv.lock` beside it isn't listed; apply warns about each.
-  Optional keys: `releases` (`false` for no `releases.json`, `{ "feed": true }` for an Atom feed too; see [releases.json](#releasesjson)), `stable` (`true` lets a `0.y.z` repo reach 1.0.0, so a breaking change bumps major again; see [Versions before 1.0](#versions-before-10)), `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in), `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`), `visibility` (`"public"` or `"private"`; apply fills it in from gh) and the settings whose defaults depend on it: `security` (`{ "onPullRequest": false }` scans lock-file pull requests or not), `attest` (artifact attestations, once built) and `autoMerge` (`false` stops apply writing `auto-merge.yml`); see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md#settings-for-private-repos).
+  Optional keys: `releases` (`false` for no `releases.json`, `{ "feed": true }` for an Atom feed too; see [releases.json](#releasesjson)), `stable` (`true` lets a `0.y.z` repo reach 1.0.0, so a breaking change bumps major again; see [Versions before 1.0](#versions-before-10)), `node` (the Node version for the workflows, else `.nvmrc` or `.node-version`, else 22), `timeZone` for changelog dates (for example `"America/Los_Angeles"`), `branches` (the branches `npm run release` cuts releases from, default `["main", "master"]`; the Commit messages workflow checks pushes to them too), `notes` (see below), `lanes` (`docs` and `fullFor`, see [CI lanes](#ci-lanes)), `repository` (`owner/repo`, the one repo whose Release and train jobs run; apply fills it in), `protect` (`{ "checks": [...] }`, the required checks for `release-kit protect`), `visibility` (`"public"` or `"private"`; apply fills it in from gh) and the settings whose defaults depend on it: `security` (`{ "onPullRequest": false }` scans lock-file pull requests or not), `attest` (artifact attestations, once built) and `autoMerge` (`false` stops apply writing `auto-merge.yml`; an object sets the wait and the held packages: `minorWaitDays`, default 3, `patchWaitDays`, default 0, `hold` and `unhold`, see [docs/AUTO_MERGE.md](docs/AUTO_MERGE.md#settings)); see [docs/PRIVATE_REPOS.md](docs/PRIVATE_REPOS.md#settings-for-private-repos).
+  [schema/release-config.v1.json](schema/release-config.v1.json) describes every key, for an editor that reads JSON Schema (`"$schema": "https://raw.githubusercontent.com/n8watkins/release-kit/main/schema/release-config.v1.json"`); [schema/adopters.v1.json](schema/adopters.v1.json) does the same for `adopters.json`.
 - In package mode, `allow-git=root` in `.npmrc`, so npm 12 installs the kit (see the npm 12 note above).
 - `package.json` scripts: `release` (an existing `release` script is left alone unless `--force`), `release:check` (composed from whichever of lint, typecheck, test and build the repo has), `prepare`.
 - `RELEASING.md`, and a short section in `AGENTS.md` / `CLAUDE.md` so agents follow the rules.
@@ -282,7 +288,7 @@ With `--train`, a scheduled workflow cuts releases so nobody has to remember:
 1. It finds the commits on `main` since the last `vX.Y.Z` tag.
    With no feature, fix, security or performance change, `revert:` commit or breaking change among them, it stops: nothing to release.
 2. It runs `npm run release:check` on that exact commit.
-3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version>`.
+3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version> --yes` (nobody is there to confirm, and the plan and checks already ran).
 4. With `train.checks` in `.release.json` (`--train-checks ci.yml,commits.yml`), it pushes that commit to a temporary `release-train/vX.Y.Z` branch, starts each listed workflow there and waits for it to pass.
 5. It pushes `main` and the tag in one atomic push, then makes sure the Release workflow runs on the tag.
 
@@ -290,8 +296,10 @@ GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITH
 The same rule means the train can't loop.
 
 GitHub doesn't count checks from `workflow_dispatch` runs toward branch protection, so on a protected `main` the push needs a deploy key the branch's rules let through.
-In a repo with a train, `npx release-kit protect` (see [Protecting the release flow](#protecting-the-release-flow)) makes that key once, stores it as the `RELEASE_TRAIN_KEY` secret, and lets deploy keys bypass the branch rules.
-Note that a ruleset's deploy-key bypass applies to every write deploy key on the repo, not only the train's.
+In a repo with a train, `npx release-kit protect` (see [Protecting the release flow](#protecting-the-release-flow)) makes that key once, stores it as the `RELEASE_TRAIN_KEY` secret of the `release-train` environment, which only runs on the default branch may use, and lets deploy keys bypass the branch rules.
+The train's cut job is the one job that declares the environment, so a workflow pushed on another branch can't read the key; a key an older protect kept as a repository secret keeps working until protect moves it (a new key, then the repository secret is deleted), and `release-kit check` warns until then.
+A ruleset's deploy-key bypass applies to every write deploy key on the repo, not only the train's, so protect and `release-kit check` name any other one.
+A private repo on GitHub Free has no rulesets and no environment secrets: there protect sets up the free safeguards instead, makes no key, and the train pushes with the workflow token to an unprotected `main`.
 
 "Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
 It needs a release tag to start from, so baseline a new repo first.
@@ -331,6 +339,7 @@ Never use workflow-level `paths` filters for this: a required check from a skipp
 
 The kit's reusable `auto-merge.yml` merges release-kit updates and Dependabot patch and minor updates (security ones included) on their own once CI passes; a major update always waits for a person.
 A minor update of a dependency below 1.0.0 waits too, since SemVer lets a 0.x minor break: it gets the `needs-review: 0.x minor` label and a comment saying why, while a 0.x patch still merges on its own.
+A Dependabot minor update first waits until its pull request has been open 3 days (`auto-merge: waiting`; a daily scheduled run merges it once the wait is over), and an update of a package that runs on every request or builds what ships (`next`, `wrangler`, `@opennextjs/*`, `@cloudflare/*` and a few more), or of a GitHub Action not pinned to a commit SHA, always waits for a person (`needs-review: held dependency`).
 It turns on GitHub's auto-merge only when the base branch requires status checks, because without one GitHub would merge before CI finishes.
 A repo that can't require checks (a private repo on GitHub Free) gets a "merge when green" fallback that merges once every check on the pull request has passed.
 apply writes the workflow, and `release-kit protect` allows auto-merge on the repo when it requires checks.
@@ -412,6 +421,9 @@ Tag a past commit with the version its `package.json` had, and publish it as a r
 npm run release -- --baseline <commit> --publish
 git push origin vX.Y.Z
 ```
+
+A commit whose `package.json` has no version (or that has none) takes the version from `--as`: `npm run release -- --baseline <commit> --as 1.6.0`.
+`--as` is refused when that commit's `package.json` says another version.
 
 ## Limits
 

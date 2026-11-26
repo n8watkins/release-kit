@@ -1,0 +1,98 @@
+# Starts the later waves of a rollout once the canary has soaked (rollout.yml).
+#
+# A patch or minor kit release rolls out to the canary first; its rollout run
+# ends with the job "Later waves wait for the soak". Every hour this looks at
+# the newest such release, and once the canary has run it for adopters.json
+# "soakHours" (default 24) and is healthy, it starts Rollout for it with stage
+# "later": the public and private waves.
+#
+# Healthy: the canary's branch still pins the release, and every check on the
+# branch's head commit (the update's merge, or a later commit) has passed. A
+# failed check, or a pin that moved away, opens a "release-kit: rollout" issue
+# once and keeps the waves back; this keeps looking every hour, so fixing the
+# canary is enough. Checks still pending or unreadable a day after the soak
+# count as unhealthy too, so the owner hears about it.
+#
+# Nothing is stored: the rollout runs' names and jobs, and the canary's pull
+# request and checks, are the state. A newer release supersedes an older one
+# still waiting.
+name: Rollout resume
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rollout-resume
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    name: Start the later waves after the soak
+    if: github.repository == 'n8watkins/release-kit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The App's key, to read the canary (a private canary needs it).
+    environment: rollout
+    permissions:
+      contents: read # adopters.json
+      actions: write # read the rollout runs, start rollout.yml
+      issues: write # the "release-kit: rollout" issue when the canary isn't healthy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Find a rollout waiting for its soak
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/rollout.mjs pending
+
+      # Read-only, for the canary repos: their pin, update pull request and checks.
+      - name: Mint a token for the canary
+        id: token
+        if: steps.pending.outputs.tag != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_KIT_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_KIT_BOT_KEY }}
+          owner: ${{ steps.pending.outputs.canary-owner }}
+          repositories: ${{ steps.pending.outputs.canary-names }}
+          permission-contents: read
+          permission-pull-requests: read
+
+      - name: Check the soak and the canary's health
+        id: soak
+        if: steps.pending.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG: ${{ steps.pending.outputs.tag }}
+          CANARIES: ${{ steps.pending.outputs.canaries }}
+          HOURS: ${{ steps.pending.outputs.soak-hours }}
+          GATE_TIME: ${{ steps.pending.outputs.gate-time }}
+        run: node scripts/rollout.mjs soak-check --tag "$TAG" --canaries "$CANARIES" --soak-hours "$HOURS" --gate-time "$GATE_TIME"
+
+      - name: Start the later waves
+        if: steps.soak.outputs.state == 'ready'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pending.outputs.tag }}
+        run: |
+          gh workflow run rollout.yml -R "$GITHUB_REPOSITORY" -f tag="$TAG" -f stage=later -f dry_run=false
+          echo "::notice::Started the later waves of $TAG."
+
+      - name: Report a canary that isn't healthy
+        if: steps.soak.outputs.state == 'unhealthy'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pending.outputs.tag }}
+          WHY: ${{ steps.soak.outputs.why }}
+        run: node scripts/rollout.mjs held --tag "$TAG" --why "$WHY"
