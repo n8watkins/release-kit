@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.11.0 - 2026-11-26
+
+### New
+
+- Safer auto-merge, a soaked rollout, a locked train key, and confirm before release ([#89](https://github.com/n8watkins/release-kit/pull/89))
+
+### Fixed
+
+- A mistyped option can no longer cut a release, and protect no longer dies on large repos ([#88](https://github.com/n8watkins/release-kit/pull/88))
+
 ## 2.10.1 - 2026-11-10
 
 Ships the secret scan from v2.10.0 (#82), whose release failed its checks, and makes 0.x minor dependency updates wait for review.
