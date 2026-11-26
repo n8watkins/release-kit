@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.0 - 2026-11-26
+
+### New
+
+- Stop Dependabot offering TypeScript major updates until lint supports TypeScript 7 ([#91](https://github.com/n8watkins/release-kit/pull/91))
+
 ## 2.11.0 - 2026-11-26
 
 ### New

@@ -4,6 +4,31 @@
   "repository": "n8watkins/release-kit",
   "releases": [
     {
+      "version": "2.12.0",
+      "tag": "v2.12.0",
+      "date": "2026-11-26",
+      "time": "2026-11-26T10:35:24Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.12.0",
+      "previous": "v2.11.0",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Stop Dependabot offering TypeScript major updates until lint supports TypeScript 7",
+          "breaking": false,
+          "pr": 91,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/91",
+          "commit": "edb3b8a2ffa884ba6605b410f98aaf34aa74a9dc",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/edb3b8a2ffa884ba6605b410f98aaf34aa74a9dc"
+        }
+      ],
+      "source": "release",
+      "unattributed": 0
+    },
+    {
       "version": "2.11.0",
       "tag": "v2.11.0",
       "date": "2026-11-26",
