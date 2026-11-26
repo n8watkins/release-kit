@@ -130,7 +130,7 @@ test('end to end: npm run release -- --push goes through the guard; a hand-made 
   // Merged through pull requests, as far as the remote knows.
   run(repo, 'git', ['push', '-q', '--no-verify', 'origin', 'main'])
 
-  const released = attempt(repo, 'node', [join(KIT, 'template/scripts/release-kit/release.mjs'), '--push', '--no-check'])
+  const released = attempt(repo, 'node', [join(KIT, 'template/scripts/release-kit/release.mjs'), '--push', '--no-check', '--whole-history'])
   assert.equal(released.status, 0, released.stderr)
   assert.match(released.stdout, /pushed v1\.1\.0/)
   assert.equal(remoteMain(), run(repo, 'git', ['rev-parse', 'HEAD']).trim())

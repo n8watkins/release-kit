@@ -7,8 +7,10 @@ import { RELEASE_TAG, compareVersions } from './conventional.mjs'
 export { isBot } from './conventional.mjs'
 
 // A repo adopting the kit without a baseline can have years of history in one
-// `git log`; Node's default 1 MB output buffer would cut it off.
-const MAX_OUTPUT = 1024 * 1024 * 1024
+// `git log`; Node's default 1 MB output buffer would cut it off (ENOBUFS). The
+// same goes for a gh API answer: 50 pull requests with their bodies can pass
+// 1 MB, so every git and gh call the kit makes uses this limit.
+export const MAX_OUTPUT = 1024 * 1024 * 1024
 
 export const git = (...args) =>
   execFileSync('git', args, { encoding: 'utf8', maxBuffer: MAX_OUTPUT, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
@@ -34,6 +36,25 @@ export function isCommit(ref) {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Takes back the commit `sha` the kit just made (a release commit), when a
+ * push or a release pull request failed: HEAD returns to its parent with
+ * git reset --keep, which keeps any change made in the working tree
+ * meanwhile, and refuses instead of overwriting one. Throws, saying what to
+ * do, when HEAD is no longer that commit or a local change is in the way.
+ */
+export function undoCommit(sha) {
+  const head = git('rev-parse', 'HEAD')
+  if (head !== sha) {
+    throw new Error(`HEAD is no longer the release commit ${sha.slice(0, 12)} (it is ${head.slice(0, 12)}), so nothing was reset: take the release commit back by hand`)
+  }
+  try {
+    git('reset', '--keep', `${sha}~1`)
+  } catch (error) {
+    throw new Error(`could not take back the release commit ${sha.slice(0, 12)} without touching local changes (${(error.stderr || error.message).trim().split('\n')[0]}): stash them, then run git reset --keep ${sha.slice(0, 12)}~1`)
   }
 }
 

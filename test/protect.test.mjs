@@ -46,7 +46,7 @@ else if (args[0] === 'api') {
   else if (path.startsWith('repos/o/r/rulesets/')) say(state.rulesets.find((r) => String(r.id) === path.split('/').pop()))
   else if (path === 'repos/o/r/branches/main/protection') state.classic ? say(state.classic) : (console.error('gh: Branch not protected (HTTP 404)'), process.exit(1))
   else if (path.startsWith('repos/o/r/branches/')) (state.branches ?? []).includes(decodeURIComponent(path.split('/').pop())) ? say({}) : missing()
-  else if (path.startsWith('repos/o/r/pulls?')) say(state.pulls ?? [])
+  else if (path.startsWith('repos/o/r/pulls?')) say((state.pulls ?? []).map((pull) => ({ ...pull, body: 'x'.repeat(state.bodyBytes ?? 0) })))
   else if (/^repos\\/o\\/r\\/commits\\/\\w+\\/check-runs/.test(path)) say({ check_runs: (state.runs ?? {})[path.split('/')[4]] ?? [] })
   else if (path.startsWith('repos/o/r/actions/runs?check_suite_id=')) say({ workflow_runs: [{ path: (state.suites ?? {})[path.split('=')[1].split('&')[0]] }].filter((r) => r.path) })
   else if (path.startsWith('repos/o/r/contents/')) { const file = decodeURIComponent(path.slice('repos/o/r/contents/'.length).split('?')[0]); (state.workflows ?? {})[file] ? say({ content: Buffer.from(state.workflows[file]).toString('base64') }) : missing() }
@@ -303,4 +303,30 @@ test('check warns when the rulesets drift, and stays quiet when gh cannot tell',
   ])
   // A private repo on GitHub Free: the free safeguards it lacks.
   assert.deepEqual(warn({ private: true }), ["o/r can't have rulesets (private on GitHub Free) and lacks the pre-push guard, active in this clone; the Direct push alarm (.github/workflows/direct-push.yml); merge when green for update pull requests (.github/workflows/auto-merge.yml): npx release-kit protect sets them up"])
+})
+
+test('a gh answer over 1 MB (50 pull requests with long bodies) is read whole, not cut off with ENOBUFS', () => {
+  // net_trailers: the list of closed pull requests was 1.4 MB, so protect --dry-run died with spawnSync gh ENOBUFS.
+  const result = protect(['--dry-run'], { bodyBytes: 400_000 })
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /required checks from the checks that passed on the latest merged pull request, #3/)
+})
+
+test('a workflow indented with four spaces is read like one with two', () => {
+  assert.equal(onlySometimes('name: Security scan\non:\n    pull_request:\n        paths:\n            - "**/package-lock.json"\n    push:\n'), true)
+  assert.equal(onlySometimes('name: CI\non:\n    push:\n        branches: [main]\n    pull_request:\n        paths-ignore: ["docs/**"]\n'), true)
+  assert.equal(onlySometimes('name: CI\non:\n    pull_request:\n        branches: [main]\n    push:\n        paths: ["src/**"]\n'), false)
+})
+
+test('an unknown option, a typo of --dry-run included, stops protect before it asks GitHub anything', () => {
+  for (const args of [['--dryrun'], ['--dry_run'], ['-n'], ['--dry-run', 'extra']]) {
+    const result = protect(args)
+    assert.equal(result.status, 1, args.join(' '))
+    assert.match(result.stderr, /protect: (unknown option|unexpected argument)/, args.join(' '))
+    assert.deepEqual(result.calls, [], args.join(' '))
+  }
+  const help = protect(['--help'])
+  assert.equal(help.status, 0)
+  assert.match(help.stdout, /^Protects a repo's release flow/)
+  assert.deepEqual(help.calls, [])
 })

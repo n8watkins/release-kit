@@ -25,7 +25,8 @@
 // findings without touching issues.
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
-import { isMain } from './git.mjs'
+import { checkArgs } from './cli.mjs'
+import { MAX_OUTPUT, isMain } from './git.mjs'
 import { globToRegExp } from './lanes.mjs'
 import { LABEL, protectedBranches, releaseCommitProblem } from './guard.mjs'
 
@@ -133,6 +134,7 @@ export function report({ findings, notes, runUrl, repo }) {
 
 function main() {
   const args = process.argv.slice(2)
+  checkArgs(args, { name: 'alarm', url: import.meta.url, flags: ['dry-run'], values: ['branches', 'allow-paths'] })
   const valueOf = (name) => {
     const at = args.indexOf(`--${name}`)
     return at === -1 ? '' : (args[at + 1] ?? '')
@@ -145,7 +147,7 @@ function main() {
   const retryMs = Number(process.env.RELEASE_KIT_ALARM_RETRY_MS ?? 10_000)
   if (event.repository?.fork) return console.log('alarm: a fork; nothing to check')
 
-  const gh = (ghArgs, input) => execFileSync('gh', ghArgs, { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] })
+  const gh = (ghArgs, input) => execFileSync('gh', ghArgs, { encoding: 'utf8', input, maxBuffer: MAX_OUTPUT, stdio: ['pipe', 'pipe', 'pipe'] })
   const get = (path) => JSON.parse(gh(['api', '-H', 'Accept: application/vnd.github+json', path]))
   const send = (method, path, body) => JSON.parse(gh(['api', '-X', method, '-H', 'Accept: application/vnd.github+json', path, '--input', '-'], JSON.stringify(body)) || 'null')
   const maybe = (path) => {

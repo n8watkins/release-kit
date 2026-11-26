@@ -361,7 +361,7 @@ test('a bad versionFiles entry stops a release before anything changes, and appl
   // A pattern that no longer matches stops it too, before the bump.
   writeFileSync(join(repo, '.release.json'), JSON.stringify({ versionFiles: ['pyproject.toml', 'uv.lock', { path: 'v.py', pattern: 'VERSION = "(.*)"' }], workflows: 'vendored' }))
   run(repo, 'git', ['commit', '-qam', 'chore: fix config'])
-  const unmatched = attempt(repo, 'node', ['scripts/release-kit/release.mjs', 'minor'])
+  const unmatched = attempt(repo, 'node', ['scripts/release-kit/release.mjs', 'minor', '--whole-history'])
   assert.equal(unmatched.status, 1)
   assert.match(unmatched.stderr, /v\.py: pattern VERSION = "\(\.\*\)" must match exactly once, but matches nowhere/)
   assert.equal(run(repo, 'git', ['status', '--porcelain']), '')

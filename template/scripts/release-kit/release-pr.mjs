@@ -11,7 +11,7 @@
 // pull request is closed, its branch deleted, and the local release commit
 // undone, so a rerun starts clean.
 import { execFileSync } from 'node:child_process'
-import { git } from './git.mjs'
+import { MAX_OUTPUT, git, undoCommit } from './git.mjs'
 
 const MERGEABLE = new Set(['CLEAN', 'HAS_HOOKS', 'UNSTABLE'])
 const PASSED = new Set(['success', 'neutral', 'skipped'])
@@ -145,25 +145,32 @@ export function timeoutReason({ mergeStateStatus }, verdict, minutes) {
 const sleep = (seconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000)
 
 export function releaseThroughPullRequest({ branch, tag, section, timeoutMinutes = 30 }) {
-  const gh = (...args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const gh = (...args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: MAX_OUTPUT, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
   const poll = Number(process.env.RELEASE_KIT_PR_POLL ?? 10)
   const grace = Number(process.env.RELEASE_KIT_PR_GRACE ?? 60)
   const releaseSha = git('rev-parse', 'HEAD')
   const head = `release/${tag}`
   const title = `chore(release): ${tag}`
   const say = (text) => console.log(`release: ${text}`)
+  // The checks can take half an hour, and work may go on in this clone
+  // meanwhile: undoCommit keeps it, where a hard reset would throw it away.
   const undo = () => {
     try {
       git('tag', '--delete', tag)
     } catch {}
-    git('reset', '--hard', 'HEAD~1')
+    try {
+      undoCommit(releaseSha)
+      return 'the release commit undone'
+    } catch (error) {
+      return `the release commit left in place: ${error.message}`
+    }
   }
   const giveUp = (number, reason) => {
     try {
       gh('pr', 'close', String(number), '--delete-branch', '--comment', `Closed by npm run release: ${reason}. Nothing was tagged; fix the cause and release again.`)
     } catch {}
-    undo()
-    throw new Error(`${reason}, so release pull request #${number} was closed and the release commit undone; nothing was tagged`)
+    const undone = undo()
+    throw new Error(`${reason}, so release pull request #${number} was closed and ${undone}; nothing was tagged`)
   }
 
   // The tag is made again on the merged commit.
@@ -171,8 +178,7 @@ export function releaseThroughPullRequest({ branch, tag, section, timeoutMinutes
   try {
     git('push', 'origin', `HEAD:refs/heads/${head}`)
   } catch (error) {
-    git('reset', '--hard', 'HEAD~1')
-    throw new Error(`could not push ${head}: ${error.stderr?.trim() || error.message}`)
+    throw new Error(`could not push ${head}: ${error.stderr?.trim() || error.message}; ${undo()}`)
   }
   const body = [
     `The release commit for ${tag}, made by \`npm run release -- --push\`.`,
@@ -190,8 +196,7 @@ export function releaseThroughPullRequest({ branch, tag, section, timeoutMinutes
     try {
       git('push', 'origin', '--delete', head)
     } catch {}
-    git('reset', '--hard', 'HEAD~1')
-    throw new Error(`could not open the release pull request: ${error.stderr?.trim() || error.message}`)
+    throw new Error(`could not open the release pull request: ${error.stderr?.trim() || error.message}; ${undo()}`)
   }
   const number = Number(/\/pull\/(\d+)/.exec(url)?.[1])
   say(`${branch} takes changes only through pull requests: opened ${url}, waiting for its checks (up to ${timeoutMinutes} minutes)`)

@@ -21,7 +21,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RELEASE_TAG } from './conventional.mjs'
-import { isMain } from './git.mjs'
+import { checkArgs } from './cli.mjs'
+import { MAX_OUTPUT, isMain } from './git.mjs'
 
 const SUMS = 'SHA256SUMS.txt'
 
@@ -48,6 +49,7 @@ export function publishPlan(remote, local) {
 
 function main() {
   const args = process.argv.slice(2)
+  checkArgs(args, { name: 'publish', url: import.meta.url, values: ['tag', 'notes', 'assets'] })
   const valueOf = (name, fallback) => {
     const at = args.indexOf(`--${name}`)
     return at === -1 ? fallback : args[at + 1]
@@ -64,12 +66,12 @@ function main() {
   if (!repo) fail('GITHUB_REPOSITORY is not set (this runs in the Release workflow)')
   if (!existsSync(notes)) fail(`no notes file at ${notes}`)
 
-  const gh = (...ghArgs) => execFileSync('gh', [...ghArgs, '--repo', repo], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const gh = (...ghArgs) => execFileSync('gh', [...ghArgs, '--repo', repo], { encoding: 'utf8', maxBuffer: MAX_OUTPUT, stdio: ['ignore', 'pipe', 'pipe'] })
   const local = existsSync(dir) ? readdirSync(dir).filter((name) => !name.startsWith('.')).sort() : []
   const localSums = local.includes(SUMS) ? readFileSync(join(dir, SUMS), 'utf8') : null
 
   let remote = null
-  const view = spawnSync('gh', ['release', 'view', tag, '--repo', repo, '--json', 'assets'], { encoding: 'utf8' })
+  const view = spawnSync('gh', ['release', 'view', tag, '--repo', repo, '--json', 'assets'], { encoding: 'utf8', maxBuffer: MAX_OUTPUT })
   if (view.status === 0) {
     const assets = JSON.parse(view.stdout).assets.map((asset) => asset.name)
     let sums = null

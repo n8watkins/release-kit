@@ -35,6 +35,13 @@ test('Dependabot metadata, version changes and kit pins are read the way Dependa
   // A security update of a dependency whose version jumps a major.
   assert.deepEqual(dependabotUpdates('fix: bump x\n\n---\nupdated-dependencies:\n- dependency-name: next\n  dependency-type: direct:production\n  update-type: version-update:semver-major\n...\n'), [{ name: 'next', type: 'major', version: null }])
   assert.deepEqual(dependabotUpdates('chore: no metadata'), [])
+  // A scoped package name is quoted in the YAML (net_trailers #74): the name is read without the quotes,
+  // so it matches its "Updates `@libsql/client` from A to B" line and the review comment shows both versions.
+  const scoped = 'build(deps): bump the npm-minor-patch group\n\nUpdates `@libsql/client` from 0.17.0 to 0.18.0\n\n---\nupdated-dependencies:\n- dependency-name: "@libsql/client"\n  dependency-version: 0.18.0\n  dependency-type: direct:production\n  update-type: version-update:semver-minor\n  dependency-group: npm-minor-patch\n...\n'
+  assert.deepEqual(dependabotUpdates(scoped), [{ name: '@libsql/client', type: 'minor', version: '0.18.0' }])
+  const update = classifyUpdate({ dependabot: true, messages: [scoped] })
+  assert.deepEqual(update.belowOne, ['@libsql/client'])
+  assert.match(reviewComment(update), /\| @libsql\/client \| 0\.17\.0 \| 0\.18\.0 \|/)
   assert.equal(semverChange('2.1.0', 'v2.1.3'), 'patch')
   assert.equal(semverChange('v2.1.0', '2.2.0'), 'minor')
   assert.equal(semverChange('2.9.9', '3.0.0'), 'major')

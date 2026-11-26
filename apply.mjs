@@ -45,6 +45,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { entryIn, entryLabel, entryProblem, readVersion, versionFilesProblems } from './template/scripts/release-kit/versions.mjs'
 import { VISIBILITIES, detectVisibility } from './template/scripts/release-kit/settings.mjs'
+import { checkArgs } from './template/scripts/release-kit/cli.mjs'
 
 const KIT = dirname(fileURLToPath(import.meta.url))
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
@@ -72,6 +73,15 @@ const SECURITY_LINE = /^( {6}pull-requests: )\S+( # release-kit: security on pul
 const NPMRC_NOTE = '# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.'
 
 const argv = process.argv.slice(2)
+// An unknown option (--dry-run for --check, say) stops here instead of
+// applying the kit for real.
+checkArgs(argv, {
+  name: 'apply',
+  url: import.meta.url,
+  flags: ['train', 'no-train', 'package', 'reusable', 'vendored', 'force', 'json', 'check'],
+  values: ['schedule', 'kit-ref', 'train-checks', 'repository', 'visibility'],
+  positionals: 1,
+})
 const has = (name) => argv.includes(`--${name}`)
 function valueOf(name) {
   const at = argv.indexOf(`--${name}`)
@@ -302,6 +312,9 @@ const HOOK_LINES = {
 const kitHook = (path) => !exists(path) || /^(#!.*\n)?# release-kit/.test(read(path))
 const usesHusky = existsSync(join(repo, '.husky'))
 const pkg = JSON.parse(read('package.json'))
+// package.json is written back with the indentation it has (four spaces, a
+// tab), so apply changes only what it means to and a rerun finds no drift.
+const pkgIndent = /^([ \t]+)"/m.exec(read('package.json'))?.[1] ?? '  '
 const hookManager = usesHusky ? null : otherHooks()
 for (const source of walk(TEMPLATE)) {
   const path = relative(TEMPLATE, source)
@@ -463,7 +476,7 @@ if (usesHusky) {
   }
   done.push('package.json scripts: prepare (turns on .githooks)')
 }
-write('package.json', `${JSON.stringify(pkg, null, 2)}\n`)
+write('package.json', `${JSON.stringify(pkg, null, pkgIndent)}\n`)
 done.push('package.json scripts: release, release:check')
 
 /**
@@ -518,8 +531,9 @@ function writeAutoMerge() {
     if (!/\.ya?ml$/.test(file) || file === 'auto-merge.yml') continue
     const text = read(`.github/workflows/${file}`)
     const name = /^name:\s*["']?(.+?)["']?\s*$/m.exec(text)?.[1]
-    // A pull_request trigger, in the on: block or an inline on: list.
-    if (name && (/^ {2}pull_request(_target)?:/m.test(text) || /^on:.*\bpull_request\b/m.test(text))) names.push(name)
+    // A pull_request trigger, in the on: block (at any indentation: two
+    // spaces or four) or an inline on: list.
+    if (name && (/^ +pull_request(_target)?:/m.test(text) || /^on:.*\bpull_request\b/m.test(text))) names.push(name)
   }
   writeWorkflow('.github/workflows/auto-merge.yml', autoMergeWorkflow(names, /^[0-9a-f]{40}$/.test(kitRef) ? `${kitRef} # release-kit ${KIT_VERSION}` : kitRef))
 }
@@ -717,8 +731,17 @@ for (const p of agentFiles.length ? agentFiles : ['AGENTS.md']) {
   const current = exists(p) ? read(p) : '# Agent instructions\n'
   const start = current.indexOf(`<!-- ${MARKER} -->`)
   const end = current.indexOf(`<!-- /${MARKER} -->`)
+  const close = `<!-- /${MARKER} -->`
+  // The same rules with other blank lines (a Markdown formatter adds one
+  // after the heading) are up to date: rewriting them would only fight the
+  // formatter, and check would report drift after every commit.
+  const lines = (text) => text.replace(/\r\n?/g, '\n').split('\n').map((line) => line.trimEnd()).filter(Boolean).join('\n')
+  if (start !== -1 && end !== -1 && lines(current.slice(start, end + close.length)) === lines(snippet)) {
+    done.push(`${p}: commit and release rules`)
+    continue
+  }
   const next = start !== -1 && end !== -1
-    ? `${current.slice(0, start)}${snippet.trim()}${current.slice(end + `<!-- /${MARKER} -->`.length)}`
+    ? `${current.slice(0, start)}${snippet.trim()}${current.slice(end + close.length)}`
     : `${current.trimEnd()}\n${snippet}`
   write(p, next)
   done.push(`${p}: commit and release rules`)
