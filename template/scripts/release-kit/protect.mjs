@@ -33,10 +33,18 @@
 //                               commit (see release.mjs).
 //   the release train           with a train in .release.json, a write deploy key
 //                               "release-kit train" may bypass the branch rules;
-//                               its private half is only in the Actions secret
-//                               RELEASE_TRAIN_KEY, and the train pushes with it
+//                               its private half is only in the secret
+//                               RELEASE_TRAIN_KEY of the GitHub environment
+//                               "release-train", which only runs on the default
+//                               branch may use, and the train pushes with it
 //                               only after train.checks pass on the release
-//                               commit. Made once; --rotate-key replaces it.
+//                               commit. Made once; --rotate-key replaces it. A
+//                               key an older protect kept as a repository
+//                               secret, which a workflow on any branch can
+//                               read, moves into the environment: a new key,
+//                               then the repository secret is deleted.
+//                               GitHub lets every write deploy key bypass the
+//                               rules, so protect names any other one.
 //
 // Classic branch protection on those branches is removed last (the rulesets
 // replace it, and a deploy key can't bypass it), so the branch is never
@@ -67,6 +75,8 @@ import { HOOK_MARKER } from './guard.mjs'
 
 export const KEY_TITLE = 'release-kit train'
 export const SECRET = 'RELEASE_TRAIN_KEY'
+/** The environment that holds the train's key: only runs on the default branch get its secrets. */
+export const ENVIRONMENT = 'release-train'
 export const BRANCH_RULESET = 'release-kit: branches'
 export const TAG_RULESET = 'release-kit: release tags'
 // The name protect.mjs used before v2.3.0, for a ruleset on the default branch only.
@@ -372,8 +382,24 @@ export function plan({ api, maybe }, repo, { checks: checksFlag, adminBypass = f
   }
   // Admin-only reads: without them the key is simply made again.
   const keys = train ? quietly(() => api(`repos/${repo}/keys`) ?? [], []) : []
-  const secret = train ? quietly(() => maybe(`repos/${repo}/actions/secrets/${SECRET}`), null) : null
-  const makeKey = train && (rotateKey || !secret || !keys.some((k) => k.title === KEY_TITLE && !k.read_only))
+  // The key's secret lives in the release-train environment, which only the
+  // default branch may deploy to; an older protect kept it in the repository.
+  const envPath = `repos/${repo}/environments/${ENVIRONMENT}`
+  const environment = train ? quietly(() => maybe(envPath), null) : null
+  const policies = environment ? quietly(() => api(`${envPath}/deployment-branch-policies?per_page=100`)?.branch_policies ?? [], []) : []
+  const envSecret = train ? quietly(() => maybe(`${envPath}/secrets/${SECRET}`), null) : null
+  const repoSecret = train ? quietly(() => maybe(`repos/${repo}/actions/secrets/${SECRET}`), null) : null
+  const onlyDefault = Boolean(environment?.deployment_branch_policy?.custom_branch_policies) && !environment.deployment_branch_policy.protected_branches
+    && policies.length === 1 && policies[0].name === branch && (policies[0].type ?? 'branch') === 'branch'
+  const env = train ? {
+    action: !environment ? 'create' : onlyDefault ? 'unchanged' : 'update',
+    // Branch policies other than the default branch go; one for it is added when missing.
+    stale: policies.filter((p) => p.name !== branch || (p.type ?? 'branch') !== 'branch'),
+    addPolicy: !policies.some((p) => p.name === branch && (p.type ?? 'branch') === 'branch'),
+  } : null
+  const makeKey = train && (rotateKey || !envSecret || !keys.some((k) => k.title === KEY_TITLE && !k.read_only))
+  // GitHub's DeployKey bypass covers every deploy key that can write, not only the train's.
+  const otherKeys = train ? keys.filter((k) => k.title !== KEY_TITLE && !k.read_only) : []
   const mergeMethods = [info.allow_merge_commit && 'merge', info.allow_squash_merge && 'squash', info.allow_rebase_merge && 'rebase'].filter(Boolean)
   const wanted = {
     branches: branchRuleset({ branches: extra, checks, mergeMethods, deployKey: train, adminBypass }),
@@ -384,7 +410,18 @@ export function plan({ api, maybe }, repo, { checks: checksFlag, adminBypass = f
   const others = rulesets.filter((r) => r.id !== existing.branches?.id && r.id !== existing.tags?.id)
   // GitHub's auto-merge waits for required checks; without any it would merge at once.
   const allowAutoMerge = checks.length > 0 && !info.allow_auto_merge
-  return { repo, branch, extra, missing, classic, checks, checksFrom, train, makeKey, keys, wanted, existing, others, allowAutoMerge }
+  return { repo, branch, extra, missing, classic, checks, checksFrom, train, makeKey, keys, env, migrate: Boolean(repoSecret), otherKeys, wanted, existing, others, allowAutoMerge }
+}
+
+/** What the release train's key setup needs, in words, for check and protect: [] when nothing. */
+export function trainKeyWarnings(p) {
+  if (!p.train) return []
+  const out = []
+  if (p.migrate) out.push(`${p.repo}: the release train's key is the repository secret ${SECRET}, which any workflow run on any branch can read (a pushed branch can add one): npx release-kit protect moves it into the "${ENVIRONMENT}" environment, which only ${p.branch} may use`)
+  else if (p.env?.action === 'create') out.push(`${p.repo} has no "${ENVIRONMENT}" environment for the release train's key: npx release-kit protect makes it`)
+  if (p.env?.action === 'update') out.push(`${p.repo}: the "${ENVIRONMENT}" environment lets more than ${p.branch} use the train's key: npx release-kit protect limits it to ${p.branch}`)
+  for (const k of p.otherKeys) out.push(`${p.repo}: deploy key "${k.title}" (id ${k.id}) can write, and the ruleset lets every write deploy key bypass it, not only the train's: make it read-only or delete it unless it must push to ${p.branch}`)
+  return out
 }
 
 /**
@@ -410,6 +447,7 @@ export function protectionWarnings({ repo, timeout = 10_000 } = {}) {
       if (!result.existing[key]) warnings.push(`${repo} has no "${name}" ruleset`)
       else for (const d of drift(result.existing[key], result.wanted[key])) warnings.push(`${repo} ruleset "${result.existing[key].name}": ${d}`)
     }
+    warnings.push(...trainKeyWarnings(result))
     if (warnings.length) warnings.push('npx release-kit protect --dry-run shows the fix, and npx release-kit protect applies it')
     return warnings
   } catch (error) {
@@ -476,7 +514,13 @@ function main() {
   }
   console.log(`  required checks from ${p.checksFrom}${p.checks.length ? '' : ': none, so pull requests merge without waiting for CI (pass --checks to name them)'}`)
   if (p.missing.length) console.log(`  .release.json branches not on GitHub, so not protected yet: ${p.missing.join(', ')} (rerun once they exist)`)
-  if (p.train) console.log(`  release train: deploy key "${KEY_TITLE}" and secret ${SECRET}: ${p.makeKey ? 'new' : 'kept (--rotate-key replaces them)'}`)
+  if (p.train) {
+    const envWas = { create: 'create', update: `update (it lets more than ${p.branch} use it now)`, unchanged: 'unchanged' }[p.env.action]
+    console.log(`  release train: environment "${ENVIRONMENT}", which only runs on ${p.branch} may use: ${envWas}`)
+    console.log(`  release train: deploy key "${KEY_TITLE}" and the environment's secret ${SECRET}: ${p.makeKey ? 'new' : 'kept (--rotate-key replaces them)'}`)
+    if (p.migrate) console.log(`  release train: the repository secret ${SECRET}, which a workflow on any branch can read, moves into the environment${p.makeKey ? ' (a secret can\'t be read back, so the key is new)' : ''}: deleted once the environment has the key`)
+    for (const k of p.otherKeys) console.log(`  warning: deploy key "${k.title}" (id ${k.id}) can write, and the ruleset lets every write deploy key bypass it, not only the train's: make it read-only or delete it unless it must push to ${p.branch}`)
+  }
   if (p.classic) console.log(`  classic branch protection on ${p.branch}: removed after the rulesets are active`)
   if (p.allowAutoMerge) console.log('  allow auto-merge: on, so update pull requests merge once the required checks pass (.github/workflows/auto-merge.yml)')
   for (const other of p.others) console.log(`  another ruleset, left alone: "${other.name}" (${other.target}, ${other.enforcement})`)
@@ -489,7 +533,15 @@ function main() {
     else github.api(`repos/${repo}/rulesets/${live.id}`, { method: 'PUT', body: wanted })
   }
 
-  // 2. The train's key: only its public half is left on this machine, and only briefly.
+  // 2. The environment that holds the key: only the default branch may use it.
+  const envPath = `repos/${repo}/environments/${ENVIRONMENT}`
+  if (p.train && p.env.action !== 'unchanged') {
+    github.api(envPath, { method: 'PUT', body: { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } } })
+    for (const stale of p.env.stale) github.api(`${envPath}/deployment-branch-policies/${stale.id}`, { method: 'DELETE' })
+    if (p.env.addPolicy) github.api(`${envPath}/deployment-branch-policies`, { method: 'POST', body: { name: p.branch, type: 'branch' } })
+  }
+
+  // 3. The train's key: only its public half is left on this machine, and only briefly.
   if (p.makeKey) {
     const dir = mkdtempSync(join(tmpdir(), 'release-kit-key-'))
     try {
@@ -497,16 +549,22 @@ function main() {
       execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', KEY_TITLE, '-f', file])
       for (const key of p.keys) if (key.title === KEY_TITLE) github.api(`repos/${repo}/keys/${key.id}`, { method: 'DELETE' })
       github.api(`repos/${repo}/keys`, { method: 'POST', body: { title: KEY_TITLE, key: readFileSync(`${file}.pub`, 'utf8').trim(), read_only: false } })
-      github.gh(['secret', 'set', SECRET, '--repo', repo], readFileSync(file, 'utf8'))
+      github.gh(['secret', 'set', SECRET, '--env', ENVIRONMENT, '--repo', repo], readFileSync(file, 'utf8'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   }
 
-  // 3. Classic protection would still reject the deploy key.
+  // 4. The old repository secret, readable from any branch, goes once the environment has the key.
+  if (p.migrate) {
+    github.gh(['secret', 'delete', SECRET, '--repo', repo])
+    console.log(`protect: moved ${SECRET} from the repository's secrets into the "${ENVIRONMENT}" environment`)
+  }
+
+  // 5. Classic protection would still reject the deploy key.
   if (p.classic) github.api(`repos/${repo}/branches/${encodeURIComponent(p.branch)}/protection`, { method: 'DELETE' })
 
-  // 4. Auto-merge, now that the branch requires checks.
+  // 6. Auto-merge, now that the branch requires checks.
   if (p.allowAutoMerge) github.api(`repos/${repo}`, { method: 'PATCH', body: { allow_auto_merge: true } })
   console.log('protect: done')
 }

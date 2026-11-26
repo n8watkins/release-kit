@@ -292,8 +292,10 @@ GitHub starts no workflow for a tag or commit pushed with a workflow's own `GITH
 The same rule means the train can't loop.
 
 GitHub doesn't count checks from `workflow_dispatch` runs toward branch protection, so on a protected `main` the push needs a deploy key the branch's rules let through.
-In a repo with a train, `npx release-kit protect` (see [Protecting the release flow](#protecting-the-release-flow)) makes that key once, stores it as the `RELEASE_TRAIN_KEY` secret, and lets deploy keys bypass the branch rules.
-Note that a ruleset's deploy-key bypass applies to every write deploy key on the repo, not only the train's.
+In a repo with a train, `npx release-kit protect` (see [Protecting the release flow](#protecting-the-release-flow)) makes that key once, stores it as the `RELEASE_TRAIN_KEY` secret of the `release-train` environment, which only runs on the default branch may use, and lets deploy keys bypass the branch rules.
+The train's cut job is the one job that declares the environment, so a workflow pushed on another branch can't read the key; a key an older protect kept as a repository secret keeps working until protect moves it (a new key, then the repository secret is deleted), and `release-kit check` warns until then.
+A ruleset's deploy-key bypass applies to every write deploy key on the repo, not only the train's, so protect and `release-kit check` name any other one.
+A private repo on GitHub Free has no rulesets and no environment secrets: there protect sets up the free safeguards instead, makes no key, and the train pushes with the workflow token to an unprotected `main`.
 
 "Run workflow" on the train takes a bump (`auto`, `patch`, `minor`, `major`) and a dry-run switch.
 It needs a release tag to start from, so baseline a new repo first.

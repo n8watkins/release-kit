@@ -15,7 +15,8 @@
 //    push is rejected and nothing is released. Branch protection doesn't
 //    count checks from runs started with workflow_dispatch, so a protected
 //    main only accepts the push from the train's deploy key (protect.mjs),
-//    which the checkout sets up when the RELEASE_TRAIN_KEY secret exists.
+//    which the checkout sets up when the RELEASE_TRAIN_KEY secret exists (in
+//    the release-train environment, which only the default branch may use).
 // 4. Makes sure the Release workflow runs on the tag: a tag pushed with the
 //    deploy key starts it by itself; one pushed with the token doesn't, so the
 //    train starts it.

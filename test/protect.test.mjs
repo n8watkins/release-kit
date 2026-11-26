@@ -30,7 +30,7 @@ const { appendFileSync, readFileSync } = require('node:fs')
 const args = process.argv.slice(2)
 const env = process.env
 const state = JSON.parse(env.FAKE_STATE)
-const input = args.includes('--input') || args[0] === 'secret' ? readFileSync(0, 'utf8') : ''
+const input = args.includes('--input') || (args[0] === 'secret' && args[1] === 'set') ? readFileSync(0, 'utf8') : ''
 appendFileSync(env.FAKE_GH_LOG, JSON.stringify({ args, input }) + '\\n')
 const say = (value) => process.stdout.write(JSON.stringify(value))
 const missing = () => { console.error('gh: Not Found (HTTP 404)'); process.exit(1) }
@@ -52,6 +52,9 @@ else if (args[0] === 'api') {
   else if (path.startsWith('repos/o/r/contents/')) { const file = decodeURIComponent(path.slice('repos/o/r/contents/'.length).split('?')[0]); (state.workflows ?? {})[file] ? say({ content: Buffer.from(state.workflows[file]).toString('base64') }) : missing() }
   else if (path === 'repos/o/r/keys') say(state.keys ?? [])
   else if (path === 'repos/o/r/actions/secrets/RELEASE_TRAIN_KEY') state.secret ? say({ name: 'RELEASE_TRAIN_KEY' }) : missing()
+  else if (path === 'repos/o/r/environments/release-train') state.env ? say(state.env) : missing()
+  else if (path.startsWith('repos/o/r/environments/release-train/deployment-branch-policies')) say({ total_count: (state.envPolicies ?? []).length, branch_policies: state.envPolicies ?? [] })
+  else if (path === 'repos/o/r/environments/release-train/secrets/RELEASE_TRAIN_KEY') state.envSecret ? say({ name: 'RELEASE_TRAIN_KEY' }) : missing()
   else missing()
 }
 `
@@ -78,7 +81,9 @@ function protect(args = [], state = {}, config = {}) {
 }
 
 const writes = (calls) => calls.filter(({ args }) => args[0] === 'secret' || (args[0] === 'api' && args[args.indexOf('-X') + 1] !== 'GET'))
-const describe = ({ args }) => (args[0] === 'secret' ? `secret ${args[2]}` : `${args[args.indexOf('-X') + 1]} ${args.find((a) => a.startsWith('repos/'))}`)
+const describe = ({ args }) => (args[0] === 'secret' ? `secret ${args[1]} ${args[2]}${args.includes('--env') ? ` --env ${args[args.indexOf('--env') + 1]}` : ''}` : `${args[args.indexOf('-X') + 1]} ${args.find((a) => a.startsWith('repos/'))}`)
+// The release-train environment as protect leaves it: only main may use it.
+const TRAIN_ENV = { env: { name: 'release-train', deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }, envPolicies: [{ id: 3, name: 'main', type: 'branch' }] }
 const CHECKS = [{ context: 'CI result', integration_id: 15368 }, { context: 'check / check', integration_id: 15368 }]
 
 test('the required checks are the GitHub Actions checks that passed on the latest merged pull request', () => {
@@ -162,27 +167,32 @@ test('with a train it adds the deploy key and its bypass, then moves off classic
   assert.deepEqual(done.map(describe), [
     'POST repos/o/r/rulesets',
     'POST repos/o/r/rulesets',
+    'PUT repos/o/r/environments/release-train',
+    'POST repos/o/r/environments/release-train/deployment-branch-policies',
     'DELETE repos/o/r/keys/7',
     'POST repos/o/r/keys',
-    'secret RELEASE_TRAIN_KEY',
+    'secret set RELEASE_TRAIN_KEY --env release-train',
     'DELETE repos/o/r/branches/main/protection',
     'PATCH repos/o/r',
   ])
+  // The environment: only main may use its secret.
+  assert.deepEqual(JSON.parse(done[2].input), { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } })
+  assert.deepEqual(JSON.parse(done[3].input), { name: 'main', type: 'branch' })
   assert.deepEqual(JSON.parse(done[0].input).bypass_actors, [{ actor_type: 'DeployKey', bypass_mode: 'always' }])
   // A write key whose private half went only to the secret, and nothing left on disk.
-  const key = JSON.parse(done[3].input)
+  const key = JSON.parse(done[5].input)
   assert.equal(key.title, 'release-kit train')
   assert.equal(key.read_only, false)
   assert.match(key.key, /^ssh-ed25519 \S+ release-kit train$/)
-  assert.match(done[4].input, /^-----BEGIN OPENSSH PRIVATE KEY-----\n/)
-  assert.ok(!result.calls.some(({ input }) => input.includes('PRIVATE KEY') && input !== done[4].input))
+  assert.match(done[6].input, /^-----BEGIN OPENSSH PRIVATE KEY-----\n/)
+  assert.ok(!result.calls.some(({ input }) => input.includes('PRIVATE KEY') && input !== done[6].input))
   assert.deepEqual(result.leftovers, [])
 })
 
 test('a rerun changes only what drifted: the legacy ruleset is renamed in place, a working key is kept', () => {
   const legacy = { ...branchRuleset({ checks: CHECKS, mergeMethods: ['squash'], deployKey: true, adminBypass: true }), id: 42, name: 'release-kit: protect main' }
   const tags = { id: 43, ...tagRuleset() }
-  const state = { rulesets: [legacy, tags, { id: 50, name: 'Mine', target: 'branch', enforcement: 'active' }], keys: [{ id: 7, title: 'release-kit train', read_only: false }], secret: true, allowAutoMerge: true }
+  const state = { rulesets: [legacy, tags, { id: 50, name: 'Mine', target: 'branch', enforcement: 'active' }], keys: [{ id: 7, title: 'release-kit train', read_only: false }], envSecret: true, ...TRAIN_ENV, allowAutoMerge: true }
   const result = protect([], state, { train: {} })
   assert.equal(result.status, 0, result.stderr)
   assert.deepEqual(writes(result.calls).map(describe), ['PUT repos/o/r/rulesets/42'])
@@ -329,4 +339,91 @@ test('an unknown option, a typo of --dry-run included, stops protect before it a
   assert.equal(help.status, 0)
   assert.match(help.stdout, /^Protects a repo's release flow/)
   assert.deepEqual(help.calls, [])
+})
+
+// The train key (F7): its secret lives in the release-train environment, which
+// only main may use, not in the repository, where a workflow on any branch can
+// read it; and every other write deploy key is named, since the ruleset's
+// deploy-key bypass covers them all.
+const TRAINED = { rulesets: [{ id: 42, ...branchRuleset({ checks: CHECKS, mergeMethods: ['squash'], deployKey: true }) }, { id: 43, ...tagRuleset() }], keys: [{ id: 7, title: 'release-kit train', read_only: false }], allowAutoMerge: true }
+
+test('a train key kept as a repository secret moves into the release-train environment: a new key, then the old secret goes', () => {
+  // net_trailers today: the key and its repository secret, no environment.
+  const state = { ...TRAINED, secret: true }
+  const dry = protect(['--dry-run'], state, { train: {} })
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.deepEqual(writes(dry.calls), [])
+  assert.match(dry.stdout, /release train: environment "release-train", which only runs on main may use: create\n/)
+  assert.match(dry.stdout, /deploy key "release-kit train" and the environment's secret RELEASE_TRAIN_KEY: new\n/)
+  assert.match(dry.stdout, /the repository secret RELEASE_TRAIN_KEY, which a workflow on any branch can read, moves into the environment \(a secret can't be read back, so the key is new\): deleted once the environment has the key/)
+
+  const result = protect([], state, { train: {} })
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(writes(result.calls).map(describe), [
+    'PUT repos/o/r/environments/release-train',
+    'POST repos/o/r/environments/release-train/deployment-branch-policies',
+    'DELETE repos/o/r/keys/7',
+    'POST repos/o/r/keys',
+    'secret set RELEASE_TRAIN_KEY --env release-train',
+    'secret delete RELEASE_TRAIN_KEY',
+  ])
+  assert.match(result.stdout, /moved RELEASE_TRAIN_KEY from the repository's secrets into the "release-train" environment/)
+  // The private key went to the environment only.
+  const secrets = result.calls.filter(({ input }) => input.includes('PRIVATE KEY'))
+  assert.equal(secrets.length, 1)
+  assert.deepEqual(secrets[0].args.slice(0, 5), ['secret', 'set', 'RELEASE_TRAIN_KEY', '--env', 'release-train'])
+  assert.deepEqual(result.leftovers, [])
+
+  // Half done before (both secrets there): the key is kept, and only the repository secret goes.
+  const half = protect([], { ...state, envSecret: true, ...TRAIN_ENV }, { train: {} })
+  assert.deepEqual(writes(half.calls).map(describe), ['secret delete RELEASE_TRAIN_KEY'])
+  // Done: a rerun changes nothing.
+  const done = protect([], { ...TRAINED, envSecret: true, ...TRAIN_ENV }, { train: {} })
+  assert.deepEqual(writes(done.calls).map(describe), [])
+  assert.match(done.stdout, /environment "release-train", which only runs on main may use: unchanged/)
+})
+
+test('an environment that lets other branches use the key is limited to the default branch', () => {
+  const loose = { env: { name: 'release-train', deployment_branch_policy: null }, envPolicies: [] }
+  const any = protect([], { ...TRAINED, envSecret: true, ...loose }, { train: {} })
+  assert.equal(any.status, 0, any.stderr)
+  assert.match(any.stdout, /environment "release-train", which only runs on main may use: update \(it lets more than main use it now\)/)
+  assert.deepEqual(writes(any.calls).map(describe), ['PUT repos/o/r/environments/release-train', 'POST repos/o/r/environments/release-train/deployment-branch-policies'])
+  // A policy for another branch, or a tag, goes; main's is kept.
+  const extra = { env: TRAIN_ENV.env, envPolicies: [{ id: 3, name: 'main', type: 'branch' }, { id: 4, name: 'feature/*', type: 'branch' }, { id: 5, name: 'v*', type: 'tag' }] }
+  const trimmed = protect([], { ...TRAINED, envSecret: true, ...extra }, { train: {} })
+  assert.deepEqual(writes(trimmed.calls).map(describe), ['PUT repos/o/r/environments/release-train', 'DELETE repos/o/r/environments/release-train/deployment-branch-policies/4', 'DELETE repos/o/r/environments/release-train/deployment-branch-policies/5'])
+  // Without a train there is no key, so no environment either.
+  const none = protect(['--dry-run'], { ...TRAINED, rulesets: [] })
+  assert.doesNotMatch(none.stdout, /release-train/)
+})
+
+test('protect and check name every other deploy key that can write, since the bypass lets each of them past the rules', () => {
+  const keys = [{ id: 7, title: 'release-kit train', read_only: false }, { id: 8, title: 'deploy bot', read_only: false }, { id: 9, title: 'mirror', read_only: true }]
+  const state = { ...TRAINED, keys, envSecret: true, ...TRAIN_ENV }
+  const result = protect(['--dry-run'], state, { train: {} })
+  assert.match(result.stdout, /warning: deploy key "deploy bot" \(id 8\) can write, and the ruleset lets every write deploy key bypass it, not only the train's: make it read-only or delete it unless it must push to main/)
+  assert.doesNotMatch(result.stdout, /"mirror"/)
+
+  const dir = tmp('protect-check-keys')
+  writeFileSync(join(dir, '.release.json'), JSON.stringify({ train: {} }))
+  const warn = (s) => {
+    const gh = fakeGh({ pulls: PULLS, runs: RUNS, ...s })
+    const saved = { cwd: process.cwd(), env: { ...process.env } }
+    try {
+      process.chdir(dir)
+      Object.assign(process.env, gh.env)
+      return protectionWarnings({ repo: 'o/r' })
+    } finally {
+      process.chdir(saved.cwd)
+      process.env = saved.env
+    }
+  }
+  assert.deepEqual(warn(state), [
+    'o/r: deploy key "deploy bot" (id 8) can write, and the ruleset lets every write deploy key bypass it, not only the train\'s: make it read-only or delete it unless it must push to main',
+    'npx release-kit protect --dry-run shows the fix, and npx release-kit protect applies it',
+  ])
+  // check says when the key is still a repository secret, and when nothing needs doing.
+  assert.match(warn({ ...TRAINED, secret: true }).join('\n'), /^o\/r: the release train's key is the repository secret RELEASE_TRAIN_KEY, which any workflow run on any branch can read \(a pushed branch can add one\): npx release-kit protect moves it into the "release-train" environment, which only main may use$/m)
+  assert.deepEqual(warn({ ...TRAINED, envSecret: true, ...TRAIN_ENV }), [])
 })

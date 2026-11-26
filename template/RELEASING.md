@@ -133,7 +133,9 @@ Its schedule is in `.release.json` (`train.schedule`, a cron line in UTC).
 
 GitHub doesn't count checks from runs started with `workflow_dispatch`, the only runs the train's token can start.
 So on a `main` protected by required checks, the train's push is rejected even though `train.checks` passed on that exact commit.
-The fix is a deploy key that the branch's rules let through, stored as the `RELEASE_TRAIN_KEY` secret; the train's checkout pushes with it when it exists.
+The fix is a deploy key that the branch's rules let through, stored as the `RELEASE_TRAIN_KEY` secret of the `release-train` environment; the train's checkout pushes with it when it exists.
+Only runs on the default branch may use that environment, and the train's cut job is the one job that declares it, so a workflow someone pushes on another branch, or adds in a pull request, can't read the key.
+A key an older protect kept as a repository secret, which any workflow on any branch can read, still works until `npx release-kit protect` moves it: protect makes a new key (a secret can't be read back), stores it in the environment and deletes the repository secret, and `npm run release:check` warns until then.
 The train still runs `train.checks` first and pushes only when they pass, so the key never lets an unchecked commit onto `main`.
 A tag pushed with the key starts the Release workflow by itself, and pushing `main` with it runs CI there as usual.
 `npx release-kit protect` (see [Protecting the branch and the tags](#protecting-the-branch-and-the-tags)) makes the key, once, in a repo with a train.
@@ -174,6 +176,7 @@ Releases still work:
   If a gating check fails, or a required check never reports before `--pr-timeout`, it closes the pull request and undoes the release commit, so nothing is tagged.
   `--via-pr` goes straight to the pull request, and `npm run release -- --dry-run --push` says which path it will take.
 - With a release train, the train's deploy key may bypass the branch rules (see [A protected main](#a-protected-main)); `--rotate-key` replaces the key.
+  GitHub lets every deploy key with write access bypass, not only the train's, so protect and `npm run release:check` name any other write deploy key on the repo: make it read-only or delete it unless it must push to `main`.
 - `--admin-bypass` lets repository admins push straight to the branch again, for a repo that wants that trade-off.
 
 `npm run release:check` warns when the rulesets drift from what protect would set (a rule removed by hand, a different bypass list, other required checks than `.release.json` names), whenever gh can read them.

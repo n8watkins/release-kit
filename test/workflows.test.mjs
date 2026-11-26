@@ -213,3 +213,15 @@ test('the publish and auto-merge jobs check out the kit scripts the same way', (
   assert.equal(copies.length, 2)
   assert.equal(copies[0], copies[1])
 })
+
+test("only the train's cut job may read its key: it alone declares the release-train environment, which protect limits to the default branch", () => {
+  for (const file of ['template/.github/workflows/release-train.yml', '.github/workflows/release-train.yml']) {
+    const jobs = read(file).split(/^jobs:\n/m)[1].split(/^(?= {2}[\w-]+:\n)/m)
+    const declaring = jobs.filter((job) => /^ {4}environment: release-train$/m.test(job)).map((job) => job.split(':')[0].trim())
+    assert.deepEqual(declaring, ['cut'], file)
+    // The key is read only in that job, by the checkout and the push step.
+    for (const job of jobs.filter((j) => !j.startsWith('  cut:'))) assert.doesNotMatch(job, /secrets\.RELEASE_TRAIN_KEY/, file)
+  }
+  // A repo whose key is still a repository secret keeps working: the caller passes it in.
+  assert.match(read('reusable/release-train.yml'), /^ {6}RELEASE_TRAIN_KEY: \$\{\{ secrets\.RELEASE_TRAIN_KEY \}\}$/m)
+})
