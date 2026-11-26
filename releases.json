@@ -4,6 +4,42 @@
   "repository": "n8watkins/release-kit",
   "releases": [
     {
+      "version": "2.11.0",
+      "tag": "v2.11.0",
+      "date": "2026-11-26",
+      "time": "2026-11-26T09:33:18Z",
+      "url": "https://github.com/n8watkins/release-kit/releases/tag/v2.11.0",
+      "previous": "v2.10.1",
+      "summary": null,
+      "breaking": false,
+      "notes": [
+        {
+          "section": "new",
+          "type": "feat",
+          "scope": null,
+          "text": "Safer auto-merge, a soaked rollout, a locked train key, and confirm before release",
+          "breaking": false,
+          "pr": 89,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/89",
+          "commit": "ea24341216fedd38ba96eda6c055e2bd9b214ff4",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/ea24341216fedd38ba96eda6c055e2bd9b214ff4"
+        },
+        {
+          "section": "fixed",
+          "type": "fix",
+          "scope": null,
+          "text": "A mistyped option can no longer cut a release, and protect no longer dies on large repos",
+          "breaking": false,
+          "pr": 88,
+          "prUrl": "https://github.com/n8watkins/release-kit/pull/88",
+          "commit": "b0163a27275f59d26a003f061909397f46becbab",
+          "commitUrl": "https://github.com/n8watkins/release-kit/commit/b0163a27275f59d26a003f061909397f46becbab"
+        }
+      ],
+      "source": "release",
+      "unattributed": 0
+    },
+    {
       "version": "2.10.1",
       "tag": "v2.10.1",
       "date": "2026-11-10",
