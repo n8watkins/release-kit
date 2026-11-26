@@ -46,6 +46,7 @@ import { fileURLToPath } from 'node:url'
 import { entryIn, entryLabel, entryProblem, readVersion, versionFilesProblems } from './template/scripts/release-kit/versions.mjs'
 import { VISIBILITIES, detectVisibility } from './template/scripts/release-kit/settings.mjs'
 import { checkArgs } from './template/scripts/release-kit/cli.mjs'
+import { autoMergePolicy } from './template/scripts/release-kit/automerge.mjs'
 
 const KIT = dirname(fileURLToPath(import.meta.url))
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
@@ -70,7 +71,9 @@ const ALARM_BRANCHES_LINE = /^( {6}branches: )"[^"\n]*"( # release-kit: branches
 const ALARM_DELETE_FILTER = "format(',main,master,{0},'"
 // The security scan's pull request setting: the caller's input, or the vendored copy's default.
 const SECURITY_LINE = /^( {6}pull-requests: )\S+( # release-kit: security on pull requests)$/m
-const NPMRC_NOTE = '# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.'
+// When the auto-merge workflow looks again at update pull requests that wait (UTC, daily).
+const AUTO_MERGE_SCHEDULE = '37 7 * * *'
+const NPMRC_NOTE ='# release-kit: npm 12 installs git dependencies (the kit is one) only when allowed.'
 
 const argv = process.argv.slice(2)
 // An unknown option (--dry-run for --check, say) stops here instead of
@@ -398,6 +401,7 @@ if (reusable && /^v\d+\.\d+\.\d+$/.test(kitRef) && exists('.github/workflows')) 
 // through GitHub's auto-merge where the branch requires checks, else (a private
 // repo on GitHub Free) through the merge-when-green fallback.
 if (config.autoMerge !== false) writeAutoMerge()
+for (const problem of autoMergePolicy(config.autoMerge).problems) skipped.push(`.release.json ${problem}`)
 
 // The workflows use npm ci and npm caching, which need npm's lock file.
 const otherLock = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'].find(exists)
@@ -494,7 +498,10 @@ function autoMergeWorkflow(workflowNames, ref) {
 # GitHub Free), the merge-when-green fallback merges it once every check on it
 # has passed. workflow_run lists every workflow that runs on pull requests, so
 # the one that finishes last still triggers a look; rerun npx release-kit
-# apply . after adding one. "autoMerge": false in .release.json turns it off.
+# apply . after adding one. A Dependabot minor update waits a few days first,
+# and some packages always wait for a person (.release.json "autoMerge"); the
+# daily schedule looks again, so one that has waited long enough merges
+# without a new push. "autoMerge": false in .release.json turns it all off.
 name: Auto-merge
 
 on:
@@ -502,6 +509,9 @@ on:
   workflow_run:
     workflows: [${workflowNames.map((n) => JSON.stringify(n)).join(', ')}]
     types: [completed]
+  schedule:
+    - cron: "${AUTO_MERGE_SCHEDULE}" # release-kit: look again at waiting update pull requests
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -513,6 +523,7 @@ jobs:
       (github.event_name == 'pull_request' && (github.event.pull_request.user.login == 'dependabot[bot]' || startsWith(github.head_ref, 'release-kit/')))
       || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
           && (github.event.workflow_run.actor.login == 'dependabot[bot]' || startsWith(github.event.workflow_run.head_branch, 'release-kit/')))
+      || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write # merge the pull request
       pull-requests: write # turn on auto-merge

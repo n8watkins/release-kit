@@ -162,6 +162,7 @@ The required checks are, in order: `--checks "CI result,check / check"`, `"prote
 That last way leaves out workflows that run on only some pull requests (a `paths` filter, like the security scan's, or auto-merge), and in a workflow with a `CI result` job (see CI lanes) only that job is required, since it stands for the others.
 
 When it requires checks, protect also allows auto-merge on the repo, so `.github/workflows/auto-merge.yml` can merge release-kit updates and Dependabot patch and minor updates once those checks pass; a major update waits for a person, and so does a minor update of a dependency below 1.0.0 (labeled `needs-review: 0.x minor`), since SemVer lets a 0.x minor break.
+A Dependabot minor update first waits 3 days after its pull request opens (labeled `auto-merge: waiting`), and an update of a held package (`next`, `wrangler`, `@opennextjs/*`, `@cloudflare/*`, ...) or of a GitHub Action not pinned to a commit SHA waits for a person (labeled `needs-review: held dependency`); `.release.json` `autoMerge` changes both.
 The required checks should cover all of CI: GitHub's auto-merge waits for nothing else.
 
 Nobody bypasses the branch rules, admins included, so a coding agent signed in as an admin can't push to `main` either.

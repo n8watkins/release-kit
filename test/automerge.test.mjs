@@ -5,8 +5,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { KIT, attempt, tmp } from './helpers.mjs'
-import { REVIEW_LABEL, alreadyMergeable, checksState, classifyUpdate, decide, dependabotUpdates, dependabotVersions, kitVersion, majorOf, reviewComment, semverChange, versionChange } from '../template/scripts/release-kit/automerge.mjs'
+import { KIT, attempt, makeRepo, run, tmp } from './helpers.mjs'
+import { DEFAULT_HOLD, HOLD_LABEL, REVIEW_LABEL, WAIT_LABEL, addedActionRefs, alreadyMergeable, autoMergePolicy, checksState, classifyUpdate, decide, dependabotUpdates, dependabotVersions, heldBy, holdComment, kitVersion, majorOf, matchesHold, reviewComment, semverChange, versionChange, waitComment, waitFor } from '../template/scripts/release-kit/automerge.mjs'
 
 // A Dependabot commit message as Dependabot writes it (a grouped update).
 const DEPENDABOT = `build(deps): bump the release-kit group with 2 updates
@@ -118,14 +118,20 @@ process.stdout.write(JSON.stringify(answer[1]))
 const b64 = (text) => Buffer.from(text).toString('base64')
 const pkg = (version) => ({ content: b64(JSON.stringify({ devDependencies: { 'release-kit': `github:n8watkins/release-kit#v${version}` } })) })
 
-function automerge({ summary, event = 'pull_request', from = '2.1.0', to = '2.2.0', rules = [], allowAutoMerge = true, runs = [], payload, commits, body = null, headRef = 'dependabot/npm_and_yarn/release-kit', labels = [], comments = [] } = {}) {
+// Opened ten days ago unless a test says otherwise, so the minor wait (3 days by default) is over.
+const DAYS_AGO = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+
+function automerge({ summary, event = 'pull_request', from = '2.1.0', to = '2.2.0', rules = [], allowAutoMerge = true, runs = [], payload, commits, body = null, headRef = 'dependabot/npm_and_yarn/release-kit', labels = [], comments = [], createdAt = DAYS_AGO(10), autoMerge = null, config, author = 'dependabot[bot]', files, open } = {}) {
   const dir = tmp('automerge')
   writeFileSync(join(dir, 'gh'), FAKE_GH, { mode: 0o755 })
   const state = {
     'repos/o/r/pulls/7/commits': commits ?? [{ commit: { message: DEPENDABOT.replaceAll('semver-minor', semverChange(from, to) ? `semver-${semverChange(from, to)}` : 'semver-minor') } }],
     'repos/o/r/issues/7/comments': comments,
     'repos/o/r/issues/7/labels': [],
-    'repos/o/r/pulls/7': { number: 7, state: 'open', draft: false, auto_merge: null, body, labels: labels.map((name) => ({ name })), user: { login: 'dependabot[bot]' }, head: { ref: headRef, sha: 'h'.repeat(40) }, base: { ref: 'main', sha: 'b'.repeat(40), repo: { allow_auto_merge: allowAutoMerge } } },
+    'repos/o/r/pulls/7/files': files ?? [],
+    'repos/o/r/pulls/7': { number: 7, state: 'open', draft: false, auto_merge: autoMerge, created_at: createdAt, body, labels: labels.map((name) => ({ name })), user: { login: author }, head: { ref: headRef, sha: 'h'.repeat(40) }, base: { ref: 'main', sha: 'b'.repeat(40), repo: { allow_auto_merge: allowAutoMerge } } },
+    'repos/o/r/pulls?state=open': open ?? [{ number: 7, user: { login: author }, head: { ref: headRef } }, { number: 8, user: { login: 'n8watkins' }, head: { ref: 'feature' } }],
+    ...(config ? { 'repos/o/r/contents/.release.json?ref=main': { content: b64(JSON.stringify(config)) } } : {}),
     [`repos/o/r/contents/package.json?ref=${'b'.repeat(40)}`]: pkg(from),
     [`repos/o/r/contents/package.json?ref=${'h'.repeat(40)}`]: pkg(to),
     'repos/o/r/rules/branches/main': rules,
@@ -142,9 +148,10 @@ function automerge({ summary, event = 'pull_request', from = '2.1.0', to = '2.2.
     ...(summary ? { GITHUB_STEP_SUMMARY: summary } : {}),
   })
   const calls = readFileSync(join(dir, 'log'), 'utf8').split('\n')
-  const merges = calls.filter((line) => line.startsWith('pr merge'))
+  const merges = calls.filter((line) => line.startsWith('pr merge') && !line.includes('--disable-auto'))
   const writes = calls.filter((line) => /^api -X (POST|DELETE) /.test(line))
-  return { ...result, merges, writes }
+  const disabled = calls.filter((line) => line.includes('--disable-auto'))
+  return { ...result, merges, writes, disabled, calls }
 }
 
 test('end to end: a minor kit update on a repo that requires checks gets auto-merge, a major does not', () => {
@@ -290,7 +297,7 @@ test('a pull request whose required checks already passed is merged directly, si
   assert.equal(alreadyMergeable(undefined), false)
   // main merges directly only after that refusal, still matching the head commit.
   const source = readFileSync(join(KIT, 'template/scripts/release-kit/automerge.mjs'), 'utf8')
-  assert.match(source, /if \(!alreadyMergeable\(error\)\) throw error\n(?: {6}\/\/.*\n)* {6}gh\('pr', 'merge', String\(number\), '--repo', repoName, `--\$\{method\}`, '--match-head-commit', raw\.head\.sha\)/)
+  assert.match(source, /if \(!alreadyMergeable\(error\)\) throw error\n(?: {8}\/\/.*\n)* {8}gh\('pr', 'merge', String\(number\), '--repo', repoName, `--\$\{method\}`, '--match-head-commit', raw\.head\.sha\)/)
 })
 
 // Below 1.0.0 SemVer lets a minor update break (and release-kit's own pre-1.0
@@ -360,7 +367,7 @@ test('end to end: 0.x patch and 1.x minor merge on their own; a 0.x minor or a g
   assert.equal(zeroPatch.status, 0, zeroPatch.stderr)
   assert.deepEqual([zeroPatch.merges, zeroPatch.writes], [enable, []])
 
-  const oneMinor = run([['next', '1.4.0', '1.5.0']])
+  const oneMinor = run([['zod', '3.4.0', '3.5.0']])
   assert.deepEqual([oneMinor.merges, oneMinor.writes], [enable, []])
 
   const zeroMinor = run([['zod-lite', '0.13.2', '0.14.0']])
@@ -386,4 +393,195 @@ test('end to end: 0.x patch and 1.x minor merge on their own; a 0.x minor or a g
   const cleared = run([['zod-lite', '0.13.1', '0.13.2']], { labels: [REVIEW_LABEL] })
   assert.deepEqual(cleared.merges, enable)
   assert.deepEqual(cleared.writes, [`api -X DELETE repos/o/r/issues/7/labels/${encodeURIComponent(REVIEW_LABEL)}`])
+})
+
+// The tightened policy (F5): a minor update waits a few days, held packages
+// and actions not pinned to a commit SHA wait for a person, and a scheduled
+// run merges what has waited long enough.
+const REQUIRED = [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI result' }] } }]
+const ENABLE = [`pr merge 7 --repo o/r --auto --squash --match-head-commit ${'h'.repeat(40)}`]
+const MERGE = [`pr merge 7 --repo o/r --squash --match-head-commit ${'h'.repeat(40)}`]
+const GREEN = [{ name: 'CI result', status: 'completed', conclusion: 'success' }]
+const deps = (list, more = {}) => automerge({ commits: [{ commit: { message: bump(...list) } }], from: '2.5.2', to: '2.5.2', rules: REQUIRED, ...more })
+
+test('autoMergePolicy: safe defaults, the repo\'s settings, and every setting it cannot use named', () => {
+  const defaults = autoMergePolicy(undefined)
+  assert.deepEqual([defaults.minorWaitDays, defaults.patchWaitDays, defaults.problems], [3, 0, []])
+  assert.deepEqual(defaults.hold, DEFAULT_HOLD)
+  for (const name of ['next', '@opennextjs/cloudflare', 'wrangler', '@cloudflare/workers-types']) assert.ok(defaults.hold.some((p) => matchesHold(name, p)), name)
+  assert.ok(!defaults.hold.some((p) => matchesHold('nextra', p)), 'a prefix only matches a pattern that ends in *')
+  assert.deepEqual(autoMergePolicy(false).hold, DEFAULT_HOLD)
+
+  const own = autoMergePolicy({ minorWaitDays: 0, patchWaitDays: 2, hold: ['my-sdk', '@acme/*'], unhold: ['vite', '@vitejs/*'] })
+  assert.deepEqual([own.minorWaitDays, own.patchWaitDays, own.problems], [0, 2, []])
+  assert.ok(own.hold.includes('my-sdk') && own.hold.includes('@acme/*') && own.hold.includes('next'))
+  assert.ok(!own.hold.includes('vite'))
+
+  // Bad values keep the safe default, and say so.
+  const bad = autoMergePolicy({ minorWaitDays: -1, patchWaitDays: '2', hold: 'next', unhold: ['lodash'], waitDays: 3 })
+  assert.deepEqual([bad.minorWaitDays, bad.patchWaitDays], [3, 0])
+  assert.deepEqual(bad.hold, DEFAULT_HOLD)
+  assert.equal(bad.problems.length, 5)
+  assert.match(bad.problems.join('\n'), /"autoMerge\.waitDays" is not a setting[\s\S]*minorWaitDays" must be a whole number of days from 0 to 90, not -1; using 3[\s\S]*unhold" names "lodash", which the kit doesn't hold[\s\S]*"autoMerge\.hold" must be a list/)
+  assert.match(autoMergePolicy(['next']).problems[0], /"autoMerge" must be false or an object/)
+})
+
+test('decide: a minor update waits out its days, a held package or an unpinned action waits for a person', () => {
+  const policy = autoMergePolicy(undefined)
+  const now = Date.parse('2026-11-25T12:00:00Z')
+  const opened = (days) => new Date(now - days * 86_400_000).toISOString()
+  const update = (type, names) => ({ type, what: names.join(', '), parts: names.map((name) => ({ name, type, from: '1.0.0', to: type === 'minor' ? '1.1.0' : '1.0.1' })), belowOne: [] })
+  const go = (u, more = {}) => {
+    const p = pr({ createdAt: opened(1), ...more })
+    return decide({ pr: p, update: u, repo: protectedRepo, event: 'pull_request', held: heldBy({ pr: p, update: u, policy, actionRefs: more.actionRefs }), wait: waitFor({ pr: p, update: u, policy, now }), now })
+  }
+  const waiting = go(update('minor', ['zod']))
+  assert.equal(waiting.action, 'wait')
+  assert.equal(new Date(waiting.until).toISOString(), '2026-11-27T12:00:00.000Z')
+  assert.match(waiting.reason, /zod is a minor update, which merges on its own only once its pull request has been open 3 days/)
+  assert.equal(go(update('minor', ['zod']), { createdAt: opened(3) }).action, 'enable')
+  // Patches merge on green; a Dependabot kit update waits the minor wait even as a patch.
+  assert.equal(go(update('patch', ['zod'])).action, 'enable')
+  assert.equal(go(update('patch', ['release-kit'])).action, 'wait')
+  // An opening time that can't be read never skips the wait.
+  assert.equal(go(update('minor', ['zod']), { createdAt: undefined }).action, 'wait')
+  // The rollout bot's kit update is governed by the rollout's soak, not this wait.
+  const kit = { type: 'minor', what: 'release-kit', parts: [{ name: 'release-kit', type: 'minor' }] }
+  const bot = pr({ author: 'release-kit-bot[bot]', headRef: 'release-kit/update', createdAt: opened(0) })
+  assert.equal(waitFor({ pr: bot, update: kit, policy, now }), null)
+  assert.equal(decide({ pr: bot, update: kit, repo: protectedRepo, event: 'pull_request', bots: ['dependabot[bot]', 'release-kit-bot[bot]'], held: heldBy({ pr: bot, update: kit, policy }), now }).action, 'enable')
+
+  // A held package holds the whole group, even a patch, even after the wait.
+  const held = go(update('patch', ['zod', 'next']), { createdAt: opened(30) })
+  assert.equal(held.action, 'review')
+  assert.deepEqual(held.labels, [HOLD_LABEL])
+  assert.match(held.reason, /it updates next, which waits for a person \(held for a person\): a person reviews and merges it/)
+  const scoped = go(update('minor', ['@opennextjs/cloudflare']))
+  assert.match(scoped.reason, /@opennextjs\/cloudflare, which waits for a person \(held for a person \(@opennextjs\/\*\)\)/)
+  // A 0.x minor that is also held gets both labels.
+  const both = { ...update('minor', ['wrangler']), belowOne: ['wrangler'] }
+  assert.deepEqual(go(both).labels, [REVIEW_LABEL, HOLD_LABEL])
+
+  // GitHub Actions updates: pinned to commit SHAs they may merge; a tag, or refs that can't be read, wait for a person.
+  const actions = update('minor', ['actions/cache'])
+  const branch = 'dependabot/github_actions/actions-minor-patch-1a2b'
+  assert.equal(go(actions, { headRef: branch, createdAt: opened(5), actionRefs: [{ action: 'actions/cache', ref: 'a'.repeat(40) }] }).action, 'enable')
+  assert.match(go(actions, { headRef: branch, createdAt: opened(5), actionRefs: [{ action: 'actions/cache', ref: 'v4.3.0' }] }).reason, /actions\/cache, which waits for a person \(a GitHub Action pinned to a tag or branch, not a commit SHA\)/)
+  assert.equal(go(actions, { headRef: branch, createdAt: opened(5), actionRefs: null }).action, 'review')
+  assert.equal(go(actions, { headRef: branch, createdAt: opened(5), actionRefs: [] }).action, 'review')
+
+  // A scheduled look again acts like pull_request where checks are required, else like workflow_run.
+  const old = pr({ createdAt: opened(5) })
+  const u = update('minor', ['zod'])
+  assert.equal(decide({ pr: old, update: u, repo: protectedRepo, event: 'schedule', now }).action, 'enable')
+  assert.equal(decide({ pr: old, update: u, repo: freePrivate, event: 'schedule', checks: 'green', now }).action, 'merge')
+  assert.equal(decide({ pr: old, update: u, repo: freePrivate, event: 'schedule', checks: 'pending', now }).action, 'skip')
+})
+
+test('addedActionRefs reads the uses: lines a pull request adds, and gives up when a patch is missing', () => {
+  const patch = '@@ -1 +1 @@\n-      - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.0\n+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.3.0\n+    uses: "owner/x@v2"\n context'
+  assert.deepEqual(addedActionRefs([{ filename: '.github/workflows/ci.yml', patch }, { filename: 'src/a.js', patch: '+uses: no@v1' }]), [
+    { action: 'actions/cache', ref: '5a3ec84eff668545956fd18022155c47e93e2684' },
+    { action: 'owner/x', ref: 'v2' },
+  ])
+  assert.equal(addedActionRefs([{ filename: '.github/workflows/ci.yml' }]), null)
+})
+
+test('end to end: a fresh minor update waits, labeled and explained once, and merges once it has waited (or the repo says 0)', () => {
+  const fresh = deps([['zod', '3.4.0', '3.5.0']], { createdAt: DAYS_AGO(1) })
+  assert.equal(fresh.status, 0, fresh.stderr)
+  assert.deepEqual(fresh.merges, [])
+  assert.match(fresh.stdout, /::notice title=Auto-merge::#7 is waiting, labeled "auto-merge: waiting": zod is a minor update/)
+  assert.equal(fresh.writes[0], `api -X POST -f labels[]=${WAIT_LABEL} repos/o/r/issues/7/labels`)
+  assert.equal(fresh.writes[1], 'api -X POST -f body=<!-- release-kit: waiting -->')
+  const until = Date.parse('2026-11-27T12:00:00Z')
+  assert.match(waitComment({ type: 'minor' }, { days: 3, until }), /^<!-- release-kit: waiting -->\n\*\*Auto-merge is waiting\.\*\* This minor update merges on its own once the pull request has been open 3 days, from 2026-11-27 12:00 UTC, and its checks pass\.\n[\s\S]*Merge it by hand to skip the wait/)
+  assert.equal(fresh.writes.length, 2)
+  // Turned on by an earlier kit version: auto-merge is switched off while it waits.
+  assert.equal(deps([['zod', '3.4.0', '3.5.0']], { createdAt: DAYS_AGO(1), autoMerge: { enabled_by: {} } }).disabled.length, 1)
+  // Already labeled and explained: nothing written again.
+  const again = deps([['zod', '3.4.0', '3.5.0']], { createdAt: DAYS_AGO(1), labels: [WAIT_LABEL], comments: [{ body: '<!-- release-kit: waiting -->' }] })
+  assert.deepEqual([again.merges, again.writes], [[], []])
+  // Waited long enough: it merges, and the label goes.
+  const ready = deps([['zod', '3.4.0', '3.5.0']], { labels: [WAIT_LABEL] })
+  assert.deepEqual(ready.merges, ENABLE)
+  assert.deepEqual(ready.writes, [`api -X DELETE repos/o/r/issues/7/labels/${encodeURIComponent(WAIT_LABEL)}`])
+  // A patch merges on green, unless the repo says to wait for those too; minorWaitDays 0 turns the wait off.
+  assert.deepEqual(deps([['zod', '3.4.0', '3.4.1']], { createdAt: DAYS_AGO(0) }).merges, ENABLE)
+  assert.deepEqual(deps([['zod', '3.4.0', '3.4.1']], { createdAt: DAYS_AGO(0), config: { autoMerge: { patchWaitDays: 2 } } }).merges, [])
+  assert.deepEqual(deps([['zod', '3.4.0', '3.5.0']], { createdAt: DAYS_AGO(0), config: { autoMerge: { minorWaitDays: 0 } } }).merges, ENABLE)
+  // A .release.json that can't be read keeps the safe defaults, with a warning.
+  const unreadable = deps([['zod', '3.4.0', '3.5.0']], { createdAt: DAYS_AGO(0), config: { autoMerge: { minorWaitDays: 'none' } } })
+  assert.deepEqual(unreadable.merges, [])
+  assert.match(unreadable.stdout, /::warning title=Auto-merge::\.release\.json "autoMerge\.minorWaitDays" must be a whole number/)
+})
+
+test('end to end: a group with a held package waits for a person as a whole, with a comment naming it', () => {
+  const summary = join(tmp('automerge-summary'), 'summary.md')
+  const held = deps([['zod', '3.4.0', '3.4.1'], ['next', '15.1.0', '15.1.2']], { autoMerge: { enabled_by: {} }, summary })
+  assert.equal(held.status, 0, held.stderr)
+  assert.deepEqual(held.merges, [])
+  assert.equal(held.disabled.length, 1, 'auto-merge turned on earlier is switched off')
+  assert.match(held.stdout, /#7 left for a person, labeled "needs-review: held dependency": it updates next, which waits for a person/)
+  assert.equal(held.writes[0], `api -X POST -f labels[]=${HOLD_LABEL} repos/o/r/issues/7/labels`)
+  assert.equal(held.writes[1], 'api -X POST -f body=<!-- release-kit: held -->')
+  const policy = autoMergePolicy(undefined)
+  const update = classifyUpdate({ dependabot: true, messages: [bump(['zod', '3.4.0', '3.4.1'], ['next', '15.1.0', '15.1.2'])] })
+  const comment = holdComment(heldBy({ pr: pr(), update, policy }))
+  assert.match(comment, /^<!-- release-kit: held -->\n\*\*Auto-merge left this for a person\.\*\*[\s\S]*\| next \| 15\.1\.0 \| 15\.1\.2 \| held for a person \|/)
+  assert.doesNotMatch(comment, /\| zod \|/)
+  assert.match(readFileSync(summary, 'utf8'), /needs-review: held dependency/)
+  // The repo's own list adds to the defaults, and unhold takes a default out.
+  assert.deepEqual(deps([['my-sdk', '1.0.0', '1.0.1']], { config: { autoMerge: { hold: ['my-sdk'] } } }).merges, [])
+  assert.deepEqual(deps([['next', '15.1.0', '15.1.2']], { config: { autoMerge: { unhold: ['next'] } } }).merges, ENABLE)
+  // On the merge-when-green fallback too.
+  const green = deps([['wrangler', '4.1.0', '4.1.1']], { rules: [], event: 'workflow_run', runs: GREEN })
+  assert.deepEqual(green.merges, [])
+  assert.match(green.stdout, /held dependency/)
+})
+
+test('end to end: a GitHub Actions update merges only when every action it changes is pinned to a commit SHA', () => {
+  const headRef = 'dependabot/github_actions/actions-minor-patch-1a2b'
+  const patch = (ref) => [{ filename: '.github/workflows/ci.yml', patch: `@@ -1 +1 @@\n-      - uses: actions/cache@${'0'.repeat(40)} # v4.2.0\n+      - uses: actions/cache@${ref} # v4.3.0\n` }]
+  const pinned = deps([['actions/cache', '4.2.0', '4.3.0']], { headRef, files: patch('5'.repeat(40)) })
+  assert.deepEqual(pinned.merges, ENABLE)
+  const tagged = deps([['actions/cache', '4.2.0', '4.3.0']], { headRef, files: [{ filename: '.github/workflows/ci.yml', patch: '-      - uses: actions/cache@v4.2.0\n+      - uses: actions/cache@v4.3.0\n' }] })
+  assert.deepEqual(tagged.merges, [])
+  assert.match(tagged.stdout, /actions\/cache, which waits for a person \(a GitHub Action pinned to a tag or branch, not a commit SHA\)/)
+  assert.match(holdComment([{ name: 'actions/cache', from: null, to: 'v4.3.0', why: 'a GitHub Action pinned to a tag or branch, not a commit SHA' }]), /\| actions\/cache \| \? \| v4\.3\.0 \| a GitHub Action pinned to a tag or branch, not a commit SHA \|/)
+  // No patch to read: held, never guessed.
+  assert.deepEqual(deps([['actions/cache', '4.2.0', '4.3.0']], { headRef, files: [{ filename: '.github/workflows/ci.yml' }] }).merges, [])
+})
+
+test('end to end: a scheduled run looks again at every open update pull request and merges the ones that waited long enough', () => {
+  const sched = deps([['zod', '3.4.0', '3.5.0']], { event: 'schedule' })
+  assert.equal(sched.status, 0, sched.stderr)
+  assert.deepEqual(sched.merges, ENABLE)
+  // Only update pull requests are looked at: #8 is a person's.
+  assert.ok(!sched.calls.some((line) => /pulls\/8\b/.test(line)))
+  const fresh = deps([['zod', '3.4.0', '3.5.0']], { event: 'schedule', createdAt: DAYS_AGO(1) })
+  assert.deepEqual(fresh.merges, [])
+  assert.match(fresh.stdout, /is waiting/)
+  // Without required checks it merges once every check passed, as on workflow_run.
+  assert.deepEqual(deps([['zod', '3.4.0', '3.5.0']], { event: 'schedule', rules: [], runs: GREEN }).merges, MERGE)
+  assert.deepEqual(deps([['zod', '3.4.0', '3.5.0']], { event: 'workflow_dispatch', rules: [], runs: [{ name: 'CI result', status: 'in_progress', conclusion: null }] }).merges, [])
+  const none = deps([['zod', '3.4.0', '3.5.0']], { event: 'schedule', open: [] })
+  assert.match(none.stdout, /no open update pull requests/)
+})
+
+test('apply writes an auto-merge.yml that looks again every day, and check flags one written before that', () => {
+  const repo = makeRepo(tmp('automerge-apply'))
+  run(KIT, 'node', ['apply.mjs', repo])
+  const path = join(repo, '.github/workflows/auto-merge.yml')
+  const workflow = readFileSync(path, 'utf8')
+  assert.match(workflow, /^ {2}schedule:\n {4}- cron: "37 7 \* \* \*" # release-kit: look again at waiting update pull requests\n {2}workflow_dispatch:\n/m)
+  assert.match(workflow, /\n {6}\|\| github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\n/)
+  // A repo still on the auto-merge.yml of an older kit: check names the file apply would change.
+  writeFileSync(path, workflow.replace(/ {2}schedule:\n.*\n {2}workflow_dispatch:\n/, ''))
+  const check = attempt(repo, 'node', [join(KIT, 'apply.mjs'), '.', '--check', '--json'])
+  assert.equal(check.status, 1)
+  assert.deepEqual(JSON.parse(check.stdout).files.changed, ['.github/workflows/auto-merge.yml'])
+  // apply names an autoMerge setting it can't use, and keeps the safe default.
+  writeFileSync(join(repo, '.release.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(repo, '.release.json'), 'utf8')), autoMerge: { minorWaitDays: 'soon' } }))
+  assert.match(run(KIT, 'node', ['apply.mjs', repo]), /! \.release\.json "autoMerge\.minorWaitDays" must be a whole number of days from 0 to 90, not "soon"; using 3/)
 })

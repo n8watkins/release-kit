@@ -2,7 +2,11 @@
 # and minor updates (security ones included) merge on their own once CI
 # passes; a major update always waits for a person, and so does a minor update
 # of a dependency below 1.0.0, which gets the "needs-review: 0.x minor" label
-# and a comment saying why (see docs/AUTO_MERGE.md).
+# and a comment saying why (see docs/AUTO_MERGE.md). A Dependabot minor update
+# first waits until its pull request is 3 days old ("auto-merge: waiting"), and
+# an update of a held package (next, wrangler, ...) or of a GitHub Action not
+# pinned to a commit SHA waits for a person ("needs-review: held dependency");
+# the repo's .release.json "autoMerge" changes both.
 #
 # Called from a repo's auto-merge.yml:
 #   on:
@@ -10,6 +14,9 @@
 #     workflow_run:
 #       workflows: [CI]
 #       types: [completed]
+#     schedule:
+#       - cron: "37 7 * * *" # looks again at the pull requests that wait
+#     workflow_dispatch:
 #   jobs:
 #     auto-merge:
 #       permissions:
@@ -24,6 +31,8 @@
 # finishes) and the repo allows auto-merge. On workflow_run it is the "merge
 # when green" fallback for repos that can't require checks, such as a private
 # repo on GitHub Free: it merges once every check on the pull request passed.
+# On schedule (and "Run workflow") it looks again at every open update pull
+# request, so one that has waited long enough merges without a new push.
 name: Auto-merge
 
 on:
