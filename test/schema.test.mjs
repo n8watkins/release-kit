@@ -8,6 +8,7 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { KIT, makeRepo, run, tmp } from './helpers.mjs'
 import { autoMergePolicy } from '../template/scripts/release-kit/automerge.mjs'
+import { dependabotPolicy } from '../template/scripts/release-kit/dependabot.mjs'
 
 const read = (path) => readFileSync(join(KIT, path), 'utf8')
 const config = JSON.parse(read('schema/release-config.v1.json'))
@@ -26,6 +27,10 @@ test('the .release.json schema names every key the code reads, and the autoMerge
   // Every key the policy accepts is in the schema, and nothing else is.
   const extra = autoMergePolicy({ x: 1 }).problems[0]
   assert.match(extra, /\(minorWaitDays, patchWaitDays, hold, unhold\)/)
+  // The same for "dependabot": the schema lists exactly what the policy takes, with its defaults.
+  assert.deepEqual(Object.keys(config.properties.dependabot.properties).sort(), ['allowMajors', 'ignoreMajors'])
+  assert.match(dependabotPolicy({ x: 1 }).problems[0], /\(ignoreMajors, allowMajors\)/)
+  assert.deepEqual(config.properties.dependabot.properties.ignoreMajors.default, [])
 })
 
 test('the adopters.json schema has the keys rollout.mjs checks', () => {
@@ -53,4 +58,8 @@ test('adopters.json and the .release.json apply writes validate against their sc
   assert.notEqual(ok('schema/release-config.v1.json', path).status, 0)
   writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), autoMerge: { minorWaitDays: 5, hold: ['@acme/*'], unhold: ['vite'] } }))
   assert.equal(ok('schema/release-config.v1.json', path).status, 0)
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), dependabot: { ignoreMajors: ['@acme/sdk'], allowMajors: ['typescript'] } }))
+  assert.equal(ok('schema/release-config.v1.json', path).status, 0)
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), dependabot: { ignoreMajors: 'react' } }))
+  assert.notEqual(ok('schema/release-config.v1.json', path).status, 0)
 })

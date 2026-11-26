@@ -61,6 +61,15 @@
     },
     "security": { "type": "object", "properties": { "onPullRequest": { "type": "boolean" } } },
     "attest": { "type": "boolean" },
+    "dependabot": {
+      "description": "Major updates the dependabot.yml apply writes ignores (docs/UPGRADES.md). The kit ignores typescript majors by default; a value the kit can't use keeps that default.",
+      "type": "object",
+      "properties": {
+        "ignoreMajors": { "description": "More packages whose major updates Dependabot doesn't propose (minor and patch updates still arrive), added to the kit's list: exact package names.", "type": "array", "items": { "type": "string", "pattern": "^[@\\w./-]+$" }, "default": [] },
+        "allowMajors": { "description": "Entries of the kit's list (today: typescript) whose major updates this repo does take.", "type": "array", "items": { "type": "string", "pattern": "^[@\\w./-]+$" }, "default": [] }
+      },
+      "additionalProperties": false
+    },
     "autoMerge": {
       "description": "false: apply writes no auto-merge.yml. An object tightens the auto-merge policy (docs/AUTO_MERGE.md); a value the kit can't use keeps its safe default.",
       "oneOf": [

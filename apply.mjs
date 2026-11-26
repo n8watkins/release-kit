@@ -47,6 +47,7 @@ import { entryIn, entryLabel, entryProblem, readVersion, versionFilesProblems } 
 import { VISIBILITIES, detectVisibility } from './template/scripts/release-kit/settings.mjs'
 import { checkArgs } from './template/scripts/release-kit/cli.mjs'
 import { autoMergePolicy } from './template/scripts/release-kit/automerge.mjs'
+import { dependabotPolicy, ignoreMajorLines, ignoresMajor } from './template/scripts/release-kit/dependabot.mjs'
 
 const KIT = dirname(fileURLToPath(import.meta.url))
 const kitPackage = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8'))
@@ -438,7 +439,7 @@ if (packaged) {
     pkg.devDependencies = Object.fromEntries(Object.entries(pkg.devDependencies).sort(([a], [b]) => a.localeCompare(b)))
     done.push(`devDependencies: release-kit ${spec} (run npm install to update the lock)`)
   }
-  writeDependabot()
+  writeDependabot(dependabotPolicy(config.dependabot))
   writeNpmrc()
 } else if (pkg.devDependencies?.['release-kit']) {
   delete pkg.devDependencies['release-kit']
@@ -556,8 +557,23 @@ function writeAutoMerge() {
  * needs both ecosystems listed, nothing ignoring release-kit, and no allow
  * list (which would block security updates).
  */
-function writeDependabot() {
+function writeDependabot({ ignoreMajors, problems }) {
   const path = '.github/dependabot.yml'
+  for (const problem of problems) skipped.push(`.release.json ${problem}`)
+  // Major updates of these packages are ignored in the weekly npm entry
+  // (docs/UPGRADES.md); the kit's default list is DEFAULT_IGNORE_MAJORS in dependabot.mjs.
+  const majorsNote = ignoreMajors.length
+    ? `#
+# Major updates of ${ignoreMajors.join(', ')} are ignored, because the repo can't take them
+# yet. For typescript: lint tooling (typescript-eslint) does not support
+# TypeScript 7, so its pull request could never be merged. Minor and patch
+# updates still arrive, and an ignore applies to security updates of that
+# package too. To take a package's majors again, list it under "allowMajors" in
+# .release.json "dependabot", like { "allowMajors": ["typescript"] }, and rerun
+# npx release-kit apply .
+`
+    : ''
+  const majorIgnores = ignoreMajors.map(ignoreMajorLines).join('')
   const ours = `# release-kit: Dependabot for this repo, written by npx release-kit apply.
 #
 # Two entries per ecosystem, both for the repo root:
@@ -575,7 +591,7 @@ function writeDependabot() {
 #    another, which waits for a person. A cooldown (3 days, and 7 for an npm
 #    major) lets a bad release be pulled before it reaches the repo. These
 #    entries ignore the kit, which the first ones update.
-#
+${majorsNote}#
 # Security updates use neither allow nor groups here, so Dependabot opens one for
 # any vulnerable dependency, direct or transitive, as soon as an alert appears
 # (no cooldown). Don't add an allow list: Dependabot applies it to security
@@ -603,7 +619,7 @@ updates:
       interval: weekly
     ignore:
       - dependency-name: release-kit
-    cooldown:
+${majorIgnores}    cooldown:
       default-days: 3
       semver-major-days: 7
     commit-message:
@@ -657,6 +673,9 @@ updates:
     else if (/release-kit/.test(current)) skipped.push(`${path} mentions release-kit: make sure it doesn't ignore it`)
     if (allowList(current)) skipped.push(`${path} is the repo's own and has an allow list: Dependabot applies it to security updates too, so a vulnerable dependency it leaves out gets no security update ("all versions were ignored"). Drop allow, and use ignore or groups to limit version updates`)
     if (!/cooldown:[\s\S]*exclude:[^\n]*release-kit/.test(current)) skipped.push(`${path} is the repo's own and doesn't exclude release-kit from Dependabot's default 3-day cooldown, which can propose a downgrade to an older kit tag: add cooldown: exclude: ["release-kit"] to the npm entry and ["${KIT_REPO}*"] to the github-actions entry`)
+    for (const name of ignoreMajors) {
+      if (!ignoresMajor(current, name)) skipped.push(`${path} is the repo's own and doesn't ignore major updates of ${name}, which the repo can't take yet (the lint tooling doesn't support it): add to the npm entry ignore: - dependency-name: ${name}, update-types: ["version-update:semver-major"] (minor and patch updates still arrive)`)
+    }
     if (!/multi-ecosystem-group:\s*["']?release-kit/.test(current)) skipped.push(`${path} is the repo's own, so kit releases arrive as separate npm and github-actions PRs: group them with a "release-kit" multi-ecosystem group (see README, "How upgrades reach your repos")`)
     return
   }
