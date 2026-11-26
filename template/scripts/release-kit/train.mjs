@@ -85,7 +85,8 @@ function findRun(workflow, ref, sha, { event = 'workflow_dispatch', attempts = 6
 
 // 1. The release commit and tag, locally.
 const release = join(dirname(fileURLToPath(import.meta.url)), 'release.mjs')
-const cut = spawnSync(process.execPath, [release, version], { stdio: 'inherit' })
+// --yes: nobody is at a terminal here to confirm, and the train already planned and checked this release.
+const cut = spawnSync(process.execPath, [release, version, '--yes'], { stdio: 'inherit' })
 if (cut.status !== 0) fail('could not cut the release')
 const sha = git('rev-parse', 'HEAD')
 const undo = () => {

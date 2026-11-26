@@ -3,9 +3,12 @@
 // section from the commits, commits "chore(release): vX.Y.Z" and makes an
 // annotated tag. Pushing the tag runs .github/workflows/release.yml.
 //
-//   npm run release -- [patch|minor|major|x.y.z] [--stable] [--summary "<text>"] [--dry-run] [--push] [--no-check]
+//   npm run release -- [patch|minor|major|x.y.z] [--stable] [--summary "<text>"] [--dry-run] [--push] [--no-check] [--yes]
 //       Without --dry-run it writes: it bumps the version, writes CHANGELOG.md,
 //       commits and tags (and with --push, pushes). Preview with --dry-run.
+//       Before it writes it shows the version and the notes and asks you to
+//       confirm; where nobody can answer (no terminal: CI, a script) it stops
+//       unless --yes says to go ahead without asking. --dry-run never asks.
 //       --summary puts a line or two, in your words, at the top of the notes.
 //       With no release tag yet it stops (a dry run only warns): baseline
 //       first (--baseline, below), or pass --whole-history to release every
@@ -28,11 +31,14 @@
 //       since the last tag.
 //   npm run release -- --verify-tag v1.2.3     (CI: the tag matches every version file)
 //   npm run release -- --tag-kind v1.2.3       (CI: baseline=true for a --baseline tag)
-//   npm run release -- --baseline [commit] [--publish]
+//   npm run release -- --baseline [commit] [--as x.y.z] [--publish] [--yes]
 //       Tags the version package.json had at that commit (default HEAD). Use it
 //       when adopting the kit, so the first release starts from here instead of
 //       listing the whole history, and to backfill past milestones. Baseline
-//       tags make no GitHub Release unless --publish.
+//       tags make no GitHub Release unless --publish. --as x.y.z names the
+//       version for a commit whose package.json has none (or has no
+//       package.json); it is refused when package.json there says another
+//       version. It asks before tagging, like a release (--yes skips that).
 //
 // With no bump given, it picks one from the commits: major for a breaking
 // change, minor for a feature, otherwise patch. Below 1.0.0 a breaking change
@@ -54,8 +60,8 @@ const args = process.argv.slice(2)
 checkArgs(args, {
   name: 'release',
   url: import.meta.url,
-  flags: ['stable', 'dry-run', 'push', 'no-check', 'via-pr', 'publish', 'whole-history'],
-  values: ['summary', 'pr-timeout', 'verify-tag', 'tag-kind'],
+  flags: ['stable', 'dry-run', 'push', 'no-check', 'via-pr', 'publish', 'whole-history', 'yes'],
+  values: ['summary', 'pr-timeout', 'verify-tag', 'tag-kind', 'as'],
   optional: ['plan', 'baseline'],
   positionals: 1,
 })
@@ -116,6 +122,30 @@ function fail(message) {
   process.exit(1)
 }
 
+/**
+ * Asks before anything is written. At a terminal it asks `question` and goes
+ * on only on "y" or "yes"; where nobody can answer (CI, a script, a pipe) it
+ * stops unless --yes was given. Callers that run unattended (the release
+ * train) pass --yes.
+ */
+async function confirm(what) {
+  if (flag('yes')) return
+  if (!process.stdin.isTTY) {
+    fail(`${what}: not on a terminal, so nobody can confirm it, and nothing was written. Pass --yes to go ahead without asking (CI and the release train do)`)
+  }
+  const { createInterface } = await import('node:readline/promises')
+  const prompt = createInterface({ input: process.stdin, output: process.stdout })
+  let answer = ''
+  try {
+    answer = await prompt.question(`release: ${what}? [y/N] `)
+  } finally {
+    prompt.close()
+  }
+  if (!/^y(es)?$/i.test(answer.trim())) fail('not confirmed, so nothing was written')
+}
+
+if (flag('as') && !flag('baseline')) fail('--as names the version of a --baseline commit: npm run release -- --baseline <commit> --as x.y.z')
+
 /** The value after `--name`, when it isn't another flag. */
 function valueOf(name) {
   const at = args.indexOf(`--${name}`)
@@ -153,17 +183,25 @@ if (flag('baseline')) {
   const publish = flag('publish')
   // The workflow reads this marker and skips publishing.
   const note = publish ? 'Backfilled release.' : BASELINE_NOTE
-  let version
+  let found
   try {
-    version = JSON.parse(git('show', `${commit}:package.json`)).version
+    found = JSON.parse(git('show', `${commit}:package.json`)).version
   } catch {
-    version = undefined
+    found = undefined
   }
+  const as = flag('as') ? valueOf('as') : undefined
+  if (flag('as') && !isVersion(as)) fail(`--as needs the version to tag, as x.y.z, not "${as ?? ''}"`)
+  // --as is for a commit with no version of its own: it never overrides one.
+  if (as !== undefined && found !== undefined && found !== as) {
+    fail(`package.json at ${ref} says version ${JSON.stringify(found)}, not ${as}: --as only names the version of a commit whose package.json has none. Leave --as out to tag ${isVersion(found) ? `v${found}` : 'its version'}, or pick another commit`)
+  }
+  const version = as ?? found
   if (!isVersion(version)) {
-    fail(`package.json at ${ref} has ${version === undefined ? 'no version' : `version "${version}"`}, not x.y.z, so there is no version to tag. To mark that commit by hand as version x.y.z:\n  git tag -a vx.y.z ${commit} -m "vx.y.z" -m "${note}"`)
+    fail(`package.json at ${ref} has ${version === undefined ? 'no version' : `version "${version}"`}, not x.y.z, so there is no version to tag. Name the version that commit is with --as:\n  npm run release -- --baseline ${commit} --as x.y.z${publish ? ' --publish' : ''}\nor tag it by hand:\n  git tag -a vx.y.z ${commit} -m "vx.y.z" -m "${note}"`)
   }
   const tag = `v${version}`
   if (git('tag', '--list', tag)) fail(`tag ${tag} already exists`)
+  await confirm(`tag ${tag} at ${ref} (${commit.slice(0, 12)})${publish ? ', to be published as a GitHub Release once pushed' : ' as a baseline (no GitHub Release)'}`)
   git('tag', '-a', tag, commit, '-m', `${tag}\n\n${note}`)
   console.log(`release: tagged ${tag} at ${ref}${publish ? '' : ' as a baseline (no GitHub Release)'}`)
   console.log(`release: push it with  git push origin ${tag}`)
@@ -298,6 +336,9 @@ if (flag('dry-run')) {
   if (flag('push') || flag('via-pr')) console.log(`release: --push would ${releasePath(branch)}`)
   process.exit(0)
 }
+
+// Everything above only read; from here on it writes.
+await confirm(`${current} -> ${version} (${kind}), ${commits.length} commit${commits.length === 1 ? '' : 's'}${summary ? `, "${summary}"` : ''}: bump, write CHANGELOG.md${wantReleases.json ? ` and ${RELEASES_FILE}` : ''}, commit and tag ${tag}${push ? ', then push it' : ' locally (nothing is pushed)'}`)
 
 if (push && !flag('no-check')) {
   console.log('release: npm run release:check')

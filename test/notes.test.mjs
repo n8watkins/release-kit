@@ -61,12 +61,12 @@ test('release --summary and .release.json notes reach the changelog, the tag and
   run(repo, 'git', ['remote', 'add', 'origin', 'https://github.com/o/r.git'])
   run(repo, 'git', ['add', '-A'])
   run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
-  run(repo, 'node', ['scripts/release-kit/release.mjs', '--baseline'])
+  run(repo, 'node', ['scripts/release-kit/release.mjs', '--baseline', '--yes'])
   commit(repo, 'feat(popup): add dark mode (#7)')
   commit(repo, 'fix: flaky test\n\nRelease-note: skip')
 
   // The summary's text is never taken for the bump.
-  run(repo, 'node', ['scripts/release-kit/release.mjs', '--summary', 'Dark mode is here.'])
+  run(repo, 'node', ['scripts/release-kit/release.mjs', '--summary', 'Dark mode is here.', '--yes'])
   const changelog = readFileSync(join(repo, 'CHANGELOG.md'), 'utf8')
   assert.match(changelog, /## 1\.1\.0 - \d{4}-\d{2}-\d{2}\n\nDark mode is here\.\n\n### New\n\n- Add dark mode \(\[#7\]\(https:\/\/github\.com\/o\/r\/pull\/7\)\)\n/)
   assert.doesNotMatch(changelog, /flaky/)

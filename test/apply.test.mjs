@@ -35,7 +35,7 @@ test('apply, then the hook, the release command and tag verification all work', 
 
   // Baseline: tag the version the repo is already at, marked so the workflow
   // skips publishing it; the first release then starts from here.
-  assert.match(run(repo, 'node', ['scripts/release-kit/release.mjs', '--baseline']), /tagged v0\.1\.0 at HEAD as a baseline/)
+  assert.match(run(repo, 'node', ['scripts/release-kit/release.mjs', '--baseline', '--yes']), /tagged v0\.1\.0 at HEAD as a baseline/)
   assert.match(run(repo, 'git', ['tag', '-l', '--format=%(contents)', 'v0.1.0']), /release-kit baseline/)
 
   // The hook rejects a plain-sentence message.
@@ -53,7 +53,7 @@ test('apply, then the hook, the release command and tag verification all work', 
   assert.match(dry, /0\.1\.0 -> 0\.2\.0 \(minor\), 2 commits since v0\.1\.0/)
   assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version, '0.1.0')
 
-  run(repo, 'node', ['scripts/release-kit/release.mjs'])
+  run(repo, 'node', ['scripts/release-kit/release.mjs', '--yes'])
   assert.equal(JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version, '0.2.0')
   assert.equal(JSON.parse(readFileSync(join(repo, 'manifest.json'), 'utf8')).version, '0.2.0')
   assert.equal(run(repo, 'git', ['tag', '--list']).trim(), 'v0.1.0\nv0.2.0')
@@ -77,7 +77,7 @@ test('apply, then the hook, the release command and tag verification all work', 
   run(repo, 'rm', ['linked-kit'])
 
   // Nothing new to release.
-  const empty = attempt(repo, 'node', ['scripts/release-kit/release.mjs'])
+  const empty = attempt(repo, 'node', ['scripts/release-kit/release.mjs', '--yes'])
   assert.match(empty.stderr, /nothing to release/)
   assert.ok(existsSync(join(repo, 'RELEASING.md')))
 })

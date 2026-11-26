@@ -119,7 +119,7 @@ function setup() {
   run(repo, 'git', ['add', '-A'])
   run(repo, 'git', ['commit', '-q', '-m', 'chore: adopt release-kit'])
   run(repo, 'git', ['remote', 'add', 'origin', remote])
-  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline'])
+  run(repo, 'node', [`${SCRIPTS}/release.mjs`, '--baseline', '--yes'])
   run(repo, 'git', ['push', '-q', '--no-verify', '--atomic', 'origin', 'main', 'v1.0.0'])
   writeFileSync(join(remote, 'hooks', 'pre-receive'), PRE_RECEIVE, { mode: 0o755 })
   const bin = tmp('release-pr-bin')
@@ -132,7 +132,7 @@ function setup() {
     const file = join(bin, `scenario-${runs}.json`)
     writeFileSync(file, JSON.stringify(scenario))
     rmSync(join(bin, 'views'), { force: true })
-    return attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--no-check', ...args], {
+    return attempt(repo, 'node', [`${SCRIPTS}/release.mjs`, '--push', '--no-check', ...args, '--yes'], {
       PATH: `${bin}:${process.env.PATH}`, FAKE_DIR: bin, FAKE_REMOTE: remote, FAKE_SCENARIO: file, RELEASE_KIT_PR_POLL: '0.05', RELEASE_KIT_PR_GRACE: '0', ...env,
     })
   }

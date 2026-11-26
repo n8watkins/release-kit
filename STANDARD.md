@@ -54,6 +54,7 @@ What the standard changes:
 ### Releases
 
 - `npm run release -- --push` from a clean main that isn't behind origin: `release:check`, bump, changelog section, `chore(release): vX.Y.Z` commit, annotated tag, one atomic push of the branch and the tag. A rejected push undoes the commit and the tag.
+- A release, and a baseline tag, write only after a yes: at a terminal the command shows the version and the notes and asks; with no terminal it stops unless `--yes` is passed (the release train passes it). `--dry-run` never asks.
 - Changelog dates are in the repo's `.release.json` `timeZone` (the machine's zone if unset).
 - The tag runs the Release workflow: version check, `npm run release:check`, optional artifacts with checksums, GitHub Release with the notes the release wrote into the tag (the same section as `CHANGELOG.md`), download-and-verify.
 - The same release is written to `releases.json` as data (version, date, tag, structured notes with type, PR and breaking flags), in the release commit, and attached to the GitHub Release; the format is versioned by `schema/releases.v1.json`, so the build log reads it instead of scraping the notes.

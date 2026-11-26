@@ -108,6 +108,8 @@ npm run release -- --push         # check, bump, changelog, commit, tag and push
 npm run release -- --plan         # what the release train would do now
 ```
 
+`npm run release` shows the version and the notes and asks before it writes anything; with no terminal to ask on (CI, a script) it stops unless you pass `--yes`.
+
 If the repo squash-merges pull requests, make the pull request title the squash commit's message (apply prints the `gh` command; see [template/RELEASING.md](template/RELEASING.md#pull-requests)): the title is what lands on main, and CI checks it.
 
 ## How upgrades reach your repos
@@ -282,7 +284,7 @@ With `--train`, a scheduled workflow cuts releases so nobody has to remember:
 1. It finds the commits on `main` since the last `vX.Y.Z` tag.
    With no feature, fix, security or performance change, `revert:` commit or breaking change among them, it stops: nothing to release.
 2. It runs `npm run release:check` on that exact commit.
-3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version>`.
+3. As `github-actions[bot]` it makes the release commit and tag, exactly like `npm run release -- <version> --yes` (nobody is there to confirm, and the plan and checks already ran).
 4. With `train.checks` in `.release.json` (`--train-checks ci.yml,commits.yml`), it pushes that commit to a temporary `release-train/vX.Y.Z` branch, starts each listed workflow there and waits for it to pass.
 5. It pushes `main` and the tag in one atomic push, then makes sure the Release workflow runs on the tag.
 
@@ -412,6 +414,9 @@ Tag a past commit with the version its `package.json` had, and publish it as a r
 npm run release -- --baseline <commit> --publish
 git push origin vX.Y.Z
 ```
+
+A commit whose `package.json` has no version (or that has none) takes the version from `--as`: `npm run release -- --baseline <commit> --as 1.6.0`.
+`--as` is refused when that commit's `package.json` says another version.
 
 ## Limits
 
