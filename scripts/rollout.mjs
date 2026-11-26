@@ -4,10 +4,25 @@
 // runs it; it is not shipped to adopters.
 //
 //   node scripts/rollout.mjs plan --tag vX.Y.Z [--repos a,b] [--adopters adopters.json]
-//       [--tags v1.0.0,v1.1.0] [--dry-run]
-//       check adopters.json and print the waves (canary, public, private) and
+//       [--tags v1.0.0,v1.1.0] [--stage auto|later] [--skip-soak] [--dry-run]
+//       check adopters.json and print the waves (canary, public, private),
 //       whether the tag is a major release (against --tags, or the kit repo's
-//       tags) as JSON; in GitHub Actions, also as step outputs for the jobs
+//       tags) and when the later waves run (`later`: now, deferred until the
+//       canary has soaked, or check the soak first) as JSON; in GitHub
+//       Actions, also as step outputs for the jobs
+//   node scripts/rollout.mjs pending [--adopters adopters.json]
+//       the scheduled resume (rollout-resume.yml): find the newest release
+//       whose rollout did the canary and deferred the later waves, and hasn't
+//       started them yet (GH_TOKEN: release-kit's token)
+//   node scripts/rollout.mjs soak-check --tag vX.Y.Z --canaries '<json>' --soak-hours 24
+//       [--gate-time <ISO time>] [--require-ready]
+//       is the canary healthy and soaked: its branch pins the tag, the update
+//       merged at least --soak-hours ago, and every check on the branch's head
+//       commit passed (GH_TOKEN: a token that reads the canary); prints
+//       state=ready|waiting|unhealthy, and with --require-ready fails unless ready
+//   node scripts/rollout.mjs held --tag vX.Y.Z --why "<text>"
+//       open the "release-kit: rollout" issue saying the later waves are held
+//       because the canary isn't healthy (once per tag)
 //   node scripts/rollout.mjs update --adopter '<json>' --tag vX.Y.Z --kit <dir>
 //       --target <dir> [--notes <file>] [--dry-run]
 //       in one adopter's checkout: run the kit's apply (from <dir>, the kit at
@@ -35,12 +50,16 @@ const KIT_REPO = 'n8watkins/release-kit'
 const SLUG = /^[\w.-]+\/[\w.-]+$/
 const TAG = /^v\d+\.\d+\.\d+$/
 export const ISSUE_LABEL = 'release-kit: rollout'
+export const DEFAULT_SOAK_HOURS = 24
+/** The job a rollout run ends with when it deferred the later waves until the canary has soaked. */
+export const DEFER_JOB = 'Later waves wait for the soak'
+const HOUR_MS = 60 * 60 * 1000
 // GitHub refuses a pull request description longer than 65536 characters.
 const BODY_LIMIT = 60000
 
 /**
  * adopters.json, checked: every problem is reported at once.
- * @returns {{ bot: string, adopters: Array<{ repo: string, name: string, owner: string, branch: string, visibility: string, wave: string, merge: string, enabled: boolean, reason?: string, note?: string }> }}
+ * @returns {{ bot: string, soakHours: number, adopters: Array<{ repo: string, name: string, owner: string, branch: string, visibility: string, wave: string, merge: string, enabled: boolean, reason?: string, note?: string }> }}
  */
 export function parseAdopters(text) {
   let data
@@ -52,6 +71,10 @@ export function parseAdopters(text) {
   const problems = []
   if (typeof data?.bot !== 'string' || !/^[\w-]+\[bot\]$/.test(data.bot)) problems.push('"bot" must be the App\'s login, like my-app[bot]')
   if (!Array.isArray(data?.adopters) || !data.adopters.length) problems.push('"adopters" must be a non-empty list')
+  // How long the canary runs a patch or minor kit release before the other waves get it.
+  const soakHours = data?.soakHours ?? DEFAULT_SOAK_HOURS
+  if (!Number.isInteger(soakHours) || soakHours < 0 || soakHours > 720) problems.push('"soakHours" must be a whole number of hours from 0 to 720 (0: no soak)')
+  for (const key of Object.keys(data ?? {})) if (!['$schema', 'bot', 'soakHours', 'adopters'].includes(key)) problems.push(`unknown key "${key}"`)
   const seen = new Set()
   const adopters = (Array.isArray(data?.adopters) ? data.adopters : []).map((a, i) => {
     const where = `adopters[${i}]${typeof a?.repo === 'string' ? ` (${a.repo})` : ''}`
@@ -78,7 +101,7 @@ export function parseAdopters(text) {
     return { ...a, owner, name }
   })
   if (problems.length) throw new Error(`adopters.json:\n  - ${problems.join('\n  - ')}`)
-  return { bot: data.bot, adopters }
+  return { bot: data.bot, soakHours, adopters }
 }
 
 /**
@@ -196,6 +219,94 @@ export function mergeState({ tag, adopter, pin, pr, checks, failed = [] }) {
 }
 
 /**
+ * When the public and private waves run, for one rollout:
+ *   now       in this run, after the canary (and its merge, for a patch or minor)
+ *   deferred  not in this run: once the canary's update has merged, the
+ *             scheduled resume (rollout-resume.yml) starts them after the soak
+ *   check     in this run, which is for the later waves only (stage later),
+ *             once the soak and the canary's health check out
+ * A dry run merges nothing, a major waits for the owner's approval before
+ * each wave instead, a run without the canary has nothing to soak, and
+ * skipSoak is the owner's "urgent fix" switch: all of them run now.
+ */
+export function laterWaves({ stage = 'auto', major = false, dryRun = false, skipSoak = false, soakHours = DEFAULT_SOAK_HOURS, canary = [] }) {
+  if (!['auto', 'later'].includes(stage)) throw new Error(`--stage must be auto or later, not "${stage}"`)
+  if (dryRun || major || skipSoak || soakHours === 0) return 'now'
+  if (stage === 'later') return 'check'
+  return canary.length ? 'deferred' : 'now'
+}
+
+const semverOf = (tag) => tag.slice(1).split('.').map(Number)
+const newerTag = (a, b) => {
+  const [x, y] = [semverOf(a), semverOf(b)]
+  return (x[0] - y[0] || x[1] - y[1] || x[2] - y[2]) > 0
+}
+
+/**
+ * The rollout waiting for its soak, from release-kit's rollout runs: the newest
+ * release tag whose run did the canary and deferred the later waves (its
+ * DEFER_JOB succeeded), with no "(later waves)" run yet. A newer release
+ * supersedes an older one still waiting. Returns { tag, runId, gateTime }
+ * (gateTime: when the gate saw the canary's update merged), or { why } when
+ * there is none.
+ *   runs     the workflow's runs ({ id, display_title, status, conclusion, created_at })
+ *   jobsOf   (runId) => that run's jobs ({ name, conclusion, completed_at })
+ */
+export function pendingSoak(runs, jobsOf) {
+  const canaryRuns = runs.filter((r) => /^Rollout v\d+\.\d+\.\d+$/.test(r.display_title ?? ''))
+  if (!canaryRuns.length) return { why: 'no real rollout run yet' }
+  const tag = canaryRuns.map((r) => r.display_title.slice('Rollout '.length)).reduce((best, t) => (newerTag(t, best) ? t : best))
+  if (runs.some((r) => r.display_title === `Rollout ${tag} (later waves)`)) return { why: `the later waves of ${tag} already started` }
+  const latest = canaryRuns.filter((r) => r.display_title === `Rollout ${tag}`).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]
+  if (latest.status !== 'completed') return { why: `the rollout of ${tag} is still running` }
+  if (latest.conclusion !== 'success') return { why: `the rollout of ${tag} ended in ${latest.conclusion}, so its later waves don't start on their own` }
+  const jobs = jobsOf(latest.id)
+  if (!jobs.some((j) => j.name === DEFER_JOB && j.conclusion === 'success')) return { why: `the rollout of ${tag} deferred nothing (a major, a dry run, or the soak was skipped)` }
+  const gates = jobs.filter((j) => j.name.startsWith('Canary merged') && j.conclusion === 'success').map((j) => j.completed_at).filter(Boolean).sort()
+  return { tag, runId: latest.id, gateTime: gates.at(-1) ?? null }
+}
+
+/**
+ * Whether one canary is healthy and has soaked long enough for the later waves.
+ *   pin        the release-kit version its branch pins now
+ *   pr         its update pull request for the tag ({ url, merged, mergedAt }), or null
+ *   gateTime   when the rollout's gate saw the update merged (used when the
+ *              pull request's merge time is unknown: the pin moved without it)
+ *   head       the branch's head commit: { sha, date, checks: 'green' |
+ *              'pending' | 'red' | 'none' | null (unreadable), failed: [names] }
+ * Healthy means the branch still pins the tag and every check on its head
+ * commit, which is the merge or a later commit, has passed. Returns
+ * { state: 'ready' | 'waiting' | 'unhealthy', why }. Checks that stay pending
+ * or unreadable for a day past the soak count as unhealthy, so the owner hears.
+ */
+export function soakState({ tag, adopter, pin, pr, gateTime = null, head, soakHours, now = Date.now() }) {
+  const version = tag.replace(/^v/, '')
+  const where = `${adopter.repo} ${adopter.branch}`
+  if (head?.checks === 'red') return { state: 'unhealthy', why: `a check failed on ${where} (${head.sha.slice(0, 12)}) after the update: ${head.failed?.join(', ') || 'see its checks'}` }
+  if (pin !== version) return { state: 'unhealthy', why: `${where} pins ${pin ? `release-kit ${pin}` : 'no release-kit version'}, not ${tag}: was the update reverted?` }
+  const merged = Date.parse((pr?.merged && pr.mergedAt) || gateTime || '')
+  if (Number.isNaN(merged)) return { state: 'unhealthy', why: `can't tell when ${where} took ${tag} (no merged update pull request, and no gate time)` }
+  const end = merged + soakHours * HOUR_MS
+  const at = (ms) => new Date(ms).toISOString().replace(/:\d\d\.\d+Z$/, ' UTC').replace('T', ' ')
+  if (now < end) return { state: 'waiting', why: `${where} took ${tag} at ${at(merged)}; the ${soakHours}-hour soak ends at ${at(end)}` }
+  if (head?.checks === 'green') return { state: 'ready', why: `${where} has run ${tag} since ${at(merged)} (${soakHours}-hour soak over), and every check on ${head.sha.slice(0, 12)} passed` }
+  const stuck = now > end + 24 * HOUR_MS
+  const what = head?.checks === 'pending' ? 'checks are still running' : head?.checks === 'none' ? 'no check has reported' : 'checks could not be read'
+  return { state: stuck ? 'unhealthy' : 'waiting', why: `the soak is over, but on ${where}'s head commit${head?.sha ? ` (${head.sha.slice(0, 12)})` : ''} ${what}${stuck ? ' a day later' : ''}` }
+}
+
+/** The issue text when the later waves are held because the canary isn't healthy. */
+export function heldReport({ tag, why, runUrl = '' }) {
+  return [
+    `The later waves of ${tag} (public, private) are held: ${why}.`,
+    ...(runUrl ? ['', `Seen by [this run](${runUrl}); it looks again every hour and starts them once the canary is healthy.`] : []),
+    '',
+    'Fix the canary (or the kit, and release a fix), then let the hourly resume start them.',
+    `To start them now anyway, run Rollout for ${tag} with stage \`later\`, dry run off and \`skip_soak\` on.`,
+  ].join('\n')
+}
+
+/**
  * The issue text for a failed rollout: which jobs failed (a wave's job is
  * named for its adopter), with links, and what to do next.
  *   jobs  the run's jobs ({ name, conclusion, html_url })
@@ -223,7 +334,7 @@ function args(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (!a.startsWith('--')) out._.push(a)
-    else if (a === '--dry-run') out['dry-run'] = true
+    else if (['--dry-run', '--skip-soak', '--require-ready'].includes(a)) out[a.slice(2)] = true
     else {
       if (argv[i + 1] === undefined) throw new Error(`${a} needs a value`)
       out[a.slice(2)] = argv[++i]
@@ -242,21 +353,38 @@ function summary(text) {
 function plan(opts) {
   if (!TAG.test(opts.tag ?? '')) throw new Error(`--tag must be a release tag like v2.6.0, not "${opts.tag ?? ''}"`)
   const file = opts.adopters ?? fileURLToPath(new URL('../adopters.json', import.meta.url))
-  const { adopters } = parseAdopters(readFileSync(file, 'utf8'))
+  const { adopters, soakHours } = parseAdopters(readFileSync(file, 'utf8'))
   const dryRun = Boolean(opts['dry-run'])
+  const stage = opts.stage || 'auto'
   const waves = planWaves(adopters, (opts.repos ?? '').split(','), { dryRun })
+  // The later waves' own run: the canary already has the release.
+  const canaries = waves.canary
+  if (stage === 'later') waves.canary = []
   // The release tags, to tell a major from a patch or minor.
   const tags = opts.tags !== undefined
     ? opts.tags.split(',').map((t) => t.trim()).filter(Boolean)
     : execFileSync('git', ['ls-remote', '--tags', '--refs', `https://github.com/${process.env.GITHUB_REPOSITORY || KIT_REPO}.git`], { encoding: 'utf8' })
       .split('\n').map((line) => line.split('refs/tags/')[1]).filter(Boolean)
   waves.major = isMajorRelease(opts.tag, tags)
+  waves.later = laterWaves({ stage, major: waves.major, dryRun, skipSoak: Boolean(opts['skip-soak']), soakHours, canary: canaries })
+  waves.soakHours = soakHours
+  if (waves.later === 'check' && !canaries.length) throw new Error('the later waves wait for the canary to soak, and no enabled canary is in adopters.json (or --repos): run with --skip-soak to start them anyway')
   for (const wave of WAVES) output(wave, JSON.stringify(waves[wave]))
   output('major', String(waves.major))
-  const lines = [`## Rollout of ${opts.tag}${dryRun ? ' (dry run)' : ''}`, '']
+  output('later', waves.later)
+  output('soak-hours', String(soakHours))
+  output('canaries', JSON.stringify(canaries))
+  output('canary-owner', canaries[0]?.owner ?? '')
+  output('canary-names', canaries.map((a) => a.name).join(','))
+  if (new Set(canaries.map((a) => a.owner)).size > 1) throw new Error('every canary must have the same owner: one App token reads them all')
+  const lines = [`## Rollout of ${opts.tag}${stage === 'later' ? ', later waves' : ''}${dryRun ? ' (dry run)' : ''}`, '']
   lines.push(waves.major
     ? `A major release: each wave waits for the owner's approval in the \`rollout-major\` environment.`
-    : 'A patch or minor release: no approval; the public and private waves start once the canary\'s update pull request has merged.')
+    : {
+      now: 'A patch or minor release: no approval; the public and private waves start once the canary\'s update pull request has merged.',
+      deferred: `A patch or minor release: no approval; once the canary's update pull request has merged, the public and private waves wait for the ${soakHours}-hour soak, and the hourly resume (rollout-resume.yml) starts them when it is over and the canary is healthy.`,
+      check: `The public and private waves, once the canary has run ${opts.tag} for ${soakHours} hours and is healthy.`,
+    }[waves.later])
   lines.push('')
   for (const wave of WAVES) lines.push(`- **${wave}**: ${waves[wave].map((a) => a.repo).join(', ') || 'none'}`)
   for (const s of waves.skipped) lines.push(`- skipped ${s.repo}: ${s.reason}`)
@@ -285,7 +413,7 @@ function lookAtAdopter(adopter, tag) {
   } catch {}
   const pulls = ghApi(`repos/${adopter.repo}/pulls?state=all&head=${encodeURIComponent(`${adopter.owner}:${BRANCH}`)}&base=${encodeURIComponent(adopter.branch)}&sort=created&direction=desc&per_page=20`) ?? []
   const raw = pulls.find((p) => p.title === prTitle(tag))
-  const pr = raw ? { number: raw.number, state: raw.state, merged: Boolean(raw.merged_at), url: raw.html_url, sha: raw.head.sha } : null
+  const pr = raw ? { number: raw.number, state: raw.state, merged: Boolean(raw.merged_at), mergedAt: raw.merged_at ?? null, url: raw.html_url, sha: raw.head.sha } : null
   let checks = null
   let failed = []
   if (pr && pr.state === 'open') {
@@ -321,6 +449,78 @@ function waitMerge(opts) {
     if (Date.now() + interval > deadline) throw new Error(`${adopter.repo}: not merged after ${opts['timeout-minutes'] ?? 60} minutes (${result.why})`)
     pause(interval)
   }
+}
+
+function pending(opts) {
+  const repo = process.env.GITHUB_REPOSITORY || KIT_REPO
+  const runs = ghApi(`repos/${repo}/actions/workflows/rollout.yml/runs?per_page=100`)?.workflow_runs
+  if (!runs) throw new Error(`could not list the rollout runs of ${repo}`)
+  const found = pendingSoak(runs, (id) => ghApi(`repos/${repo}/actions/runs/${id}/jobs?per_page=100`)?.jobs ?? [])
+  if (!found.tag) {
+    console.log(`nothing waits for its soak: ${found.why}`)
+    output('tag', '')
+    return
+  }
+  const file = opts.adopters ?? fileURLToPath(new URL('../adopters.json', import.meta.url))
+  const { adopters, soakHours } = parseAdopters(readFileSync(file, 'utf8'))
+  const canaries = planWaves(adopters).canary
+  if (!canaries.length) throw new Error(`${found.tag} waits for its soak, but adopters.json has no enabled canary to check: run Rollout for it with stage later and skip_soak`)
+  if (new Set(canaries.map((a) => a.owner)).size > 1) throw new Error('every canary must have the same owner: one App token reads them all')
+  console.log(`${found.tag} waits for its soak (run ${found.runId}; the gate saw the canary merged at ${found.gateTime ?? 'an unknown time'})`)
+  output('tag', found.tag)
+  output('gate-time', found.gateTime ?? '')
+  output('soak-hours', String(soakHours))
+  output('canaries', JSON.stringify(canaries))
+  output('canary-owner', canaries[0].owner)
+  output('canary-names', canaries.map((a) => a.name).join(','))
+}
+
+/** One look at a canary's branch head: its sha, commit date and checks. */
+function lookAtHead(adopter) {
+  const commit = ghApi(`repos/${adopter.repo}/commits/${encodeURIComponent(adopter.branch)}`)
+  if (!commit?.sha) return null
+  const runs = ghApi(`repos/${adopter.repo}/commits/${commit.sha}/check-runs?per_page=100`)?.check_runs
+  const statuses = ghApi(`repos/${adopter.repo}/commits/${commit.sha}/status`)
+  const failed = (runs ?? []).filter((r) => r.status === 'completed' && !['success', 'neutral', 'skipped'].includes(r.conclusion)).map((r) => r.name)
+  const checks = !runs ? null : !runs.length && !statuses?.total_count ? 'none' : checksState(runs, statuses ?? undefined)
+  return { sha: commit.sha, date: commit.commit?.committer?.date ?? null, checks, failed }
+}
+
+function soakCheck(opts) {
+  if (!TAG.test(opts.tag ?? '')) throw new Error(`--tag must be a release tag like v2.6.0, not "${opts.tag ?? ''}"`)
+  const canaries = JSON.parse(opts.canaries ?? '[]')
+  if (!Array.isArray(canaries) || !canaries.length || canaries.some((a) => !SLUG.test(a?.repo ?? ''))) throw new Error('--canaries must be the canary adopters from the plan, as JSON')
+  const soakHours = Number(opts['soak-hours'] ?? DEFAULT_SOAK_HOURS)
+  if (!Number.isInteger(soakHours) || soakHours < 0) throw new Error('--soak-hours must be a whole number of hours')
+  const results = canaries.map((adopter) => {
+    const { pin, pr } = lookAtAdopter(adopter, opts.tag)
+    return soakState({ tag: opts.tag, adopter, pin, pr, gateTime: opts['gate-time'] || null, head: lookAtHead(adopter), soakHours })
+  })
+  const state = ['unhealthy', 'waiting'].find((s) => results.some((r) => r.state === s)) ?? 'ready'
+  const why = results.map((r) => r.why).join('; ')
+  console.log(`${opts.tag}: ${state}: ${why}`)
+  output('state', state)
+  output('why', why.replace(/\r?\n/g, ' '))
+  summary(`### Soak of ${opts.tag}\n\n${state}: ${why}`)
+  if (opts['require-ready'] && state !== 'ready') throw new Error(`the later waves of ${opts.tag} don't start yet: ${why}${state === 'waiting' ? ' (or run with skip_soak for an urgent fix)' : ''}`)
+}
+
+function held(opts) {
+  if (!TAG.test(opts.tag ?? '')) throw new Error(`--tag must be a release tag like v2.6.0, not "${opts.tag ?? ''}"`)
+  const repo = process.env.GITHUB_REPOSITORY || KIT_REPO
+  const gh = (...list) => execFileSync('gh', list, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'] })
+  const runUrl = process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}` : ''
+  const title = `Rollout of ${opts.tag} held: the canary is not healthy`
+  const open = JSON.parse(gh('issue', 'list', '-R', repo, '--label', ISSUE_LABEL, '--state', 'open', '--json', 'number,title', '--limit', '50'))
+  const same = open.find((i) => i.title === title)
+  if (same) {
+    console.log(`#${same.number} already says so`)
+    return
+  }
+  try {
+    gh('label', 'create', ISSUE_LABEL, '-R', repo, '--color', 'B60205', '--description', 'A kit rollout that stopped and needs a look')
+  } catch {}
+  console.log(gh('issue', 'create', '-R', repo, '--title', title, '--label', ISSUE_LABEL, '--body', heldReport({ tag: opts.tag, why: opts.why ?? 'see the run', runUrl })).trim())
 }
 
 function report(opts) {
@@ -459,7 +659,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     else if (command === 'update') update(opts)
     else if (command === 'wait-merge') waitMerge(opts)
     else if (command === 'report') report(opts)
-    else throw new Error('usage: node scripts/rollout.mjs plan --tag vX.Y.Z [--repos a,b] [--tags v1,v2] [--dry-run] | update --adopter <json> --tag vX.Y.Z --kit <dir> --target <dir> [--notes <file>] [--bot <login>] [--dry-run] | wait-merge --adopter <json> --tag vX.Y.Z [--timeout-minutes 60] [--interval-seconds 30] | report --tag vX.Y.Z --run-id <id>')
+    else if (command === 'pending') pending(opts)
+    else if (command === 'soak-check') soakCheck(opts)
+    else if (command === 'held') held(opts)
+    else throw new Error('usage: node scripts/rollout.mjs plan --tag vX.Y.Z [--repos a,b] [--tags v1,v2] [--stage auto|later] [--skip-soak] [--dry-run] | pending | soak-check --tag vX.Y.Z --canaries <json> --soak-hours N [--gate-time <iso>] [--require-ready] | held --tag vX.Y.Z --why <text> | update --adopter <json> --tag vX.Y.Z --kit <dir> --target <dir> [--notes <file>] [--bot <login>] [--dry-run] | wait-merge --adopter <json> --tag vX.Y.Z [--timeout-minutes 60] [--interval-seconds 30] | report --tag vX.Y.Z --run-id <id>')
   } catch (error) {
     console.error(`rollout: ${error.message}`)
     process.exit(1)

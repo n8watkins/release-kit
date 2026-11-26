@@ -107,7 +107,7 @@ Pushing the tag runs `.github/workflows/release.yml`:
 4. The GitHub Release is created with the generated notes and the files (`releases.json`, and `releases.xml` with the feed on, among them), and the uploaded files are re-downloaded and checked.
 
 In release-kit itself, a published release then starts the rollout bot: [`rollout-start.yml`](.github/workflows/rollout-start.yml) runs `.github/workflows/rollout.yml` for the tag, for real ([docs/UPGRADES.md](docs/UPGRADES.md#with-the-app)).
-A patch or minor release rolls out with no clicks, gated on the canary's update pull request merging; a major release waits for the owner's approval in the `rollout-major` environment before each wave; a failure opens a `release-kit: rollout` issue.
+A patch or minor release rolls out with no clicks: the canary first, and the other waves once the canary's update has merged and run for `soakHours` (in `adopters.json`, default 24) with every check green, started by the hourly `rollout-resume.yml`; a major release waits for the owner's approval in the `rollout-major` environment before each wave; a failure opens a `release-kit: rollout` issue.
 It skips a baseline, a pre-release, and a tag that already had a real rollout.
 
 If a Release run fails after the tag is pushed (a flaky check, an outage), fix the cause and retry; the workflow is safe to run again:

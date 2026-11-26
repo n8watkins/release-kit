@@ -94,9 +94,18 @@ On every published release (pre-releases are skipped), [`.github/workflows/rollo
 - **In waves:** the canary repo, then the public repos, then the private ones.
   A wave starts only when every repo in the waves before it succeeded, so a red canary stops the rollout.
 - **Gated on the canary, with no clicks, for a patch or minor release:** after the canary wave, the "Canary merged" job waits up to an hour for the canary's update pull request to pass its checks and merge (it checks that the canary's branch pins the new tag).
-  Only then do the public and private waves start.
   A failed check on that pull request, the pull request closed without merging, or the hour running out stops the rollout.
   On a private canary the App can't read checks, so only the merge or the timeout decides there.
+- **A soak before the other waves:** the rollout run then ends with the job "Later waves wait for the soak".
+  Every hour `rollout-resume.yml` looks at the newest such release, and once the canary has run it for `soakHours` (at the top of `adopters.json`, default 24, 0 for none) and is healthy, it starts Rollout again with stage `later`: the public and private waves.
+  Healthy means the canary's branch still pins the release, and every check on the branch's head commit, the merge or a later commit, has passed.
+  A failed check or a pin that moved away keeps the waves back and opens a `release-kit: rollout` issue (once); fixing the canary is enough, since it keeps looking every hour.
+  Checks still pending, or unreadable (a private canary), a day after the soak count as unhealthy too, so you hear about it.
+  The later waves' run checks the soak and the canary's health again before it opens anything.
+  Nothing is stored: the rollout runs' names and jobs, and the canary's pull request and checks, are the state, and a newer release supersedes an older one still waiting.
+- **When the canary's update never merges:** the run stops at the gate and opens the rollout issue, and the later waves don't start on their own.
+  Fix the cause, merge the canary's pull request, and run Rollout for the tag with stage `later` and dry run off; the soak counts from that merge.
+- **An urgent fix skips the soak:** "Run workflow" with `skip_soak` on runs every wave in one go, the later ones right after the canary merges (or, with stage `later`, at once).
 - **With your approval for a major release:** each wave first waits for one click in the `rollout-major` environment, up to three per release.
   Its update pull requests wait for you to merge them anyway, so there is no merge gate: merge the canary's, then approve the next wave.
 - **Failures come to you as an issue:** when a job in a real rollout fails, the "Report a failure" job opens an issue labeled `release-kit: rollout` in release-kit, or comments on the open one, naming each failed job (a wave's job is named for its repo) with a link to its log.

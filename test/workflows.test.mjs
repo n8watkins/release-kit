@@ -50,7 +50,7 @@ test('workflows read by default and grant write only to the jobs that need it', 
   // Only the auto-merge policy touches pull requests.
   for (const file of files) if (!/auto-merge\.yml$/.test(file)) assert.doesNotMatch(read(file), /pull-requests: write/, file)
   // Only the Direct push alarm and the rollout's failure report open issues.
-  for (const file of files) if (!/(direct-push|\/rollout)\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
+  for (const file of files) if (!/(direct-push|\/rollout|\/rollout-resume)\.yml$/.test(file)) assert.doesNotMatch(read(file), /issues: write/, file)
 })
 
 test('the auto-merge callers grant every permission the reusable job asks for', () => {

@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BRANCH, ISSUE_LABEL, failureReport, filesFromStatus, isMajorRelease, linkReleaseNotes, mergeState, parseAdopters, planWaves, prBody, prTitle, updateLock } from '../scripts/rollout.mjs'
+import { BRANCH, DEFER_JOB, ISSUE_LABEL, failureReport, filesFromStatus, heldReport, isMajorRelease, laterWaves, linkReleaseNotes, mergeState, parseAdopters, pendingSoak, planWaves, prBody, prTitle, soakState, updateLock } from '../scripts/rollout.mjs'
 import { KIT, attempt, makeRepo, run, tmp } from './helpers.mjs'
 import { execFileSync } from 'node:child_process'
 
@@ -181,13 +181,26 @@ test('plan prints the waves and writes them as step outputs', () => {
   writeFileSync(join(dir, 'summary'), '')
   const env = { GITHUB_OUTPUT: join(dir, 'out'), GITHUB_STEP_SUMMARY: join(dir, 'summary') }
   run(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'v9.9.9', '--tags', 'v9.0.0,v9.9.8', '--adopters', join(dir, 'adopters.json')], env)
-  const out = Object.fromEntries(readFileSync(join(dir, 'out'), 'utf8').trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), JSON.parse(l.slice(l.indexOf('=') + 1))]))
+  const raw = () => Object.fromEntries(readFileSync(join(dir, 'out'), 'utf8').trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]))
+  const out = Object.fromEntries(Object.entries(raw()).map(([k, v]) => [k, ['later', 'canary-owner', 'canary-names'].includes(k) ? v : JSON.parse(v)]))
   assert.deepEqual(out.canary.map((a) => a.repo), ['acme/app'])
   assert.deepEqual(out.public.map((a) => a.repo), ['acme/web'])
   assert.deepEqual(out.private, [])
   assert.equal(out.major, false)
   assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /\*\*canary\*\*: acme\/app/)
-  assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /no approval; the public and private waves start once the canary's update pull request has merged/)
+  // A real patch or minor rollout soaks on the canary: the later waves are deferred.
+  assert.equal(out.later, 'deferred')
+  assert.equal(out['soak-hours'], 24)
+  assert.deepEqual(out.canaries.map((a) => a.repo), ['acme/app'])
+  assert.deepEqual([out['canary-owner'], out['canary-names']], ['acme', 'app'])
+  assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /no approval; once the canary's update pull request has merged, the public and private waves wait for the 24-hour soak, and the hourly resume \(rollout-resume\.yml\) starts them/)
+  // The later waves' own run leaves the canary out and checks the soak; skip-soak runs them now.
+  writeFileSync(join(dir, 'out'), '')
+  run(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'v9.9.9', '--tags', 'v9.0.0,v9.9.8', '--adopters', join(dir, 'adopters.json'), '--stage', 'later'], env)
+  assert.deepEqual([raw().canary, raw().later, JSON.parse(raw().canaries).length], ['[]', 'check', 1])
+  writeFileSync(join(dir, 'out'), '')
+  run(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'v9.9.9', '--tags', 'v9.0.0,v9.9.8', '--adopters', join(dir, 'adopters.json'), '--skip-soak'], env)
+  assert.equal(raw().later, 'now')
   writeFileSync(join(dir, 'out'), '')
   run(KIT, 'node', ['scripts/rollout.mjs', 'plan', '--tag', 'v10.0.0', '--tags', 'v9.9.9', '--adopters', join(dir, 'adopters.json')], env)
   assert.match(readFileSync(join(dir, 'out'), 'utf8'), /^major=true$/m)
@@ -283,8 +296,8 @@ test('the rollout workflow runs the waves in order, gates a patch or minor on th
   // canary, then the gate, then public, then private; a failed wave or gate stops the ones after it.
   assert.match(main, /^ {2}canary:\n(?: {4}.*\n)*? {4}needs: plan$/m)
   assert.match(main, /^ {2}canary-merged:\n(?: {4}.*\n)*? {4}needs: \[plan, canary\]$/m)
-  assert.match(main, /^ {2}public:\n(?: {4}.*\n)*? {4}needs: \[plan, canary, canary-merged\]$/m)
-  assert.match(main, /^ {2}private:\n(?: {4}.*\n)*? {4}needs: \[plan, canary, canary-merged, public\]$/m)
+  assert.match(main, /^ {2}public:\n(?: {4}.*\n)*? {4}needs: \[plan, canary, canary-merged, soak\]$/m)
+  assert.match(main, /^ {2}private:\n(?: {4}.*\n)*? {4}needs: \[plan, canary, canary-merged, soak, public\]$/m)
   assert.equal(main.match(/needs\.canary\.result == 'success' \|\| needs\.canary\.result == 'skipped'/g).length, 2)
   assert.equal(main.match(/needs\.canary-merged\.result == 'success' \|\| needs\.canary-merged\.result == 'skipped'/g).length, 2)
   assert.match(main, /needs\.public\.result == 'success' \|\| needs\.public\.result == 'skipped'/)
@@ -301,7 +314,7 @@ test('the rollout workflow runs the waves in order, gates a patch or minor on th
   assert.equal(main.match(/^ {6}major: \$\{\{ needs\.plan\.outputs\.major == 'true' \}\}$/gm).length, 3)
   // A failure in a real rollout opens or updates the rollout issue.
   const report = main.slice(main.indexOf('\n  report:\n'))
-  assert.match(report, /needs: \[plan, canary, canary-merged, public, private\]/)
+  assert.match(report, /needs: \[plan, canary, canary-merged, defer, soak, public, private\]/)
   assert.match(report, /if: failure\(\) && !\(github\.event_name == 'workflow_dispatch' && inputs\.dry_run\)/)
   assert.match(report, /issues: write/)
   assert.match(report, /node scripts\/rollout\.mjs report --tag "\$TAG" --run-id "\$RUN_ID"/)
@@ -330,7 +343,7 @@ test('a release the Release workflow publishes starts one real rollout, in this 
   // release.yml is also the reusable workflow adopters call: it must not ask for actions: write.
   assert.doesNotMatch(read('.github/workflows/release.yml'), /actions: write|rollout/)
   // The run name carries the tag, so a tag that already rolled out is found.
-  assert.match(main, /^run-name: Rollout \$\{\{ inputs\.tag \|\| github\.event\.release\.tag_name \}\}\$\{\{ inputs\.dry_run && ' \(dry run\)' \|\| '' \}\}$/m)
+  assert.match(main, /^run-name: Rollout \$\{\{ inputs\.tag \|\| github\.event\.release\.tag_name \}\}\$\{\{ inputs\.stage == 'later' && ' \(later waves\)' \|\| '' \}\}\$\{\{ inputs\.dry_run && ' \(dry run\)' \|\| '' \}\}$/m)
 
   // The step's script, run against a stand-in gh.
   const lines = start.split('\n')
@@ -396,4 +409,175 @@ test("the lock file moves to the kit at the new tag, not only package.json's pin
   assert.equal(readFileSync(join(app, 'package.json'), 'utf8'), manifest('v1.1.0'), "package.json stays apply's, byte for byte")
   // A lock that still doesn't match the tag stops the rollout for that repo.
   assert.throws(() => updateLock(app, 'v1.2.0', env), /lock file has release-kit 1.1.0 after npm install, not v1.2.0/)
+})
+
+// The soak (F6): a patch or minor kit release runs on the canary for
+// adopters.json "soakHours" before the public and private waves get it, and
+// only while the canary stays healthy.
+test('adopters.json soakHours: 24 by default, 0 turns the soak off, anything else is refused', () => {
+  assert.equal(parseAdopters(file([adopter()])).soakHours, 24)
+  assert.equal(parseAdopters(JSON.stringify({ bot: 'b[bot]', soakHours: 0, adopters: [adopter()] })).soakHours, 0)
+  for (const bad of [-1, 1.5, '24', 1000]) {
+    assert.throws(() => parseAdopters(JSON.stringify({ bot: 'b[bot]', soakHours: bad, adopters: [adopter()] })), /"soakHours" must be a whole number of hours from 0 to 720/, String(bad))
+  }
+  assert.throws(() => parseAdopters(JSON.stringify({ bot: 'b[bot]', soak: 24, adopters: [adopter()] })), /unknown key "soak"/)
+  // The repo's own file states it at the top.
+  assert.equal(JSON.parse(read('adopters.json')).soakHours, 24)
+})
+
+test('laterWaves: a real patch or minor rollout defers the later waves to after the soak; a dry run, a major or skip_soak runs them now', () => {
+  const canary = [adopter({ wave: 'canary' })]
+  assert.equal(laterWaves({ canary }), 'deferred')
+  assert.equal(laterWaves({ canary, dryRun: true }), 'now')
+  assert.equal(laterWaves({ canary, major: true }), 'now')
+  assert.equal(laterWaves({ canary, skipSoak: true }), 'now')
+  assert.equal(laterWaves({ canary, soakHours: 0 }), 'now')
+  // Without the canary in the run there is nothing to soak.
+  assert.equal(laterWaves({ canary: [] }), 'now')
+  assert.equal(laterWaves({ canary, stage: 'later' }), 'check')
+  assert.equal(laterWaves({ canary, stage: 'later', skipSoak: true }), 'now')
+  assert.throws(() => laterWaves({ stage: 'soon' }), /--stage must be auto or later/)
+})
+
+test('soakState: ready only once the soak is over, the branch still pins the tag and every check on its head passed', () => {
+  const now = Date.parse('2026-11-26T12:00:00Z')
+  const base = { tag: 'v2.11.0', adopter: { repo: 'acme/canary', branch: 'main' }, pin: '2.11.0', soakHours: 24, now }
+  const pr = (mergedAt) => ({ url: 'https://github.com/acme/canary/pull/9', merged: true, mergedAt })
+  const head = (checks, failed = []) => ({ sha: 'c'.repeat(40), date: '2026-11-26T00:00:00Z', checks, failed })
+  const ready = soakState({ ...base, pr: pr('2026-11-25T11:00:00Z'), head: head('green') })
+  assert.deepEqual(ready.state, 'ready')
+  assert.match(ready.why, /acme\/canary main has run v2\.11\.0 since 2026-11-25 11:00 UTC \(24-hour soak over\), and every check on cccccccccccc passed/)
+  const early = soakState({ ...base, pr: pr('2026-11-26T01:00:00Z'), head: head('green') })
+  assert.deepEqual([early.state, early.why], ['waiting', 'acme/canary main took v2.11.0 at 2026-11-26 01:00 UTC; the 24-hour soak ends at 2026-11-27 01:00 UTC'])
+  // A red check stops it at once, soak or not; so does a pin that moved away.
+  const red = soakState({ ...base, pr: pr('2026-11-26T01:00:00Z'), head: head('red', ['CI result']) })
+  assert.deepEqual([red.state, red.why], ['unhealthy', 'a check failed on acme/canary main (cccccccccccc) after the update: CI result'])
+  assert.match(soakState({ ...base, pin: '2.10.1', pr: pr('2026-11-25T01:00:00Z'), head: head('green') }).why, /pins release-kit 2\.10\.1, not v2\.11\.0: was the update reverted\?/)
+  // The pin moved without the bot's pull request merging: the gate's time stands in.
+  assert.equal(soakState({ ...base, pr: null, gateTime: '2026-11-25T10:00:00Z', head: head('green') }).state, 'ready')
+  assert.match(soakState({ ...base, pr: null, head: head('green') }).why, /can't tell when acme\/canary main took v2\.11\.0/)
+  // Checks still running or never reported: wait, and after a day more, say so.
+  assert.equal(soakState({ ...base, pr: pr('2026-11-25T11:00:00Z'), head: head('pending') }).state, 'waiting')
+  const stuck = soakState({ ...base, pr: pr('2026-11-24T00:00:00Z'), head: head('none') })
+  assert.deepEqual([stuck.state, stuck.why], ['unhealthy', "the soak is over, but on acme/canary main's head commit (cccccccccccc) no check has reported a day later"])
+  assert.equal(soakState({ ...base, soakHours: 0, pr: pr('2026-11-26T11:59:00Z'), head: head('green') }).state, 'ready')
+})
+
+test('pendingSoak finds the newest rollout that deferred its later waves and has not started them', () => {
+  const runs = [
+    { id: 1, display_title: 'Rollout v2.10.0', status: 'completed', conclusion: 'success', created_at: '2026-11-01T00:00:00Z' },
+    { id: 2, display_title: 'Rollout v2.11.0 (dry run)', status: 'completed', conclusion: 'success', created_at: '2026-11-25T00:00:00Z' },
+    { id: 3, display_title: 'Rollout v2.11.0', status: 'completed', conclusion: 'success', created_at: '2026-11-25T01:00:00Z' },
+    { id: 4, display_title: 'Rollout soak', status: 'completed', conclusion: 'success', created_at: '2026-11-25T02:00:00Z' },
+  ]
+  const jobs = {
+    3: [
+      { name: 'Plan the waves', conclusion: 'success', completed_at: '2026-11-25T01:01:00Z' },
+      { name: 'Canary merged / portfolio-rank', conclusion: 'success', completed_at: '2026-11-25T01:20:00Z' },
+      { name: DEFER_JOB, conclusion: 'success', completed_at: '2026-11-25T01:21:00Z' },
+    ],
+  }
+  const jobsOf = (id) => jobs[id] ?? []
+  assert.deepEqual(pendingSoak(runs, jobsOf), { tag: 'v2.11.0', runId: 3, gateTime: '2026-11-25T01:20:00Z' })
+  // Already started, still running, failed, or a run that deferred nothing: none.
+  assert.match(pendingSoak([...runs, { id: 5, display_title: 'Rollout v2.11.0 (later waves)', status: 'in_progress' }], jobsOf).why, /later waves of v2\.11\.0 already started/)
+  assert.match(pendingSoak([{ ...runs[2], status: 'in_progress', conclusion: null }], jobsOf).why, /still running/)
+  assert.match(pendingSoak([{ ...runs[2], conclusion: 'failure' }], jobsOf).why, /ended in failure, so its later waves don't start on their own/)
+  assert.match(pendingSoak([runs[2]], () => []).why, /deferred nothing/)
+  // A newer release supersedes an older one still waiting.
+  assert.match(pendingSoak([...runs, { id: 6, display_title: 'Rollout v2.12.0', status: 'in_progress' }], jobsOf).why, /rollout of v2\.12\.0 is still running/)
+  assert.match(pendingSoak([], jobsOf).why, /no real rollout run yet/)
+})
+
+test('soak-check and pending read GitHub through gh, and held opens the rollout issue once', () => {
+  const dir = tmp('rollout-soak')
+  writeFileSync(join(dir, 'gh'), `#!/usr/bin/env node
+const { appendFileSync, readFileSync } = require('node:fs')
+const args = process.argv.slice(2)
+appendFileSync(process.env.FAKE_LOG, args.join(' ') + '\\n')
+const state = JSON.parse(readFileSync(process.env.FAKE_STATE, 'utf8'))
+const path = args.find((a) => a.startsWith('repos/')) ?? args.slice(0, 2).join(' ')
+const hit = Object.entries(state).find(([prefix]) => path.startsWith(prefix))
+if (!hit) { console.error('HTTP 404: ' + path); process.exit(1) }
+process.stdout.write(typeof hit[1] === 'string' ? hit[1] : JSON.stringify(hit[1]))
+`, { mode: 0o755 })
+  const hoursAgo = (h) => new Date(Date.now() - h * 3_600_000).toISOString()
+  const canary = { repo: 'acme/canary', owner: 'acme', name: 'canary', branch: 'main' }
+  const pkg = (v) => ({ content: Buffer.from(JSON.stringify({ devDependencies: { 'release-kit': `github:n8watkins/release-kit#v${v}` } })).toString('base64') })
+  const state = (over = {}) => ({
+    'repos/acme/canary/contents/package.json': pkg('2.11.0'),
+    'repos/acme/canary/pulls?': [{ number: 9, title: prTitle('v2.11.0'), state: 'closed', merged_at: hoursAgo(30), html_url: 'https://github.com/acme/canary/pull/9', head: { sha: 'a'.repeat(40) } }],
+    'repos/acme/canary/commits/main': { sha: 'c'.repeat(40), commit: { committer: { date: hoursAgo(30) } } },
+    [`repos/acme/canary/commits/${'c'.repeat(40)}/check-runs`]: { check_runs: [{ name: 'CI result', status: 'completed', conclusion: 'success' }] },
+    [`repos/acme/canary/commits/${'c'.repeat(40)}/status`]: { state: 'success', total_count: 0 },
+    ...over,
+  })
+  const go = (args, s) => {
+    writeFileSync(join(dir, 'state.json'), JSON.stringify(s))
+    writeFileSync(join(dir, 'log'), '')
+    writeFileSync(join(dir, 'out'), '')
+    const result = attempt(KIT, 'node', ['scripts/rollout.mjs', ...args], { PATH: `${dir}:${process.env.PATH}`, FAKE_STATE: join(dir, 'state.json'), FAKE_LOG: join(dir, 'log'), GITHUB_OUTPUT: join(dir, 'out'), GITHUB_REPOSITORY: 'n8watkins/release-kit' })
+    return { ...result, out: Object.fromEntries(readFileSync(join(dir, 'out'), 'utf8').trim().split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])), log: readFileSync(join(dir, 'log'), 'utf8') }
+  }
+  const check = (s, more = []) => go(['soak-check', '--tag', 'v2.11.0', '--canaries', JSON.stringify([canary]), '--soak-hours', '24', ...more], s)
+
+  const ready = check(state())
+  assert.equal(ready.status, 0, ready.stderr)
+  assert.equal(ready.out.state, 'ready')
+  const early = check(state({ 'repos/acme/canary/pulls?': [{ number: 9, title: prTitle('v2.11.0'), state: 'closed', merged_at: hoursAgo(2), html_url: 'u', head: { sha: 'a'.repeat(40) } }] }))
+  assert.equal(early.out.state, 'waiting')
+  // The later waves' own run fails its soak job unless ready.
+  const required = check(state({ 'repos/acme/canary/pulls?': [{ number: 9, title: prTitle('v2.11.0'), state: 'closed', merged_at: hoursAgo(2), html_url: 'u', head: { sha: 'a'.repeat(40) } }] }), ['--require-ready'])
+  assert.equal(required.status, 1)
+  assert.match(required.stderr, /the later waves of v2\.11\.0 don't start yet: .*soak ends at .*\(or run with skip_soak for an urgent fix\)/)
+  const red = check(state({ [`repos/acme/canary/commits/${'c'.repeat(40)}/check-runs`]: { check_runs: [{ name: 'E2E', status: 'completed', conclusion: 'failure' }] } }))
+  assert.deepEqual([red.out.state, red.out.why], ['unhealthy', `a check failed on acme/canary main (${'c'.repeat(12)}) after the update: E2E`])
+
+  // pending: the rollout runs and their jobs, through release-kit's token.
+  const runs = { workflow_runs: [{ id: 3, display_title: 'Rollout v2.11.0', status: 'completed', conclusion: 'success', created_at: hoursAgo(30) }] }
+  const jobs = { jobs: [{ name: 'Canary merged / canary', conclusion: 'success', completed_at: hoursAgo(29) }, { name: DEFER_JOB, conclusion: 'success', completed_at: hoursAgo(29) }] }
+  const pend = go(['pending'], { 'repos/n8watkins/release-kit/actions/workflows/rollout.yml/runs': runs, 'repos/n8watkins/release-kit/actions/runs/3/jobs': jobs })
+  assert.equal(pend.status, 0, pend.stderr)
+  assert.equal(pend.out.tag, 'v2.11.0')
+  assert.equal(pend.out['soak-hours'], '24')
+  assert.equal(pend.out['canary-owner'], 'n8watkins')
+  assert.equal(pend.out['canary-names'], 'portfolio-rank')
+  const nothing = go(['pending'], { 'repos/n8watkins/release-kit/actions/workflows/rollout.yml/runs': { workflow_runs: [] } })
+  assert.equal(nothing.out.tag, '')
+
+  // held: one issue per tag, never a second.
+  const issue = go(['held', '--tag', 'v2.11.0', '--why', 'a check failed'], { 'issue list': '[]', 'label create': '', 'issue create': 'https://github.com/n8watkins/release-kit/issues/1' })
+  assert.equal(issue.status, 0, issue.stderr)
+  assert.match(issue.log, /^issue create -R n8watkins\/release-kit --title Rollout of v2\.11\.0 held: the canary is not healthy --label release-kit: rollout --body The later waves of v2\.11\.0 \(public, private\) are held: a check failed\./m)
+  const again = go(['held', '--tag', 'v2.11.0', '--why', 'a check failed'], { 'issue list': JSON.stringify([{ number: 1, title: 'Rollout of v2.11.0 held: the canary is not healthy' }]) })
+  assert.doesNotMatch(again.log, /issue create/)
+  assert.match(heldReport({ tag: 'v2.11.0', why: 'x' }), /run Rollout for v2\.11\.0 with stage `later`, dry run off and `skip_soak` on/)
+})
+
+test('the rollout defers its later waves to the hourly resume, which starts them after the soak; skip_soak and a major run them at once', () => {
+  const main = read('.github/workflows/rollout.yml')
+  const resume = read('.github/workflows/rollout-resume.yml')
+  for (const input of ['stage', 'skip_soak']) assert.match(main, new RegExp(`^ {6}${input}:$`, 'm'))
+  assert.match(main, /skip_soak:\n(?: {8}.*\n)*? {8}default: false/)
+  // The defer job ends a real patch or minor run once the canary merged; the resume finds it by name.
+  const defer = main.slice(main.indexOf('\n  defer:\n'), main.indexOf('\n  soak:\n'))
+  assert.match(defer, new RegExp(`name: ${DEFER_JOB}\n`))
+  assert.match(defer, /needs\.canary-merged\.result == 'success' && needs\.plan\.outputs\.later == 'deferred'/)
+  // The later waves' own run checks the soak first, with a read-only token for the canary.
+  const soak = main.slice(main.indexOf('\n  soak:\n'), main.indexOf('\n  public:\n'))
+  assert.match(soak, /if: needs\.plan\.outputs\.later == 'check'/)
+  assert.match(soak, /permission-contents: read\n {10}permission-pull-requests: read\n/)
+  assert.match(soak, /soak-check --tag "\$TAG" --canaries "\$CANARIES" --soak-hours "\$HOURS" --require-ready/)
+  // Neither later wave runs in a deferred run, nor after a soak that isn't over.
+  assert.equal(main.match(/needs\.plan\.outputs\.later != 'deferred'/g).length, 2)
+  assert.equal(main.match(/needs\.soak\.result == 'success' \|\| needs\.soak\.result == 'skipped'/g).length, 2)
+  // The resume: hourly, only in release-kit, and it starts Rollout for real with stage later.
+  assert.match(resume, /^ {2}schedule:\n {4}- cron: "23 \* \* \* \*"$/m)
+  assert.match(resume, /if: github\.repository == 'n8watkins\/release-kit'/)
+  assert.match(resume, /node scripts\/rollout\.mjs pending\n/)
+  assert.match(resume, /gh workflow run rollout\.yml -R "\$GITHUB_REPOSITORY" -f tag="\$TAG" -f stage=later -f dry_run=false/)
+  assert.match(resume, /if: steps\.soak\.outputs\.state == 'ready'/)
+  assert.match(resume, /if: steps\.soak\.outputs\.state == 'unhealthy'\n(?: {8}.*\n)*? {8}run: node scripts\/rollout\.mjs held --tag "\$TAG" --why "\$WHY"/)
+  // rollout-start still finds a tag that already rolled out by its exact name: the later waves' run is another name.
+  assert.match(read('.github/workflows/rollout-start.yml'), /grep -Fqx "Rollout \$TAG"/)
 })
